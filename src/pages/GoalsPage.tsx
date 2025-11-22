@@ -6178,8 +6178,6 @@ export default function GoalsPage(): ReactElement {
       return () => window.clearTimeout(id)
     }
   }, [quickDraftActive])
-  // focus newly-added subtask textarea after render
-  const pendingQuickSubtaskFocusRef = useRef<null | { taskId: string; subtaskId: string }>(null)
   const addQuickItem = useCallback(
     (keepDraft: boolean = false) => {
       const text = quickDraft.trim()
@@ -6943,7 +6941,6 @@ export default function GoalsPage(): ReactElement {
   const taskDetailsRef = useRef<TaskDetailsState>(taskDetails)
   const taskDetailsDragSnapshotRef = useRef<Map<string, { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }>>(new Map())
   const draggingTaskIdRef = useRef<string | null>(null)
-  const pendingGoalSubtaskFocusRef = useRef<{ taskId: string; subtaskId: string } | null>(null)
   const taskNotesSaveTimersRef = useRef<Map<string, number>>(new Map())
   const taskNotesLatestRef = useRef<Map<string, string>>(new Map())
   const requestedTaskNotesRef = useRef<Set<string>>(new Set())
