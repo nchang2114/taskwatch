@@ -462,6 +462,20 @@ const isUuid = (value: string | undefined | null): value is string => {
   if (typeof value !== 'string') return false
   return UUID_PATTERN.test(value)
 }
+const isTouchDevice = (): boolean => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
+  // Basic heuristics: any pointer coarse or maxTouchPoints > 0 or ontouchstart in window
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyNav: any = navigator
+    const hasTouchPoints = typeof anyNav.maxTouchPoints === 'number' && anyNav.maxTouchPoints > 0
+    const mqCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+    const hasOntouch = 'ontouchstart' in window
+    return hasTouchPoints || mqCoarse || hasOntouch
+  } catch {
+    return false
+  }
+}
 const quickListDebug = (...args: any[]) => {
   if (import.meta.env.DEV) {
     logDebug('[QuickList]', ...args)
@@ -583,6 +597,7 @@ const findActivationCaretOffset = (
   }
   return computeSelectionOffsetWithin(element, 'end')
 }
+
 
 // Precisely place caret in a textarea under a client point using a mirror element.
 export function setTextareaCaretFromPoint(field: HTMLTextAreaElement, clientX: number, clientY: number): void {
@@ -7757,6 +7772,17 @@ export default function GoalsPage(): ReactElement {
             const end = input.value.length
             input.setSelectionRange(end, end)
           } catch {}
+          try {
+            const scrollTarget = input.closest('.goal-task-details__subtask') as HTMLElement | null
+            if (scrollTarget && typeof window !== 'undefined' && isTouchDevice()) {
+              const rect = scrollTarget.getBoundingClientRect()
+              const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+              // Match task-like behavior: keep the focused subtask a bit lower on screen
+              const targetY = viewportHeight * 0.25
+              const delta = rect.top - targetY
+              window.scrollTo({ top: window.scrollY + delta, behavior: 'smooth' })
+            }
+          } catch {}
         }
       }
     },
@@ -8733,20 +8759,54 @@ export default function GoalsPage(): ReactElement {
       return
     }
     const length = node.value.length
-    node.focus()
-    node.setSelectionRange(length, length)
+    const onTouch = isTouchDevice()
+    // On touch devices (iOS Safari, etc.), call focus without preventScroll to
+    // encourage the software keyboard to open. On non-touch, preserve the
+    // existing preventScroll behavior to avoid jumpy layout.
+    try {
+      if (onTouch) {
+        node.focus()
+      } else {
+        node.focus({ preventScroll: true } as any)
+      }
+    } catch {
+      node.focus()
+    }
+    try {
+      node.setSelectionRange(length, length)
+    } catch {}
+    try {
+      const scrollTarget = node.closest('.goal-bucket-draft, .goal-bucket-item') as HTMLElement | null
+      if (scrollTarget && typeof window !== 'undefined' && onTouch) {
+        const rect = scrollTarget.getBoundingClientRect()
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+        // Aim to keep the focused entry a bit lower than top (around 70–75% of viewport)
+        const targetY = viewportHeight * 0.25
+        const delta = rect.top - targetY
+        window.scrollTo({ top: window.scrollY + delta, behavior: 'smooth' })
+      }
+    } catch {}
   }
 
   const startBucketDraft = (goalId: string) => {
-    setExpanded((current) => ({ ...current, [goalId]: true }))
+    // Optimistically ensure there is a draft entry so focus can attach
     setBucketDrafts((current) => {
       if (goalId in current) {
         return current
       }
       return { ...current, [goalId]: '' }
     })
+    // Expand the goal section
+    setExpanded((current) => ({ ...current, [goalId]: true }))
 
+    // In case a draft input is already mounted (e.g. reusing existing draft), focus it
+    // immediately within the tap gesture to help iOS Safari treat it as user-initiated.
     if (typeof window !== 'undefined') {
+      const immediate = () => focusBucketDraftInput(goalId)
+      try {
+        immediate()
+      } catch {}
+      // Also schedule a follow-up focus after React has had a chance to render
       const scheduleFocus = () => focusBucketDraftInput(goalId)
       if (typeof window.requestAnimationFrame === 'function') {
         window.requestAnimationFrame(() => window.requestAnimationFrame(scheduleFocus))
