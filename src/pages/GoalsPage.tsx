@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect, type ReactElement } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import './GoalsPage.css'
 import {
   fetchGoalsHierarchy,
@@ -6492,24 +6492,42 @@ export default function GoalsPage(): ReactElement {
   const addQuickSubtask = useCallback(
     (taskId: string) => {
       let created: QuickSubtask | undefined
-      const stored = writeStoredQuickList(
-        quickListItems.map((it): QuickItem => {
-          if (it.id !== taskId) return it
-          const subs: QuickSubtask[] = Array.isArray(it.subtasks) ? it.subtasks.slice() : []
-          const newSub: QuickSubtask = {
-            id: createUuid(),
-            text: '',
-            completed: false,
-            sortIndex: (subs[0]?.sortIndex ?? 0) - 1,
-            updatedAt: new Date().toISOString(),
+      flushSync(() => {
+        const stored = writeStoredQuickList(
+          quickListItems.map((it): QuickItem => {
+            if (it.id !== taskId) return it
+            const subs: QuickSubtask[] = Array.isArray(it.subtasks) ? it.subtasks.slice() : []
+            const newSub: QuickSubtask = {
+              id: createUuid(),
+              text: '',
+              completed: false,
+              sortIndex: (subs[0]?.sortIndex ?? 0) - 1,
+              updatedAt: new Date().toISOString(),
+            }
+            created = { ...newSub }
+            const nextSubs: QuickSubtask[] = [newSub, ...subs].map((s, i) => ({ ...s, sortIndex: i }))
+            return { ...it, expanded: true, subtasksCollapsed: false, subtasks: nextSubs, updatedAt: new Date().toISOString() }
+          }),
+        )
+        setQuickListItems(stored)
+      })
+
+      if (created) {
+        const inputId = makeGoalSubtaskInputId(taskId, created.id)
+        const input = document.getElementById(inputId) as HTMLTextAreaElement | null
+        if (input) {
+          try {
+            input.focus({ preventScroll: true })
+          } catch {
+            input.focus()
           }
-          created = { ...newSub }
-          const nextSubs: QuickSubtask[] = [newSub, ...subs].map((s, i) => ({ ...s, sortIndex: i }))
-          pendingQuickSubtaskFocusRef.current = { taskId, subtaskId: newSub.id }
-          return { ...it, expanded: true, subtasksCollapsed: false, subtasks: nextSubs, updatedAt: new Date().toISOString() }
-        }),
-      )
-      setQuickListItems(stored)
+          try {
+            const end = input.value.length
+            input.setSelectionRange(end, end)
+          } catch {}
+        }
+      }
+
       if (!created || !isUuid(taskId) || !isUuid(created.id)) {
         return
       }
@@ -6692,20 +6710,7 @@ export default function GoalsPage(): ReactElement {
       }
     })()
   }, [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase])
-  useEffect(() => {
-    const pending = pendingQuickSubtaskFocusRef.current
-    if (!pending) return
-    try {
-      const inputId = makeGoalSubtaskInputId(pending.taskId, pending.subtaskId)
-      const el = document.getElementById(inputId) as HTMLTextAreaElement | null
-      if (el) {
-        el.focus({ preventScroll: true } as any)
-        // autosize direct after focus
-        autosizeTextArea(el)
-      }
-    } catch {}
-    pendingQuickSubtaskFocusRef.current = null
-  }, [quickListItems])
+
   const [activeLifeRoutineCustomizerId, setActiveLifeRoutineCustomizerId] = useState<string | null>(null)
   const lifeRoutineCustomizerDialogRef = useRef<HTMLDivElement | null>(null)
   const activeLifeRoutine = useMemo(() => {
@@ -7719,72 +7724,49 @@ export default function GoalsPage(): ReactElement {
         sortIndex = SUBTASK_SORT_STEP
       }
       const newSubtask = createEmptySubtask(sortIndex)
-      updateTaskDetails(taskId, (current) => {
-        const base = current.subtasks
-        const idx = afterId ? base.findIndex((s) => s.id === afterId) : -1
-        const at = idx >= 0 ? idx + 1 : 0
-        const copy = [...base]
-        copy.splice(at, 0, newSubtask)
-        return {
-          ...current,
-          expanded: true,
-          subtasksCollapsed: false,
-          subtasks: copy,
-        }
+      flushSync(() => {
+        updateTaskDetails(taskId, (current) => {
+          const base = current.subtasks
+          const idx = afterId ? base.findIndex((s) => s.id === afterId) : -1
+          const at = idx >= 0 ? idx + 1 : 0
+          const copy = [...base]
+          copy.splice(at, 0, newSubtask)
+          return {
+            ...current,
+            expanded: true,
+            subtasksCollapsed: false,
+            subtasks: copy,
+          }
+        })
+        updateGoalTaskSubtasks(taskId, (current) => {
+          const idx = afterId ? current.findIndex((s) => s.id === afterId) : -1
+          const at = idx >= 0 ? idx + 1 : 0
+          const copy = [...current]
+          copy.splice(at, 0, newSubtask)
+          return copy
+        })
       })
-      updateGoalTaskSubtasks(taskId, (current) => {
-        const idx = afterId ? current.findIndex((s) => s.id === afterId) : -1
-        const at = idx >= 0 ? idx + 1 : 0
-        const copy = [...current]
-        copy.splice(at, 0, newSubtask)
-        return copy
-      })
+
       if (options?.focus) {
-        // Mark this subtask to receive focus immediately after render
-        pendingGoalSubtaskFocusRef.current = { taskId, subtaskId: newSubtask.id }
+        const inputId = makeGoalSubtaskInputId(taskId, newSubtask.id)
+        const input = document.getElementById(inputId) as HTMLTextAreaElement | null
+        if (input) {
+          try {
+            input.focus({ preventScroll: true })
+          } catch {
+            input.focus()
+          }
+          try {
+            const end = input.value.length
+            input.setSelectionRange(end, end)
+          } catch {}
+        }
       }
     },
     [updateGoalTaskSubtasks, updateTaskDetails],
   )
 
-  useEffect(() => {
-    const pending = pendingGoalSubtaskFocusRef.current
-    if (!pending) {
-      return
-    }
-    if (typeof window === 'undefined') {
-      return
-    }
-    const inputId = makeGoalSubtaskInputId(pending.taskId, pending.subtaskId)
-    let attempts = 0
-    const tryFocus = () => {
-      const input = document.getElementById(inputId) as HTMLTextAreaElement | null
-      if (input) {
-        try {
-          input.focus({ preventScroll: true })
-        } catch {
-          input.focus()
-        }
-        try {
-          const end = input.value.length
-          input.setSelectionRange(end, end)
-        } catch {
-          try {
-            input.select()
-          } catch {}
-        }
-        pendingGoalSubtaskFocusRef.current = null
-        return
-      }
-      if (typeof window.requestAnimationFrame === 'function' && attempts < 8) {
-        attempts += 1
-        window.requestAnimationFrame(tryFocus)
-      } else {
-        pendingGoalSubtaskFocusRef.current = null
-      }
-    }
-    tryFocus()
-  }, [taskDetails])
+
 
   const handleSubtaskTextChange = useCallback(
     (taskId: string, subtaskId: string, value: string) => {
@@ -10347,22 +10329,17 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
   }
 
   const startTaskDraft = (_goalId: string, bucketId: string) => {
-    setBucketExpanded((current) => ({ ...current, [bucketId]: true }))
-    setTaskDrafts((current) => {
-      if (bucketId in current) {
-        return current
-      }
-      return { ...current, [bucketId]: '' }
+    flushSync(() => {
+      setBucketExpanded((current) => ({ ...current, [bucketId]: true }))
+      setTaskDrafts((current) => {
+        if (bucketId in current) {
+          return current
+        }
+        return { ...current, [bucketId]: '' }
+      })
     })
 
-    if (typeof window !== 'undefined') {
-      const scheduleFocus = () => focusTaskDraftInput(bucketId)
-      if (typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(() => window.requestAnimationFrame(scheduleFocus))
-      } else {
-        window.setTimeout(scheduleFocus, 0)
-      }
-    }
+    focusTaskDraftInput(bucketId)
   }
 
   const handleTaskDraftChange = (_goalId: string, bucketId: string, value: string) => {
@@ -10490,14 +10467,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     releaseSubmittingFlag(bucketId)
 
     if (options?.keepDraft) {
-      if (typeof window !== 'undefined') {
-        const scheduleFocus = () => focusTaskDraftInput(bucketId)
-        if (typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(() => window.requestAnimationFrame(scheduleFocus))
-        } else {
-          window.setTimeout(scheduleFocus, 0)
-        }
-      }
+      focusTaskDraftInput(bucketId)
     }
   }
 
