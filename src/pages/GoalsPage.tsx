@@ -3570,7 +3570,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
               {bucketLineTop !== null ? (
                 <div className="goal-insert-line" style={{ top: `${bucketLineTop}px` }} aria-hidden />
               ) : null}
-              {bucketDraftValue !== undefined && (
+              {bucketDraftValue !== undefined ? (
                 <li className="goal-bucket-draft" key="bucket-draft">
                   <div className="goal-bucket-draft-inner">
                     <input
@@ -3593,7 +3593,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                     />
                   </div>
                 </li>
-              )}
+              ) : null}
               {activeBuckets.map((b, index) => {
                 const isBucketOpen = bucketExpanded[b.id] ?? false
                 const activeTasks = b.tasks.filter((task) => !task.completed)
@@ -8789,31 +8789,19 @@ export default function GoalsPage(): ReactElement {
   }
 
   const startBucketDraft = (goalId: string) => {
-    // Optimistically ensure there is a draft entry so focus can attach
-    setBucketDrafts((current) => {
-      if (goalId in current) {
-        return current
-      }
-      return { ...current, [goalId]: '' }
+    // Mirror task draft behaviour: expand + create draft synchronously,
+    // then focus immediately so it stays tied to the user gesture.
+    flushSync(() => {
+      setExpanded((current) => ({ ...current, [goalId]: true }))
+      setBucketDrafts((current) => {
+        if (goalId in current) {
+          return current
+        }
+        return { ...current, [goalId]: '' }
+      })
     })
-    // Expand the goal section
-    setExpanded((current) => ({ ...current, [goalId]: true }))
 
-    // In case a draft input is already mounted (e.g. reusing existing draft), focus it
-    // immediately within the tap gesture to help iOS Safari treat it as user-initiated.
-    if (typeof window !== 'undefined') {
-      const immediate = () => focusBucketDraftInput(goalId)
-      try {
-        immediate()
-      } catch {}
-      // Also schedule a follow-up focus after React has had a chance to render
-      const scheduleFocus = () => focusBucketDraftInput(goalId)
-      if (typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(() => window.requestAnimationFrame(scheduleFocus))
-      } else {
-        window.setTimeout(scheduleFocus, 0)
-      }
-    }
+    focusBucketDraftInput(goalId)
   }
 
   const handleBucketDraftChange = (goalId: string, value: string) => {
@@ -8918,6 +8906,12 @@ export default function GoalsPage(): ReactElement {
 
   const handleBucketDraftBlur = (goalId: string) => {
     if (submittingBucketDrafts.current.has(goalId)) {
+      return
+    }
+    const currentValue = bucketDrafts[goalId]
+    if (!currentValue || currentValue.trim().length === 0) {
+      // Empty draft: just remove it so the row disappears.
+      removeBucketDraft(goalId)
       return
     }
     handleBucketDraftSubmit(goalId)
