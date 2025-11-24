@@ -1415,7 +1415,7 @@ const MilestoneLayer: React.FC<{
   const dateEditRef = useRef<HTMLInputElement | null>(null)
   const editingNameSnapshotRef = useRef<string | null>(null)
   const editingLiveNameRef = useRef<string>('')
-  const [collapsed, setCollapsed] = useState<boolean>(false)
+  const [collapsed, setCollapsed] = useState<boolean>(true)
   const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({})
   // Timeline view mode: scaled (time-based) vs unscaled (equidistant nodes)
   const [timelineScaled, setTimelineScaled] = useState<boolean>(true)
