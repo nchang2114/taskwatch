@@ -25,7 +25,7 @@
     font-size: 16px !important;
   }
 }
-
+ 
 :root {
   /* Slightly shorter global header height */
   --site-header-height: clamp(3.5rem, 5.2vw, 4.4rem);
