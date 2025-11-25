@@ -292,6 +292,18 @@ const matchesMonthlyDay = (rule: RepeatingSessionRule, dayStart: number): boolea
   return d.getDate() === expectedDay
 }
 
+type CustomRecurrenceUnit = 'day' | 'week' | 'month' | 'year'
+type CustomRecurrenceEnds = 'never' | 'on' | 'after'
+type CustomRecurrenceDraft = {
+  interval: number
+  unit: CustomRecurrenceUnit
+  weeklyDays: Set<number>
+  monthlyDay: number
+  ends: CustomRecurrenceEnds
+  endDate: string
+  occurrences: number
+}
+
 type CalendarPopoverEditingState = {
   entryId: string
   value: string
@@ -2513,6 +2525,36 @@ export default function ReflectionPage() {
   // Repeating sessions (rules fetched from backend)
   const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
+  const [customRecurrenceOpen, setCustomRecurrenceOpen] = useState(false)
+  const [customRecurrenceBaseMs, setCustomRecurrenceBaseMs] = useState<number | null>(null)
+  const [customRecurrenceDraft, setCustomRecurrenceDraft] = useState<CustomRecurrenceDraft>(() => ({
+    interval: 1,
+    unit: 'week',
+    weeklyDays: new Set<number>([new Date().getDay()]),
+    monthlyDay: new Date().getDate(),
+    ends: 'never',
+    endDate: (() => {
+      const now = new Date()
+      now.setDate(now.getDate() + 30)
+      return now.toISOString().slice(0, 10)
+    })(),
+    occurrences: 10,
+  }))
+  const openCustomRecurrence = useCallback((baseMs: number | null) => {
+    setCustomRecurrenceBaseMs(baseMs)
+    setCustomRecurrenceDraft((prev) => {
+      const now = Number.isFinite(baseMs as number) ? new Date(baseMs as number) : new Date()
+      const nextWeekly = new Set<number>(prev.weeklyDays)
+      nextWeekly.add(now.getDay())
+      return {
+        ...prev,
+        weeklyDays: nextWeekly,
+        monthlyDay: now.getDate(),
+      }
+    })
+    setCustomRecurrenceOpen(true)
+  }, [])
+  const closeCustomRecurrence = useCallback(() => setCustomRecurrenceOpen(false), [])
 
   const clearCalendarPanFallbackTimeout = useCallback(() => {
     const timeoutId = calendarPanFallbackTimeoutRef.current
@@ -9200,9 +9242,14 @@ useEffect(() => {
                     { value: 'weekly', label: 'Weekly' },
                     { value: 'monthly', label: 'Monthly' },
                     { value: 'annually', label: 'Annually' },
+                    { value: 'custom', label: 'Custom...' },
                   ]}
                   onChange={async (v) => {
-                    const val = (v as 'none' | 'daily' | 'weekly' | 'monthly' | 'annually')
+                    const val = (v as 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom')
+                    if (val === 'custom') {
+                      openCustomRecurrence(entry.startedAt)
+                      return
+                    }
                     if (val === 'none') {
                       // If this entry is a guide from a repeating rule, cut the series after this instance
                       if (isGuide) {
@@ -10205,9 +10252,14 @@ useEffect(() => {
                 { value: 'weekly', label: 'Weekly' },
                 { value: 'monthly', label: 'Monthly' },
                 { value: 'annually', label: 'Annually' },
+                { value: 'custom', label: 'Custom...' },
               ]}
               onChange={async (v) => {
-                const val = v as 'none' | 'daily' | 'weekly' | 'monthly' | 'annually'
+                const val = v as 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom'
+                if (val === 'custom') {
+                  openCustomRecurrence(inspectorEntry.startedAt)
+                  return
+                }
                 if (val === 'none') {
                   const ids = await deactivateMatchingRulesForEntry(inspectorEntry)
                   if (Array.isArray(ids) && ids.length > 0) {
@@ -10691,8 +10743,193 @@ useEffect(() => {
     }
   }
 
+  const customRecurrenceModal =
+    customRecurrenceOpen && typeof document !== 'undefined'
+      ? createPortal(
+        (() => {
+          const draft = customRecurrenceDraft
+          const baseDate = Number.isFinite(customRecurrenceBaseMs as number) ? new Date(customRecurrenceBaseMs as number) : new Date()
+          const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+          const clampInterval = (value: number) => Math.max(1, Math.min(365, Math.round(value)))
+          const clampOccurrences = (value: number) => Math.max(1, Math.min(999, Math.round(value)))
+          const incrementInterval = (delta: number) => {
+            setCustomRecurrenceDraft((prev) => ({ ...prev, interval: clampInterval((prev.interval || 1) + delta) }))
+          }
+          const incrementOccurrences = (delta: number) => {
+            setCustomRecurrenceDraft((prev) => ({ ...prev, occurrences: clampOccurrences((prev.occurrences || 1) + delta) }))
+          }
+          const toggleWeeklyDay = (idx: number) => {
+            setCustomRecurrenceDraft((prev) => {
+              const next = new Set(prev.weeklyDays)
+              if (next.has(idx)) next.delete(idx)
+              else next.add(idx)
+              return { ...prev, weeklyDays: next }
+            })
+          }
+          const handleUnitChange = (unit: CustomRecurrenceUnit) => {
+            setCustomRecurrenceDraft((prev) => ({
+              ...prev,
+              unit,
+              weeklyDays: unit === 'week' ? new Set(prev.weeklyDays.size > 0 ? prev.weeklyDays : [baseDate.getDay()]) : prev.weeklyDays,
+              monthlyDay: unit === 'month' ? (prev.monthlyDay || baseDate.getDate()) : prev.monthlyDay,
+            }))
+          }
+          const handleEndChange = (ends: CustomRecurrenceEnds) => {
+            setCustomRecurrenceDraft((prev) => ({ ...prev, ends }))
+          }
+          const handleModalClick = (e: MouseEvent) => {
+            e.stopPropagation()
+          }
+          return (
+            <div className="custom-recur__backdrop" role="presentation" onClick={closeCustomRecurrence}>
+              <div className="custom-recur" role="dialog" aria-modal="true" aria-label="Custom recurrence" onClick={handleModalClick}>
+                <header className="custom-recur__header">
+                  <h3 className="custom-recur__title">Custom recurrence</h3>
+                </header>
+                <div className="custom-recur__body">
+                  <div className="custom-recur__row">
+                    <span className="custom-recur__label">Repeat every</span>
+                    <div className="custom-recur__controls">
+                      <div className="custom-recur__stepper">
+                        <input
+                          type="number"
+                          min={1}
+                          className="custom-recur__number"
+                          value={draft.interval}
+                          aria-label="Repeat interval"
+                          onChange={(e) => {
+                            const next = clampInterval(Number(e.target.value) || 1)
+                            setCustomRecurrenceDraft((prev) => ({ ...prev, interval: next }))
+                          }}
+                        />
+                        <div className="custom-recur__stepper-arrows" aria-hidden="true">
+                          <button type="button" onClick={() => incrementInterval(1)}>▲</button>
+                          <button type="button" onClick={() => incrementInterval(-1)}>▼</button>
+                        </div>
+                      </div>
+                      <div className="custom-recur__select-wrap">
+                        <select
+                          className="custom-recur__select"
+                          value={draft.unit}
+                          aria-label="Repeat unit"
+                          onChange={(e) => handleUnitChange(e.target.value as CustomRecurrenceUnit)}
+                        >
+                          <option value="day">day</option>
+                          <option value="week">week</option>
+                          <option value="month">month</option>
+                          <option value="year">year</option>
+                        </select>
+                        <span className="custom-recur__chevron" aria-hidden="true">▾</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {draft.unit === 'week' ? (
+                    <div className="custom-recur__row">
+                      <span className="custom-recur__label">Repeat on</span>
+                      <div className="custom-recur__weekdays" role="group" aria-label="Repeat on days of week">
+                        {weekdayLabels.map((label, idx) => {
+                          const active = draft.weeklyDays.has(idx)
+                          return (
+                            <button
+                              key={label + idx}
+                              type="button"
+                              className={`custom-recur__weekday${active ? ' custom-recur__weekday--active' : ''}`}
+                              onClick={() => toggleWeeklyDay(idx)}
+                              aria-pressed={active}
+                            >
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {draft.unit === 'month' ? (
+                    <div className="custom-recur__row custom-recur__row--full">
+                      <button type="button" className="custom-recur__dropdown">
+                        Monthly on day {draft.monthlyDay}
+                        <span className="custom-recur__chevron" aria-hidden="true">▾</span>
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="custom-recur__row custom-recur__ends">
+                    <span className="custom-recur__label">Ends</span>
+                    <div className="custom-recur__ends-options" role="radiogroup" aria-label="Recurrence end">
+                      <label className="custom-recur__radio">
+                        <input
+                          type="radio"
+                          name="custom-recur-end"
+                          checked={draft.ends === 'never'}
+                          onChange={() => handleEndChange('never')}
+                        />
+                        <span>Never</span>
+                      </label>
+                      <label className="custom-recur__radio">
+                        <input
+                          type="radio"
+                          name="custom-recur-end"
+                          checked={draft.ends === 'on'}
+                          onChange={() => handleEndChange('on')}
+                        />
+                        <span>On</span>
+                        <input
+                          type="date"
+                          className="custom-recur__date"
+                          value={draft.endDate}
+                          disabled={draft.ends !== 'on'}
+                          onChange={(e) => setCustomRecurrenceDraft((prev) => ({ ...prev, endDate: e.target.value }))}
+                        />
+                      </label>
+                      <label className="custom-recur__radio">
+                        <input
+                          type="radio"
+                          name="custom-recur-end"
+                          checked={draft.ends === 'after'}
+                          onChange={() => handleEndChange('after')}
+                        />
+                        <span>After</span>
+                        <div className="custom-recur__occurrence-wrap">
+                          <div className="custom-recur__stepper custom-recur__stepper--compact">
+                            <input
+                              type="number"
+                              min={1}
+                              className="custom-recur__number"
+                          value={draft.occurrences}
+                          disabled={draft.ends !== 'after'}
+                          onChange={(e) => {
+                                const next = clampOccurrences(Number(e.target.value) || 1)
+                                setCustomRecurrenceDraft((prev) => ({ ...prev, occurrences: next }))
+                              }}
+                            />
+                            <div className="custom-recur__stepper-arrows" aria-hidden="true">
+                              <button type="button" disabled={draft.ends !== 'after'} onClick={() => incrementOccurrences(1)}>▲</button>
+                              <button type="button" disabled={draft.ends !== 'after'} onClick={() => incrementOccurrences(-1)}>▼</button>
+                            </div>
+                          </div>
+                          <span className="custom-recur__occurrences-label">occurrences</span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <footer className="custom-recur__footer">
+                  <button type="button" className="custom-recur__ghost" onClick={closeCustomRecurrence}>Cancel</button>
+                  <button type="button" className="custom-recur__primary" onClick={closeCustomRecurrence}>Done</button>
+                </footer>
+              </div>
+            </div>
+          )
+        })(),
+        document.body,
+      )
+      : null
+
   return (
-    <section className="site-main__inner reflection-page" aria-label="Reflection">
+    <>
+      <section className="site-main__inner reflection-page" aria-label="Reflection">
       <div className="reflection-intro">
         <h1 className="reflection-title">Reflection</h1>
         {/* Subtitle removed for cleaner header */}
@@ -11816,5 +12053,7 @@ useEffect(() => {
 
       {/* Daily reflection section removed */}
     </section>
+      {customRecurrenceModal}
+    </>
   )
 }

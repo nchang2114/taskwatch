@@ -3462,3 +3462,263 @@ body.scroll-lock .calendar-days-area,
 body.scroll-lock .calendar-day-column {
   touch-action: none !important;
 }
+
+/* --- Custom recurrence modal --- */
+.custom-recur__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 30, 0.35);
+  backdrop-filter: blur(3px);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.custom-recur {
+  width: min(92vw, 380px);
+  background: linear-gradient(160deg, #f7f9ff, #eef2ff);
+  color: #111322;
+  border-radius: 1.25rem;
+  box-shadow: 0 22px 48px rgba(19, 28, 70, 0.35);
+  border: 1px solid rgba(122, 140, 230, 0.35);
+  padding: 1.25rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.custom-recur__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.custom-recur__title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.custom-recur__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.custom-recur__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.custom-recur__row--full {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.custom-recur__label {
+  min-width: 90px;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.custom-recur__controls {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  flex: 1;
+}
+
+.custom-recur__stepper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d4daf8;
+  background: white;
+  border-radius: 0.6rem;
+  padding-right: 1.5rem;
+  min-width: 90px;
+}
+
+.custom-recur__stepper--compact {
+  min-width: 80px;
+}
+
+.custom-recur__number {
+  border: 0;
+  background: transparent;
+  padding: 0.65rem 0.7rem;
+  width: 100%;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+  outline: none;
+}
+
+.custom-recur__stepper-arrows {
+  position: absolute;
+  right: 0.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.custom-recur__stepper-arrows button {
+  border: 0;
+  background: transparent;
+  padding: 0.1rem;
+  line-height: 1;
+  color: #3b4797;
+  cursor: pointer;
+}
+
+.custom-recur__select-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+}
+
+.custom-recur__select {
+  width: 100%;
+  appearance: none;
+  padding: 0.65rem 1rem;
+  border-radius: 0.65rem;
+  border: 1px solid #d4daf8;
+  background: white;
+  font-weight: 600;
+  color: #0f172a;
+  outline: none;
+}
+
+.custom-recur__chevron {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #3b4797;
+  pointer-events: none;
+}
+
+.custom-recur__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.custom-recur__weekday {
+  border: 0;
+  background: #e7ecff;
+  color: #2b3366;
+  border-radius: 999px;
+  width: 38px;
+  height: 38px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.custom-recur__weekday--active {
+  background: #2455ff;
+  color: #fff;
+}
+
+.custom-recur__dropdown {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.65rem;
+  border: 1px solid #d4daf8;
+  background: white;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.custom-recur__ends {
+  align-items: flex-start;
+}
+
+.custom-recur__ends-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.custom-recur__radio {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  color: #1f2937;
+  font-weight: 500;
+}
+
+.custom-recur__date,
+.custom-recur__occurrence-wrap {
+  grid-column: 2;
+}
+
+.custom-recur__date {
+  border: 1px solid #d4daf8;
+  background: #f5f7ff;
+  color: #8b95b5;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.55rem;
+  min-width: 170px;
+}
+
+.custom-recur__occurrence-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.custom-recur__occurrences-label {
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.custom-recur__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.custom-recur__ghost,
+.custom-recur__primary {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.65rem 1.3rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 0.98rem;
+}
+
+.custom-recur__ghost {
+  background: transparent;
+  color: #1f4dd6;
+}
+
+.custom-recur__primary {
+  background: linear-gradient(135deg, #1e46ff, #2f7dff);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(46, 109, 255, 0.3);
+}
+
+@media (max-width: 600px) {
+  .custom-recur__backdrop {
+    align-items: flex-end;
+  }
+  .custom-recur {
+    width: 100%;
+    border-radius: 1rem 1rem 0.75rem 0.75rem;
+  }
+}
