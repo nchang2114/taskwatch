@@ -1618,6 +1618,7 @@ html[data-theme='light'] .goal-draft-input::placeholder {
 }
 
 .goal-gradient-swatch {
+  position: relative;
   width: 100%;
   max-width: 13rem;
   height: 2.8rem;
