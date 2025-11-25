@@ -5745,7 +5745,7 @@ useEffect(() => {
   }, [customRecurrenceOpen])
 
   useEffect(() => {
-    if (customRecurrenceOpen) {
+    if (customRecurrenceOpen || calendarEditorEntryId) {
       const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
       document.body.style.overflow = 'hidden'
       document.body.style.paddingRight = `${scrollbarWidth}px`
@@ -5757,7 +5757,7 @@ useEffect(() => {
       document.body.style.overflow = ''
       document.body.style.paddingRight = ''
     }
-  }, [customRecurrenceOpen])
+  }, [customRecurrenceOpen, calendarEditorEntryId])
 
   useEffect(() => {
     if (!customRecurrenceOpen || (!customUnitMenuOpen && !customMonthlyMenuOpen)) return
