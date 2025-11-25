@@ -3586,7 +3586,7 @@ body.scroll-lock .calendar-day-column {
   background: transparent;
   padding: 0.1rem;
   line-height: 1;
-  color: #3b4797;
+  color: #475569;
   cursor: pointer;
 }
 
@@ -3594,18 +3594,40 @@ body.scroll-lock .calendar-day-column {
   position: relative;
   flex: 1;
   min-width: 120px;
+  isolation: isolate;
 }
 
 .custom-recur__select {
   width: 100%;
-  appearance: none;
-  padding: 0.65rem 1rem;
+  padding: 0.65rem 0.9rem;
   border-radius: 0.65rem;
-  border: 1px solid #d4daf8;
-  background: white;
+  border: 1px solid rgba(26, 43, 77, 0.12);
+  background: #f8fafc;
   font-weight: 600;
+  font-size: 0.92rem;
   color: #0f172a;
   outline: none;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 140ms ease, background 140ms ease, transform 120ms ease;
+}
+
+.custom-recur__select:focus-visible {
+  outline: 1px solid rgba(26, 43, 77, 0.25);
+  outline-offset: 1px;
+}
+
+.custom-recur__select-wrap--menu .custom-recur__select {
+  box-shadow: none;
+}
+
+.custom-recur__select-wrap::after {
+  content: none;
 }
 
 .custom-recur__chevron {
@@ -3613,8 +3635,58 @@ body.scroll-lock .calendar-day-column {
   right: 0.75rem;
   top: 50%;
   transform: translateY(-50%);
-  color: #3b4797;
+  color: #475569;
   pointer-events: none;
+}
+
+.custom-recur__select.is-open {
+  border-color: rgba(26, 43, 77, 0.2);
+  box-shadow: none;
+  background: #f1f5fb;
+}
+
+.custom-recur__select-label {
+  flex: 1;
+  text-align: left;
+}
+
+.custom-recur__menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0.25rem 0;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(26, 43, 77, 0.12);
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(12, 21, 54, 0.12);
+  z-index: 20000;
+}
+
+.custom-recur__option {
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.custom-recur__option:hover,
+.custom-recur__option:focus-visible {
+  background: rgba(47, 125, 255, 0.08);
+}
+
+.custom-recur__option.is-selected {
+  background: rgba(47, 125, 255, 0.12);
+  color: #0c1e66;
 }
 
 .custom-recur__weekdays {

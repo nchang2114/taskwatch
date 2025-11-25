@@ -299,6 +299,7 @@ type CustomRecurrenceDraft = {
   unit: CustomRecurrenceUnit
   weeklyDays: Set<number>
   monthlyDay: number
+  monthlyPattern: 'day' | 'nth' | 'last'
   ends: CustomRecurrenceEnds
   endDate: string
   occurrences: number
@@ -2527,11 +2528,16 @@ export default function ReflectionPage() {
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
   const [customRecurrenceOpen, setCustomRecurrenceOpen] = useState(false)
   const [customRecurrenceBaseMs, setCustomRecurrenceBaseMs] = useState<number | null>(null)
+  const [customUnitMenuOpen, setCustomUnitMenuOpen] = useState(false)
+  const [customMonthlyMenuOpen, setCustomMonthlyMenuOpen] = useState(false)
+  const customUnitMenuRef = useRef<HTMLDivElement | null>(null)
+  const customMonthlyMenuRef = useRef<HTMLDivElement | null>(null)
   const [customRecurrenceDraft, setCustomRecurrenceDraft] = useState<CustomRecurrenceDraft>(() => ({
     interval: 1,
     unit: 'week',
     weeklyDays: new Set<number>([new Date().getDay()]),
     monthlyDay: new Date().getDate(),
+    monthlyPattern: 'day',
     ends: 'never',
     endDate: (() => {
       const now = new Date()
@@ -2541,7 +2547,10 @@ export default function ReflectionPage() {
     occurrences: 10,
   }))
   const openCustomRecurrence = useCallback((baseMs: number | null) => {
+    setCalendarPreview(null)
     setCustomRecurrenceBaseMs(baseMs)
+    setCustomUnitMenuOpen(false)
+    setCustomMonthlyMenuOpen(false)
     setCustomRecurrenceDraft((prev) => {
       const now = Number.isFinite(baseMs as number) ? new Date(baseMs as number) : new Date()
       const nextWeekly = new Set<number>(prev.weeklyDays)
@@ -2550,6 +2559,7 @@ export default function ReflectionPage() {
         ...prev,
         weeklyDays: nextWeekly,
         monthlyDay: now.getDate(),
+        monthlyPattern: prev.monthlyPattern ?? 'day',
       }
     })
     setCustomRecurrenceOpen(true)
@@ -5727,6 +5737,27 @@ useEffect(() => {
   )
 
   const handleCloseCalendarPreview = useCallback(() => setCalendarPreview(null), [])
+
+  useEffect(() => {
+    if (customRecurrenceOpen) {
+      setCalendarPreview(null)
+    }
+  }, [customRecurrenceOpen])
+
+  useEffect(() => {
+    if (!customRecurrenceOpen || (!customUnitMenuOpen && !customMonthlyMenuOpen)) return
+    const onDocPointerDown = (e: PointerEvent) => {
+      const el = e.target as HTMLElement | null
+      if (!el) return
+      const withinUnit = customUnitMenuRef.current && customUnitMenuRef.current.contains(el)
+      const withinMonthly = customMonthlyMenuRef.current && customMonthlyMenuRef.current.contains(el)
+      if (withinUnit || withinMonthly) return
+      setCustomUnitMenuOpen(false)
+      setCustomMonthlyMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onDocPointerDown)
+    return () => document.removeEventListener('pointerdown', onDocPointerDown)
+  }, [customRecurrenceOpen, customUnitMenuOpen, customMonthlyMenuOpen])
 
   useEffect(() => {
     if (!calendarPreview) return
@@ -10750,6 +10781,7 @@ useEffect(() => {
           const draft = customRecurrenceDraft
           const baseDate = Number.isFinite(customRecurrenceBaseMs as number) ? new Date(customRecurrenceBaseMs as number) : new Date()
           const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+          const weekdayFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
           const clampInterval = (value: number) => Math.max(1, Math.min(365, Math.round(value)))
           const clampOccurrences = (value: number) => Math.max(1, Math.min(999, Math.round(value)))
           const incrementInterval = (delta: number) => {
@@ -10807,19 +10839,37 @@ useEffect(() => {
                           <button type="button" onClick={() => incrementInterval(-1)}>▼</button>
                         </div>
                       </div>
-                      <div className="custom-recur__select-wrap">
-                        <select
-                          className="custom-recur__select"
-                          value={draft.unit}
+                      <div className="custom-recur__select-wrap" data-open={customUnitMenuOpen} ref={customUnitMenuRef}>
+                        <button
+                          type="button"
+                          className={`custom-recur__select${customUnitMenuOpen ? ' is-open' : ''}`}
                           aria-label="Repeat unit"
-                          onChange={(e) => handleUnitChange(e.target.value as CustomRecurrenceUnit)}
+                          aria-haspopup="listbox"
+                          aria-expanded={customUnitMenuOpen}
+                          onClick={() => setCustomUnitMenuOpen((prev) => !prev)}
                         >
-                          <option value="day">day</option>
-                          <option value="week">week</option>
-                          <option value="month">month</option>
-                          <option value="year">year</option>
-                        </select>
-                        <span className="custom-recur__chevron" aria-hidden="true">▾</span>
+                          <span className="custom-recur__select-label">{draft.unit}</span>
+                          <span className="custom-recur__chevron" aria-hidden="true">▾</span>
+                        </button>
+                        {customUnitMenuOpen ? (
+                          <div className="custom-recur__menu" role="listbox" aria-label="Repeat unit options">
+                            {(['day', 'week', 'month', 'year'] as CustomRecurrenceUnit[]).map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                role="option"
+                                aria-selected={draft.unit === opt}
+                                className={`custom-recur__option${draft.unit === opt ? ' is-selected' : ''}`}
+                                onClick={() => {
+                                  handleUnitChange(opt)
+                                  setCustomUnitMenuOpen(false)
+                                }}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -10848,10 +10898,48 @@ useEffect(() => {
 
                   {draft.unit === 'month' ? (
                     <div className="custom-recur__row custom-recur__row--full">
-                      <button type="button" className="custom-recur__dropdown">
-                        Monthly on day {draft.monthlyDay}
-                        <span className="custom-recur__chevron" aria-hidden="true">▾</span>
-                      </button>
+                      <div className="custom-recur__select-wrap custom-recur__select-wrap--menu" data-open={customMonthlyMenuOpen} ref={customMonthlyMenuRef}>
+                        <button
+                          type="button"
+                          className={`custom-recur__select${customMonthlyMenuOpen ? ' is-open' : ''}`}
+                          aria-label="Monthly pattern"
+                          aria-haspopup="listbox"
+                          aria-expanded={customMonthlyMenuOpen}
+                          onClick={() => setCustomMonthlyMenuOpen((prev) => !prev)}
+                        >
+                          <span className="custom-recur__select-label">
+                            {draft.monthlyPattern === 'day'
+                              ? `Monthly on day ${draft.monthlyDay}`
+                              : draft.monthlyPattern === 'nth'
+                                ? `Monthly on the fourth ${weekdayFull[baseDate.getDay()]}`
+                                : `Monthly on the last ${weekdayFull[baseDate.getDay()]}`}
+                          </span>
+                          <span className="custom-recur__chevron" aria-hidden="true">▾</span>
+                        </button>
+                        {customMonthlyMenuOpen ? (
+                          <div className="custom-recur__menu" role="listbox" aria-label="Monthly pattern options">
+                            {([
+                              { value: 'day', label: `Monthly on day ${draft.monthlyDay}` },
+                              { value: 'nth', label: `Monthly on the fourth ${weekdayFull[baseDate.getDay()]}` },
+                              { value: 'last', label: `Monthly on the last ${weekdayFull[baseDate.getDay()]}` },
+                            ] as const).map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                role="option"
+                                aria-selected={draft.monthlyPattern === opt.value}
+                                className={`custom-recur__option${draft.monthlyPattern === opt.value ? ' is-selected' : ''}`}
+                                onClick={() => {
+                                  setCustomRecurrenceDraft((prev) => ({ ...prev, monthlyPattern: opt.value }))
+                                  setCustomMonthlyMenuOpen(false)
+                                }}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
