@@ -3487,20 +3487,20 @@ body.scroll-lock .calendar-day-column {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
+  padding: 0.9rem;
 }
 
 .custom-recur {
-  width: min(92vw, 380px);
-  background: linear-gradient(160deg, #f7f9ff, #eef2ff);
+  width: min(92vw, 330px);
+  background: #f8fafc;
   color: #111322;
-  border-radius: 1.25rem;
-  box-shadow: 0 22px 48px rgba(19, 28, 70, 0.35);
-  border: 1px solid rgba(122, 140, 230, 0.35);
-  padding: 1.25rem 1.35rem;
+  border-radius: 0.9rem;
+  box-shadow: 0 16px 32px rgba(19, 28, 70, 0.28);
+  border: 1px solid rgba(122, 140, 230, 0.25);
+  padding: 0.9rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.55rem;
 }
 
 .custom-recur__header {
@@ -3511,7 +3511,7 @@ body.scroll-lock .calendar-day-column {
 
 .custom-recur__title {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 650;
   color: #0f172a;
 }
@@ -3519,13 +3519,13 @@ body.scroll-lock .calendar-day-column {
 .custom-recur__body {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.55rem;
 }
 
 .custom-recur__row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
 }
 
@@ -3535,14 +3535,15 @@ body.scroll-lock .calendar-day-column {
 }
 
 .custom-recur__label {
-  min-width: 90px;
+  min-width: 80px;
   font-weight: 500;
   color: #1f2937;
+  font-size: 0.9rem;
 }
 
 .custom-recur__controls {
   display: flex;
-  gap: 0.55rem;
+  gap: 0.45rem;
   align-items: center;
   flex: 1;
 }
@@ -3553,21 +3554,21 @@ body.scroll-lock .calendar-day-column {
   align-items: center;
   border: 1px solid #d4daf8;
   background: white;
-  border-radius: 0.6rem;
-  padding-right: 1.5rem;
-  min-width: 90px;
+  border-radius: 0.55rem;
+  padding-right: 1.1rem;
+  min-width: 80px;
 }
 
 .custom-recur__stepper--compact {
-  min-width: 80px;
+  min-width: 72px;
 }
 
 .custom-recur__number {
   border: 0;
   background: transparent;
-  padding: 0.65rem 0.7rem;
+  padding: 0.5rem 0.6rem;
   width: 100%;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: #0f172a;
   outline: none;
@@ -3584,7 +3585,7 @@ body.scroll-lock .calendar-day-column {
 .custom-recur__stepper-arrows button {
   border: 0;
   background: transparent;
-  padding: 0.1rem;
+  padding: 0.05rem;
   line-height: 1;
   color: #475569;
   cursor: pointer;
@@ -3597,21 +3598,25 @@ body.scroll-lock .calendar-day-column {
   isolation: isolate;
 }
 
+.custom-recur__select-wrap--menu {
+  min-width: 220px;
+}
+
 .custom-recur__select {
   width: 100%;
-  padding: 0.65rem 0.9rem;
+  padding: 0.55rem 0.8rem;
   border-radius: 0.65rem;
   border: 1px solid rgba(26, 43, 77, 0.12);
   background: #f8fafc;
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   color: #0f172a;
   outline: none;
   box-shadow: none;
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.55rem;
+  gap: 0.5rem;
   cursor: pointer;
   position: relative;
   transition: border-color 140ms ease, background 140ms ease, transform 120ms ease;
@@ -3658,23 +3663,23 @@ body.scroll-lock .calendar-day-column {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 0.25rem 0;
-  border-radius: 0.5rem;
+  padding: 0.2rem 0;
+  border-radius: 0.45rem;
   border: 1px solid rgba(26, 43, 77, 0.12);
   background: #fff;
   box-shadow: 0 10px 24px rgba(12, 21, 54, 0.12);
-  z-index: 20000;
+  z-index: 40000;
 }
 
 .custom-recur__option {
   width: 100%;
   text-align: left;
-  padding: 0.55rem 0.9rem;
+  padding: 0.48rem 0.8rem;
   border: 0;
   background: transparent;
   color: #0f172a;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
 }
@@ -3692,7 +3697,7 @@ body.scroll-lock .calendar-day-column {
 .custom-recur__weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 0.35rem;
+  gap: 0.28rem;
   flex: 1;
 }
 
@@ -3701,9 +3706,9 @@ body.scroll-lock .calendar-day-column {
   background: #e7ecff;
   color: #2b3366;
   border-radius: 999px;
-  width: 38px;
-  height: 38px;
-  font-weight: 700;
+  width: 32px;
+  height: 32px;
+  font-weight: 600;
   cursor: pointer;
   transition: background 160ms ease, color 160ms ease;
 }
@@ -3718,9 +3723,9 @@ body.scroll-lock .calendar-day-column {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.75rem 0.85rem;
-  border-radius: 0.65rem;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.55rem;
   border: 1px solid #d4daf8;
   background: white;
   font-weight: 600;
@@ -3734,30 +3739,33 @@ body.scroll-lock .calendar-day-column {
 .custom-recur__ends-options {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.4rem;
 }
 
 .custom-recur__radio {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   color: #1f2937;
   font-weight: 500;
+  font-size: 0.92rem;
 }
 
 .custom-recur__date,
 .custom-recur__occurrence-wrap {
   grid-column: 2;
+  margin-left: 0.35rem;
 }
 
 .custom-recur__date {
   border: 1px solid #d4daf8;
   background: #f5f7ff;
   color: #8b95b5;
-  padding: 0.55rem 0.65rem;
-  border-radius: 0.55rem;
-  min-width: 170px;
+  padding: 0.48rem 0.6rem;
+  border-radius: 0.5rem;
+  min-width: 150px;
+  font-size: 0.9rem;
 }
 
 .custom-recur__occurrence-wrap {
@@ -3767,25 +3775,25 @@ body.scroll-lock .calendar-day-column {
 }
 
 .custom-recur__occurrences-label {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: #4b5563;
 }
 
 .custom-recur__footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.75rem;
-  margin-top: 0.35rem;
+  gap: 0.6rem;
+  margin-top: 0.2rem;
 }
 
 .custom-recur__ghost,
 .custom-recur__primary {
   border: 0;
   border-radius: 999px;
-  padding: 0.65rem 1.3rem;
-  font-weight: 700;
+  padding: 0.42rem 0.95rem;
+  font-weight: 650;
   cursor: pointer;
-  font-size: 0.98rem;
+  font-size: 0.85rem;
 }
 
 .custom-recur__ghost {
