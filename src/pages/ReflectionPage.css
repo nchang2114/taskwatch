@@ -3636,7 +3636,10 @@ body.scroll-lock .calendar-day-column {
 }
 
 .custom-recur__select-wrap--menu {
+  flex: 0 0 auto;
   min-width: 220px;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .custom-recur__select {
@@ -3668,6 +3671,15 @@ body.scroll-lock .calendar-day-column {
   box-shadow: none;
 }
 
+.custom-recur__select-wrap--menu .custom-recur__select {
+  min-width: 100%;
+  max-width: 100%;
+  padding-right: 2.25rem; /* reserve space for chevron */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .custom-recur__select-wrap::after {
   content: none;
 }
@@ -3681,6 +3693,15 @@ body.scroll-lock .calendar-day-column {
   pointer-events: none;
 }
 
+.custom-recur__select-wrap--menu .custom-recur__chevron {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
 .custom-recur__select.is-open {
   border-color: rgba(26, 43, 77, 0.2);
   box-shadow: none;
@@ -3690,6 +3711,7 @@ body.scroll-lock .calendar-day-column {
 .custom-recur__select-label {
   flex: 1;
   text-align: left;
+  min-width: 0;
 }
 
 .custom-recur__menu {
