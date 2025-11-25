@@ -619,6 +619,22 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const SNAPBACK_CUSTOM_TRIGGERS_KEY = 'nc-taskwatch-snapback-custom-triggers'
   const SNAPBACK_OVERVIEW_TRIGGERS_KEY = 'nc-taskwatch-overview-triggers'
   const [overviewTriggersVersion, setOverviewTriggersVersion] = useState(0)
+
+  useEffect(() => {
+    if (isSnapbackOpen) {
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+      document.body.style.overflow = 'hidden'
+      document.body.style.paddingRight = `${scrollbarWidth}px`
+    } else {
+      document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
+    }
+  }, [isSnapbackOpen])
+
   const [currentTaskName, setCurrentTaskName] = useState<string>(initialTaskName)
   const [sessionStart, setSessionStart] = useState<number | null>(null)
   const [currentTime, setCurrentTime] = useState(() => Date.now())
