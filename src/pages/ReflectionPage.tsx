@@ -2809,11 +2809,11 @@ export default function ReflectionPage() {
       const absRaw = Math.abs(effectiveRaw)
       const direction = effectiveRaw >= 0 ? 1 : -1
 
-      const quickTouchFling = Boolean(state.isTouch) && state.mode === 'hdrag' && elapsedMs < 300 && absRaw > 0.05
+      const quickTouchFling = Boolean(state.isTouch) && state.mode === 'hdrag' && (elapsedMs < 450 || absRaw > 0.2)
       let snapUnits: number
       if (quickTouchFling) {
-        // Fast swipe: always advance at least one chunk in the swipe direction
-        const steps = Math.max(1, Math.ceil(absRaw))
+        // Fast swipe: always advance at least one chunk in the swipe direction (no snap-back on fling)
+        const steps = Math.max(1, Math.round(absRaw + 0.2))
         snapUnits = direction * steps
       } else {
         // Controlled drag: snap only if past halfway into the next chunk
