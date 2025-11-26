@@ -3957,7 +3957,7 @@ html[data-theme='dark'] .custom-recur__dropdown {
 }
 
 html[data-theme='dark'] .custom-recur__radio {
-  color: #d3dcff;
+  color: #d3dcff; 
 }
 
 html[data-theme='dark'] .custom-recur__radio input[type='radio'] {
