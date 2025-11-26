@@ -49,6 +49,15 @@ const SURFACE_GRADIENTS: Record<SurfaceStyle, string> = {
 const gradientFromSurface = (surface: SurfaceStyle | null | undefined): string =>
   (surface && SURFACE_GRADIENTS[surface]) || 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
 
+const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle => {
+  if (typeof colour !== 'string') return DEFAULT_SURFACE_STYLE
+  const normalized = colour.trim().toLowerCase()
+  const match = (Object.entries(SURFACE_GRADIENTS) as Array<[SurfaceStyle, string]>).find(
+    ([, gradient]) => gradient.toLowerCase() === normalized,
+  )
+  return match ? match[0] : DEFAULT_SURFACE_STYLE
+}
+
 export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines-v1'
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
 export const LIFE_ROUTINE_USER_STORAGE_KEY = 'nc-taskwatch-life-routines-user'
@@ -212,7 +221,6 @@ type LifeRoutineDbRow = {
   id: string
   title?: string | null
   blurb?: string | null
-  surface_style?: string | null
   surface_colour?: string | null
   sort_index?: number | null
 }
@@ -286,8 +294,7 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
   const surfaceColourRaw = typeof (row as any).surface_colour === 'string' ? ((row as any).surface_colour as string) : null
   const surfaceColor =
     surfaceColourRaw && surfaceColourRaw.trim().length > 0 ? surfaceColourRaw.trim() : gradientFromSurface(DEFAULT_SURFACE_STYLE)
-  // Surface style column is gone; keep visuals consistent by defaulting to the app default.
-  const surfaceStyle = DEFAULT_SURFACE_STYLE
+  const surfaceStyle = surfaceStyleFromColour(surfaceColourRaw)
   const sortIndex = typeof row.sort_index === 'number' && Number.isFinite(row.sort_index) ? row.sort_index : 0
   return {
     id,
