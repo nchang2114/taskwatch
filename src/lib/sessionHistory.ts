@@ -117,7 +117,7 @@ const disableHistorySubtasks = () => {
   writeFeatureFlags(flags)
 }
 const HISTORY_BASE_SELECT_COLUMNS =
-  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, goal_surface, entry_colour, created_at, updated_at, future_session'
+  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, entry_colour, created_at, updated_at, future_session'
 
 const buildHistorySelectColumns = (): string => {
   let columns = HISTORY_BASE_SELECT_COLUMNS
@@ -259,9 +259,6 @@ const isConflictError = (err: any): boolean => {
   const combined = `${msg} ${details}`.toLowerCase()
   return combined.includes('duplicate key value') || combined.includes('already exists')
 }
-
-const toDbSurface = (value: SurfaceStyle | null | undefined): SurfaceStyle | null =>
-  sanitizeSurfaceStyle(value) ?? null
 
 const SURFACE_GRADIENTS: Record<SurfaceStyle, string> = {
   glass: 'linear-gradient(135deg, #313c67 0%, #1f2952 45%, #121830 100%)',
@@ -1253,7 +1250,6 @@ const payloadFromRecord = (
     bucket_id: isUuid(record.bucketId) ? record.bucketId : null,
     task_id: isUuid(record.taskId) ? record.taskId : null,
     // Clamp surfaces to DB-allowed values to satisfy CHECK constraints server-side
-    goal_surface: toDbSurface(record.goalSurface),
     created_at: new Date(createdAtSource).toISOString(),
     updated_at: new Date(updatedAt).toISOString(),
     ...(typeof record.futureSession === 'boolean' ? { future_session: record.futureSession } : {}),
@@ -1289,7 +1285,7 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
     goalId: typeof row.goal_id === 'string' ? row.goal_id : null,
     bucketId: typeof row.bucket_id === 'string' ? row.bucket_id : null,
     taskId: typeof row.task_id === 'string' ? row.task_id : null,
-    goalSurface: typeof row.goal_surface === 'string' ? row.goal_surface : null,
+    goalSurface: null,
     bucketSurface: null,
     entryColor: typeof (row as any).entry_colour === 'string' ? ((row as any).entry_colour as string) : null,
     notes: typeof row.notes === 'string' ? row.notes : null,
