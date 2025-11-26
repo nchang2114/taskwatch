@@ -2888,7 +2888,10 @@ const [showInspectorExtras, setShowInspectorExtras] = useState(false)
 const [showEditorExtras, setShowEditorExtras] = useState(false)
 const [showInlineExtras, setShowInlineExtras] = useState(false)
 const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string | null>(null)
-  const calendarTouchAction = useMemo(() => (calendarView === '3d' ? 'pan-x' : 'pan-y'), [calendarView])
+  const calendarTouchAction = useMemo(
+    () => (calendarView === '3d' ? 'pan-x pan-y' : 'pan-y'),
+    [calendarView],
+  )
   // Ref to the session name input inside the calendar editor modal (for autofocus on new entries)
   const calendarEditorNameInputRef = useRef<HTMLInputElement | null>(null)
 
