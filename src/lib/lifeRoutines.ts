@@ -213,6 +213,7 @@ type LifeRoutineDbRow = {
   title?: string | null
   blurb?: string | null
   surface_style?: string | null
+  surface_colour?: string | null
   sort_index?: number | null
 }
 
@@ -282,8 +283,10 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
     return null
   }
   const blurb = typeof row.blurb === 'string' ? row.blurb : ''
-  const surfaceColor = typeof (row as any).surface_colour === 'string' ? ((row as any).surface_colour as string) : null
-  // Surface style is legacy; keep visuals consistent by defaulting to the app default.
+  const surfaceColourRaw = typeof (row as any).surface_colour === 'string' ? ((row as any).surface_colour as string) : null
+  const surfaceColor =
+    surfaceColourRaw && surfaceColourRaw.trim().length > 0 ? surfaceColourRaw.trim() : gradientFromSurface(DEFAULT_SURFACE_STYLE)
+  // Surface style column is gone; keep visuals consistent by defaulting to the app default.
   const surfaceStyle = DEFAULT_SURFACE_STYLE
   const sortIndex = typeof row.sort_index === 'number' && Number.isFinite(row.sort_index) ? row.sort_index : 0
   return {
@@ -327,8 +330,7 @@ export const pushLifeRoutinesToSupabase = async (
     user_id: session.user.id,
     title: routine.title,
     blurb: routine.blurb,
-    surface_style: routine.surfaceStyle,
-    surface_colour: gradientFromSurface(routine.surfaceStyle),
+    surface_colour: routine.surfaceColor ?? gradientFromSurface(routine.surfaceStyle),
     sort_index: index,
   }))
 
@@ -343,31 +345,10 @@ export const pushLifeRoutinesToSupabase = async (
   }
 
   if (rows.length > 0) {
-    const tryUpsert = async (payload: typeof rows) =>
-      supabase!.from('life_routines').upsert(payload, { onConflict: 'id' })
-
-    const { error: upsertError } = await tryUpsert(rows)
+    const { error: upsertError } = await supabase.from('life_routines').upsert(rows, { onConflict: 'id' })
     if (upsertError) {
-      const details = (upsertError as any).details || ''
-      const msg = `${upsertError.message} ${details}`.toLowerCase()
-      // If the backend uses a Postgres ENUM or CHECK constraint for surface_style
-      // and it hasn't been updated to include new themes, a 400 error will occur.
-      const looksLikeSurfaceStyleConstraint =
-        msg.includes('surface_style') || msg.includes('enum') || msg.includes('invalid input value')
-
-      if (looksLikeSurfaceStyleConstraint) {
-        // Retry once with a safe fallback so sync doesn’t block other fields.
-        const fallback = DEFAULT_SURFACE_STYLE
-        const fallbackRows = rows.map((r) => ({ ...r, surface_style: fallback }))
-        const { error: retryError } = await tryUpsert(fallbackRows)
-        if (retryError) {
-          fail('Failed to upsert life routines with fallback surface', retryError)
-          return
-        }
-      } else {
-        fail('Failed to upsert life routines', upsertError)
-        return
-      }
+      fail('Failed to upsert life routines', upsertError)
+      return
     }
   }
 
@@ -476,7 +457,7 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   // Fetch remote snapshot
   const { data, error } = await supabase
     .from('life_routines')
-    .select('id, title, blurb, surface_style, sort_index')
+    .select('id, title, blurb, surface_colour, sort_index')
     .eq('user_id', session.user.id)
     .order('sort_index', { ascending: true })
 
