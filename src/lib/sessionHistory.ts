@@ -38,8 +38,6 @@ const parseEnvToggle = (value: unknown): boolean | null => {
   return null
 }
 const ENV_ENABLE_HISTORY_NOTES = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_HISTORY_NOTES)
-// Subtasks are disabled for session_history persistence to avoid DB column issues.
-const ENV_ENABLE_HISTORY_SUBTASKS = false
 const ENV_ENABLE_REPEAT_ORIGINAL = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_REPEAT_ORIGINAL)
 const ENV_ENABLE_HISTORY_FUTURE_SESSION = parseEnvToggle(
   (import.meta as any)?.env?.VITE_ENABLE_HISTORY_FUTURE_SESSION,
@@ -1336,7 +1334,6 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
       const missingRepeat =
         errorMentionsColumn(fetchError, 'repeating_session_id') || errorMentionsColumn(fetchError, 'original_time')
       const missingNotes = errorMentionsColumn(fetchError, 'notes')
-      const missingSubtasks = false
       let changed = false
       if (missingRepeat && isRepeatOriginalEnabled()) {
         disableRepeatOriginal()
