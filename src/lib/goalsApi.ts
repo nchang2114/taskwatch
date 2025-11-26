@@ -2,6 +2,8 @@ import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, sanitizeSurfaceStyle } from './surfaceStyles'
 
+const FALLBACK_GOAL_COLOR = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
+
 export type DbGoal = {
   id: string
   name: string
