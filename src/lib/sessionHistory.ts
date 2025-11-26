@@ -24,7 +24,6 @@ type FeatureFlags = {
   historyNotes?: boolean
   historySubtasks?: boolean
   historyFutureSession?: boolean
-  historyBucketRelation?: boolean
 }
 const parseEnvToggle = (value: unknown): boolean | null => {
   if (typeof value !== 'string') return null
@@ -43,9 +42,6 @@ const ENV_ENABLE_HISTORY_SUBTASKS = parseEnvToggle((import.meta as any)?.env?.VI
 const ENV_ENABLE_REPEAT_ORIGINAL = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_REPEAT_ORIGINAL)
 const ENV_ENABLE_HISTORY_FUTURE_SESSION = parseEnvToggle(
   (import.meta as any)?.env?.VITE_ENABLE_HISTORY_FUTURE_SESSION,
-)
-const ENV_ENABLE_HISTORY_BUCKET_RELATION = parseEnvToggle(
-  (import.meta as any)?.env?.VITE_ENABLE_HISTORY_BUCKET_RELATION,
 )
 const readFeatureFlags = (): FeatureFlags => {
   if (typeof window === 'undefined') return {}
@@ -120,28 +116,11 @@ const disableHistorySubtasks = () => {
   flags.historySubtasks = false
   writeFeatureFlags(flags)
 }
-const isHistoryBucketRelationEnabled = (): boolean => {
-  const override = envOverride(ENV_ENABLE_HISTORY_BUCKET_RELATION)
-  if (override !== null) {
-    return override
-  }
-  const flags = readFeatureFlags()
-  return flags.historyBucketRelation !== false
-}
-const disableHistoryBucketRelation = () => {
-  const flags = readFeatureFlags()
-  if (flags.historyBucketRelation === false) return
-  flags.historyBucketRelation = false
-  writeFeatureFlags(flags)
-}
 const HISTORY_BASE_SELECT_COLUMNS =
   'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, goal_surface, entry_colour, created_at, updated_at, future_session'
 
 const buildHistorySelectColumns = (): string => {
   let columns = HISTORY_BASE_SELECT_COLUMNS
-  if (isHistoryBucketRelationEnabled()) {
-    columns += ', buckets(buckets_card_style)'
-  }
   if (isHistoryNotesEnabled()) {
     columns += ', notes'
   }
@@ -184,10 +163,6 @@ const getErrorContext = (err: any): string => {
 const isColumnMissingError = (err: any): boolean => {
   const combined = getErrorContext(err)
   return combined.includes('column') && combined.includes('does not exist')
-}
-const isRelationMissingError = (err: any): boolean => {
-  const combined = getErrorContext(err)
-  return combined.includes('relationship') && combined.includes('session_history') && combined.includes('buckets')
 }
 const errorMentionsColumn = (err: any, column: string): boolean => {
   if (!err) return false
@@ -950,10 +925,10 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
       if (!goalSurface && normalizedGoalName.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()) {
         goalSurface = LIFE_ROUTINES_SURFACE
       }
-      // No default bucket surface mapping; bucket surface remains as provided or null
 
+      // Do not re-derive color from bucket styles; rely on stored entryColour or fall back to goal surface/default.
       if (!entryColor || !entryColor.toLowerCase().includes('linear-gradient(')) {
-        const surfaceForGradient = goalSurface ?? bucketSurface ?? DEFAULT_SURFACE_STYLE
+        const surfaceForGradient = goalSurface ?? DEFAULT_SURFACE_STYLE
         entryColor = gradientFromSurface(surfaceForGradient)
       }
 
@@ -1303,24 +1278,6 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
   const endedAt = snapToNearestMinute(rawEnd)
   const elapsed = clampNumber(row.elapsed_ms, Math.max(0, endedAt - startedAt))
 
-  const bucketSurfaceFromRelation = (() => {
-    const relation = (row as any).buckets
-    const readStyle = (source: any): string | null => {
-      if (!source || typeof source !== 'object') return null
-      const value = (source as any).buckets_card_style
-      return typeof value === 'string' ? value : null
-    }
-    if (Array.isArray(relation)) {
-      for (const item of relation) {
-        const style = readStyle(item)
-        if (style) return style
-      }
-      return null
-    }
-    return readStyle(relation)
-  })()
-  const bucketSurfaceRaw = bucketSurfaceFromRelation
-
   const candidate: HistoryCandidate = {
     id,
     taskName,
@@ -1333,7 +1290,7 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
     bucketId: typeof row.bucket_id === 'string' ? row.bucket_id : null,
     taskId: typeof row.task_id === 'string' ? row.task_id : null,
     goalSurface: typeof row.goal_surface === 'string' ? row.goal_surface : null,
-    bucketSurface: bucketSurfaceRaw,
+    bucketSurface: null,
     entryColor: typeof (row as any).entry_colour === 'string' ? ((row as any).entry_colour as string) : null,
     notes: typeof row.notes === 'string' ? row.notes : null,
     subtasks: row.subtasks ?? null,
@@ -1425,14 +1382,13 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
         .order('updated_at', { ascending: false })
       remoteRows = response.data as any
       fetchError = response.error as any
-      if (!fetchError || (!isColumnMissingError(fetchError) && !isRelationMissingError(fetchError))) {
+      if (!fetchError || !isColumnMissingError(fetchError)) {
         break
       }
       const missingRepeat =
         errorMentionsColumn(fetchError, 'repeating_session_id') || errorMentionsColumn(fetchError, 'original_time')
       const missingNotes = errorMentionsColumn(fetchError, 'notes')
       const missingSubtasks = errorMentionsColumn(fetchError, 'subtasks')
-      const missingBucketRelation = isRelationMissingError(fetchError)
       let changed = false
       if (missingRepeat && isRepeatOriginalEnabled()) {
         disableRepeatOriginal()
@@ -1444,10 +1400,6 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
       }
       if (missingSubtasks && isHistorySubtasksEnabled()) {
         disableHistorySubtasks()
-        changed = true
-      }
-      if (missingBucketRelation && isHistoryBucketRelationEnabled()) {
-        disableHistoryBucketRelation()
         changed = true
       }
       if (!changed) {
