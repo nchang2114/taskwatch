@@ -37,8 +37,6 @@ import {
 } from '../lib/goalsSync'
 import {
   DEFAULT_SURFACE_STYLE,
-  ensureSurfaceStyle,
-  sanitizeSurfaceStyle,
   type SurfaceStyle,
 } from '../lib/surfaceStyles'
 import {
@@ -90,7 +88,6 @@ import {
   readHistoryOwnerId,
   readStoredHistory as readPersistedHistory,
   syncHistoryWithSupabase,
-  gradientFromSurface,
   type HistoryEntry,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
@@ -108,8 +105,6 @@ type FocusCandidate = {
   completed: boolean
   priority: boolean
   difficulty: 'none' | 'green' | 'yellow' | 'red'
-  goalSurface: SurfaceStyle
-  bucketSurface: SurfaceStyle
   entryColor?: string | null
   notes: string
   subtasks: NotebookSubtask[]
@@ -126,8 +121,6 @@ type FocusSource = {
   taskId: string | null
   taskDifficulty: FocusCandidate['difficulty'] | null
   priority: boolean | null
-  goalSurface: SurfaceStyle | null
-  bucketSurface: SurfaceStyle | null
   notes?: string | null
   subtasks?: NotebookSubtask[]
   repeatingRuleId?: string | null
@@ -141,8 +134,6 @@ type SessionMetadata = {
   taskId: string | null
   goalName: string | null
   bucketName: string | null
-  goalSurface: SurfaceStyle
-  bucketSurface: SurfaceStyle | null
   sessionKey: string | null
   taskLabel: string
   repeatingRuleId: string | null
@@ -195,10 +186,11 @@ type SnapbackActionId = (typeof SNAPBACK_ACTIONS)[number]['id']
 
 const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_GOAL_ID = 'life-routines'
-const LIFE_ROUTINES_SURFACE: SurfaceStyle = 'linen'
 const QUICK_LIST_NAME = 'Quick List'
 const QUICK_LIST_GOAL_ID = 'quick-list'
 const QUICK_LIST_BUCKET_ID = 'quick-list-bucket'
+const NEUTRAL_SURFACE: SurfaceStyle = DEFAULT_SURFACE_STYLE
+const NEUTRAL_ENTRY_GRADIENT = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
 const formatLocalYmd = (ms: number): string => {
   const d = new Date(ms)
   const y = d.getFullYear()
@@ -242,8 +234,6 @@ const createEmptySessionMetadata = (taskLabel: string): SessionMetadata => ({
   taskId: null,
   goalName: null,
   bucketName: null,
-  goalSurface: DEFAULT_SURFACE_STYLE,
-  bucketSurface: null,
   sessionKey: null,
   taskLabel,
   repeatingRuleId: null,
@@ -415,9 +405,7 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
       left.bucketName !== right.bucketName ||
       left.goalId !== right.goalId ||
       left.bucketId !== right.bucketId ||
-      left.taskId !== right.taskId ||
-      left.goalSurface !== right.goalSurface ||
-      left.bucketSurface !== right.bucketSurface
+      left.taskId !== right.taskId
     ) {
       return false
     }
@@ -482,8 +470,6 @@ const readStoredFocusSource = (): FocusSource | null => {
         : typeof candidate.priority === 'string'
           ? candidate.priority === 'true'
           : null
-    const goalSurface = sanitizeSurfaceStyle(candidate.goalSurface)
-    const bucketSurface = sanitizeSurfaceStyle(candidate.bucketSurface)
     const notes = typeof candidate.notes === 'string' ? candidate.notes : ''
     const subtasks = sanitizeNotebookSubtasks(candidate.subtasks)
     const repeatingRuleId =
@@ -505,8 +491,6 @@ const readStoredFocusSource = (): FocusSource | null => {
       taskId,
       taskDifficulty,
       priority,
-      goalSurface,
-      bucketSurface,
       notes,
       subtasks,
       repeatingRuleId: repeatingRuleId ?? null,
@@ -674,8 +658,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
     sessionKey: string | null
     goalName: string | null
     bucketName: string | null
-    goalSurface: SurfaceStyle
-    bucketSurface: SurfaceStyle | null
     repeatingRuleId: string | null
     repeatingOccurrenceDate: string | null
     repeatingOriginalTime: number | null
@@ -686,8 +668,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
     sessionKey: null,
     goalName: null,
     bucketName: null,
-    goalSurface: DEFAULT_SURFACE_STYLE,
-    bucketSurface: null,
     repeatingRuleId: null,
     repeatingOccurrenceDate: null,
     repeatingOriginalTime: null,
@@ -748,16 +728,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       if (r.bucketId && typeof r.surfaceColor === 'string' && r.surfaceColor.trim().length > 0) {
         map.set(r.bucketId, r.surfaceColor.trim())
       }
-    })
-    return map
-  }, [lifeRoutineTasks])
-  // Build a lookup of life routine (bucket) title -> surface style so we can restore colors for
-  // history-derived life routine suggestions that may have missing bucketSurface metadata.
-  const lifeRoutineSurfaceLookup = useMemo(() => {
-    const map = new Map<string, SurfaceStyle>()
-    lifeRoutineTasks.forEach((r) => {
-      const key = r.title.trim().toLowerCase()
-      if (key) map.set(key, r.surfaceStyle)
     })
     return map
   }, [lifeRoutineTasks])
@@ -1367,24 +1337,22 @@ useEffect(() => {
                         : NOTEBOOK_SUBTASK_SORT_STEP,
                   }))
                 : []
-              candidates.push({
-                goalId: goal.id,
-                goalName: goal.name,
-                bucketId: bucket.id,
-                bucketName: bucket.name,
-                taskId: task.id,
+            candidates.push({
+              goalId: goal.id,
+              goalName: goal.name,
+              bucketId: bucket.id,
+              bucketName: bucket.name,
+              taskId: task.id,
               taskName: task.text,
               completed: task.completed,
               priority: task.priority,
               difficulty: task.difficulty,
-              goalSurface: DEFAULT_SURFACE_STYLE,
-              bucketSurface: DEFAULT_SURFACE_STYLE,
               entryColor: goalGradient,
-                notes: typeof task.notes === 'string' ? task.notes : '',
-                subtasks: candidateSubtasks,
-                repeatingRuleId: null,
-                repeatingOccurrenceDate: null,
-                repeatingOriginalTime: null,
+              notes: typeof task.notes === 'string' ? task.notes : '',
+              subtasks: candidateSubtasks,
+              repeatingRuleId: null,
+              repeatingOccurrenceDate: null,
+              repeatingOriginalTime: null,
             })
           })
         })
@@ -1408,8 +1376,6 @@ useEffect(() => {
       completed: Boolean(item.completed),
       priority: Boolean(item.priority),
       difficulty: item.difficulty ?? 'none',
-      goalSurface: DEFAULT_SURFACE_STYLE,
-      bucketSurface: DEFAULT_SURFACE_STYLE,
       entryColor: quickGradient,
       notes: typeof item.notes === 'string' ? item.notes : '',
       subtasks: Array.isArray(item.subtasks)
@@ -1427,7 +1393,7 @@ useEffect(() => {
       repeatingOccurrenceDate: null,
       repeatingOriginalTime: null,
     }))
-  }, [quickListItems, quickListRemoteIds])
+  }, [goalGradientById, quickListItems, quickListRemoteIds])
   const quickListActiveCandidates = useMemo(
     () => quickListFocusCandidates.filter((candidate) => !candidate.completed),
     [quickListFocusCandidates],
@@ -1487,18 +1453,16 @@ useEffect(() => {
               goalName: goal.name,
               bucketId: bucket.id,
               bucketName: bucket.name,
-                taskId: task.id,
-                taskName: task.text,
-                completed: task.completed,
-                priority: !!task.priority,
-                difficulty: (task.difficulty as any) ?? 'none',
-                goalSurface: DEFAULT_SURFACE_STYLE,
-                bucketSurface: DEFAULT_SURFACE_STYLE,
-                notes: typeof task.notes === 'string' ? task.notes : '',
-                subtasks: Array.isArray(task.subtasks)
-                  ? task.subtasks.map((s, idx) => ({
-                      id: s.id,
-                      text: s.text,
+                    taskId: task.id,
+                    taskName: task.text,
+                    completed: task.completed,
+                    priority: !!task.priority,
+                    difficulty: (task.difficulty as any) ?? 'none',
+                    notes: typeof task.notes === 'string' ? task.notes : '',
+                    subtasks: Array.isArray(task.subtasks)
+                      ? task.subtasks.map((s, idx) => ({
+                          id: s.id,
+                          text: s.text,
                       completed: s.completed,
                       sortIndex: typeof s.sortIndex === 'number' ? s.sortIndex : (idx + 1) * NOTEBOOK_SUBTASK_SORT_STEP,
                     }))
@@ -1532,8 +1496,6 @@ useEffect(() => {
                 completed: task.completed,
                 priority: !!task.priority,
                 difficulty: (task.difficulty as any) ?? 'none',
-                goalSurface: DEFAULT_SURFACE_STYLE,
-                bucketSurface: DEFAULT_SURFACE_STYLE,
                 notes: typeof task.notes === 'string' ? task.notes : '',
                 subtasks: Array.isArray(task.subtasks)
                   ? task.subtasks.map((s, idx) => ({
@@ -1563,8 +1525,6 @@ useEffect(() => {
         completed: false,
         priority: false,
         difficulty: 'none',
-        goalSurface: ensureSurfaceStyle(entry.goalSurface, DEFAULT_SURFACE_STYLE),
-        bucketSurface: ensureSurfaceStyle(entry.bucketSurface ?? undefined, DEFAULT_SURFACE_STYLE),
         entryColor: entry.entryColor ?? null,
         notes: entry.notes ?? '',
         subtasks: [],
@@ -1621,18 +1581,16 @@ useEffect(() => {
                       goalName: goal.name,
                       bucketId: bucket.id,
                       bucketName: bucket.name,
-                      taskId: task.id,
-                      taskName: task.text,
-                      completed: task.completed,
-                      priority: !!task.priority,
-                      difficulty: (task.difficulty as any) ?? 'none',
-                      goalSurface: DEFAULT_SURFACE_STYLE,
-                      bucketSurface: DEFAULT_SURFACE_STYLE,
-                      notes: typeof task.notes === 'string' ? task.notes : '',
-                      subtasks: Array.isArray(task.subtasks)
-                        ? task.subtasks.map((sub, idx) => ({ id: sub.id, text: sub.text, completed: sub.completed, sortIndex: typeof sub.sortIndex === 'number' ? sub.sortIndex : (idx + 1) * NOTEBOOK_SUBTASK_SORT_STEP }))
-                        : [],
-                      repeatingRuleId: null,
+                    taskId: task.id,
+                    taskName: task.text,
+                    completed: task.completed,
+                    priority: !!task.priority,
+                    difficulty: (task.difficulty as any) ?? 'none',
+                    notes: typeof task.notes === 'string' ? task.notes : '',
+                    subtasks: Array.isArray(task.subtasks)
+                      ? task.subtasks.map((sub, idx) => ({ id: sub.id, text: sub.text, completed: sub.completed, sortIndex: typeof sub.sortIndex === 'number' ? sub.sortIndex : (idx + 1) * NOTEBOOK_SUBTASK_SORT_STEP }))
+                      : [],
+                    repeatingRuleId: null,
                       repeatingOccurrenceDate: null,
                       repeatingOriginalTime: null,
                     }
@@ -1659,18 +1617,16 @@ useEffect(() => {
                       goalName: goal.name,
                       bucketId: bucket.id,
                       bucketName: bucket.name,
-                      taskId: task.id,
-                      taskName: task.text,
-                      completed: task.completed,
-                      priority: !!task.priority,
-                      difficulty: (task.difficulty as any) ?? 'none',
-                      goalSurface: DEFAULT_SURFACE_STYLE,
-                      bucketSurface: DEFAULT_SURFACE_STYLE,
-                      notes: typeof task.notes === 'string' ? task.notes : '',
-                      subtasks: Array.isArray(task.subtasks)
-                        ? task.subtasks.map((sub, idx) => ({ id: sub.id, text: sub.text, completed: sub.completed, sortIndex: typeof sub.sortIndex === 'number' ? sub.sortIndex : (idx + 1) * NOTEBOOK_SUBTASK_SORT_STEP }))
-                        : [],
-                      repeatingRuleId: null,
+                    taskId: task.id,
+                    taskName: task.text,
+                    completed: task.completed,
+                    priority: !!task.priority,
+                    difficulty: (task.difficulty as any) ?? 'none',
+                    notes: typeof task.notes === 'string' ? task.notes : '',
+                    subtasks: Array.isArray(task.subtasks)
+                      ? task.subtasks.map((sub, idx) => ({ id: sub.id, text: sub.text, completed: sub.completed, sortIndex: typeof sub.sortIndex === 'number' ? sub.sortIndex : (idx + 1) * NOTEBOOK_SUBTASK_SORT_STEP }))
+                      : [],
+                    repeatingRuleId: null,
                       repeatingOccurrenceDate: null,
                       repeatingOriginalTime: null,
                     }
@@ -1690,21 +1646,11 @@ useEffect(() => {
                 completed: false,
                 priority: false,
                 difficulty: 'none',
-                goalSurface: DEFAULT_SURFACE_STYLE,
-                bucketSurface: DEFAULT_SURFACE_STYLE,
                 notes: '',
                 subtasks: [],
                 repeatingRuleId: null,
                 repeatingOccurrenceDate: null,
                 repeatingOriginalTime: null,
-              }
-            }
-            // Restore Daily Life colors if applicable
-            if ((candidate.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() && candidate.bucketName.trim().length > 0) {
-              const lrSurface = lifeRoutineSurfaceLookup.get(candidate.bucketName.trim().toLowerCase())
-              if (lrSurface) {
-                candidate.goalSurface = LIFE_ROUTINES_SURFACE
-                candidate.bucketSurface = lrSurface
               }
             }
             suggestions.push({ ...candidate, startedAt, endedAt, isGuide: false })
@@ -1724,7 +1670,7 @@ useEffect(() => {
       unique.push(s)
     }
     return unique
-  }, [history, activeGoalSnapshots, lifeRoutineSurfaceLookup, currentTime])
+  }, [activeGoalSnapshots, currentTime, goalGradientById, history, lifeRoutineColorByBucket])
 
   // Fetch repeating rules to surface guide tasks that overlap 'now'
   const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
@@ -1884,8 +1830,6 @@ useEffect(() => {
               completed: task.completed,
               priority: !!task.priority,
               difficulty: (task.difficulty as any) ?? 'none',
-              goalSurface: DEFAULT_SURFACE_STYLE,
-              bucketSurface: DEFAULT_SURFACE_STYLE,
               entryColor: goalGradientById.get(goal.id) ?? null,
               notes: typeof task.notes === 'string' ? task.notes : '',
               subtasks: Array.isArray(task.subtasks)
@@ -1910,21 +1854,11 @@ useEffect(() => {
           completed: false,
           priority: false,
           difficulty: 'none',
-          goalSurface: DEFAULT_SURFACE_STYLE,
-          bucketSurface: DEFAULT_SURFACE_STYLE,
           notes: '',
           subtasks: [],
           repeatingRuleId: rule.id,
           repeatingOccurrenceDate: formatYmd(baseStart),
           repeatingOriginalTime: startedAt,
-        }
-      }
-      // Life routine color restoration
-      if ((candidate.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() && candidate.bucketName.trim().length > 0) {
-        const lrSurface = lifeRoutineSurfaceLookup.get(candidate.bucketName.trim().toLowerCase())
-        if (lrSurface) {
-          candidate.goalSurface = LIFE_ROUTINES_SURFACE
-          candidate.bucketSurface = lrSurface
         }
       }
       // Suppress if an identical real entry already exists at this timing (±1m), even without linkage
@@ -1947,7 +1881,7 @@ useEffect(() => {
       considerOccurrence(rule, yesterdayStart)
     })
     return list
-  }, [repeatingRules, repeatingExceptions, activeGoalSnapshots, lifeRoutineSurfaceLookup, history, currentTime])
+  }, [activeGoalSnapshots, currentTime, goalGradientById, history, repeatingExceptions, repeatingRules])
 
   // Combine planned and guide suggestions for the "now" section, de-duplicated by names
   const combinedNowSuggestions = useMemo<ScheduledSuggestion[]>(() => {
@@ -2004,19 +1938,6 @@ useEffect(() => {
       : sessionGoalName
         ? sessionGoalName
         : ''
-  const rawSessionGoalSurface =
-    isRunning || elapsed > 0
-      ? currentSessionMeta.goalSurface
-      : focusSource?.goalSurface ?? activeFocusCandidate?.goalSurface ?? DEFAULT_SURFACE_STYLE
-  const sessionGoalSurface = ensureSurfaceStyle(rawSessionGoalSurface ?? DEFAULT_SURFACE_STYLE, DEFAULT_SURFACE_STYLE)
-  const rawSessionBucketSurface =
-    isRunning || elapsed > 0
-      ? currentSessionMeta.bucketSurface
-      : focusSource?.bucketSurface ?? activeFocusCandidate?.bucketSurface ?? null
-  const sessionBucketSurface =
-    rawSessionBucketSurface !== null && rawSessionBucketSurface !== undefined
-      ? ensureSurfaceStyle(rawSessionBucketSurface, DEFAULT_SURFACE_STYLE)
-      : null
   const sessionGoalId =
     isRunning || elapsed > 0
       ? currentSessionMeta.goalId
@@ -2035,14 +1956,6 @@ useEffect(() => {
     const taskId = focusSource?.taskId ?? activeFocusCandidate?.taskId ?? null
     const goalName = focusSource?.goalName ?? activeFocusCandidate?.goalName ?? null
     const bucketName = focusSource?.bucketName ?? activeFocusCandidate?.bucketName ?? null
-    const goalSurfaceSource =
-      focusSource?.goalSurface ?? activeFocusCandidate?.goalSurface ?? DEFAULT_SURFACE_STYLE
-    const goalSurface = ensureSurfaceStyle(goalSurfaceSource ?? DEFAULT_SURFACE_STYLE, DEFAULT_SURFACE_STYLE)
-    const bucketSurfaceSource = focusSource?.bucketSurface ?? activeFocusCandidate?.bucketSurface ?? null
-    const bucketSurface =
-      bucketSurfaceSource !== null && bucketSurfaceSource !== undefined
-        ? ensureSurfaceStyle(bucketSurfaceSource, DEFAULT_SURFACE_STYLE)
-        : null
     const sessionKey = makeSessionKey(goalId, bucketId, taskId)
     const repeatingRuleId = focusSource?.repeatingRuleId ?? activeFocusCandidate?.repeatingRuleId ?? null
     const repeatingOccurrenceDate =
@@ -2055,8 +1968,6 @@ useEffect(() => {
       taskId,
       goalName,
       bucketName,
-      goalSurface,
-      bucketSurface,
       sessionKey,
       taskLabel: safeTaskName,
       repeatingRuleId,
@@ -2067,10 +1978,6 @@ useEffect(() => {
 
   const effectiveGoalName = focusSource?.goalName ?? activeFocusCandidate?.goalName ?? null
   const effectiveBucketName = focusSource?.bucketName ?? activeFocusCandidate?.bucketName ?? null
-  const effectiveGoalSurface =
-    focusSource?.goalSurface ?? activeFocusCandidate?.goalSurface ?? DEFAULT_SURFACE_STYLE
-  const effectiveBucketSurface =
-    focusSource?.bucketSurface ?? activeFocusCandidate?.bucketSurface ?? null
   const focusSurfaceClasses = useMemo(() => [], [])
   const focusInlineStyle: React.CSSProperties | undefined = undefined
   const notebookKey = useMemo(
@@ -3828,8 +3735,6 @@ useEffect(() => {
       sessionKey,
       goalName: effectiveGoalName,
       bucketName: effectiveBucketName,
-      goalSurface: effectiveGoalSurface,
-      bucketSurface: effectiveBucketSurface,
       repeatingRuleId: contextRuleId,
       repeatingOccurrenceDate: contextOccurrenceDate,
       repeatingOriginalTime: contextOriginalTime,
@@ -3839,8 +3744,6 @@ useEffect(() => {
     activeFocusCandidate,
     effectiveGoalName,
     effectiveBucketName,
-    effectiveGoalSurface,
-    effectiveBucketSurface,
     activeFocusCandidate?.repeatingRuleId,
     focusSource?.repeatingRuleId,
     activeFocusCandidate?.repeatingOccurrenceDate,
@@ -3880,8 +3783,6 @@ useEffect(() => {
       const candidate = activeFocusCandidate
       let nextGoalName = current.goalName
       let nextBucketName = current.bucketName
-      let nextGoalSurface: SurfaceStyle | null = DEFAULT_SURFACE_STYLE
-      let nextBucketSurface: SurfaceStyle | null = null
       let nextTaskId = current.taskId
       let nextTaskDifficulty = current.taskDifficulty
       let nextPriority = current.priority
@@ -3922,8 +3823,6 @@ useEffect(() => {
         taskId: nextTaskId,
         taskDifficulty: nextTaskDifficulty,
         priority: nextPriority,
-        goalSurface: nextGoalSurface,
-        bucketSurface: nextBucketSurface,
       }
     })
   }, [activeFocusCandidate, goalsSnapshot, isRunning, elapsed])
@@ -3959,8 +3858,6 @@ useEffect(() => {
       goalId: sessionGoalId,
       bucketId: sessionBucketId,
       taskId: sessionTaskId,
-      goalSurface: sessionGoalSurface,
-      bucketSurface: sessionBucketSurface,
       updatedAt: Date.now(),
     }
 
@@ -3986,8 +3883,6 @@ useEffect(() => {
     sessionGoalId,
     sessionBucketId,
     sessionTaskId,
-    sessionGoalSurface,
-    sessionBucketSurface,
   ])
 
   useEffect(() => {
@@ -4403,8 +4298,6 @@ useEffect(() => {
         sessionKey: currentSessionKeyRef.current,
         goalName: sessionMeta.goalName ?? entryGoalName,
         bucketName: sessionMeta.bucketName ?? entryBucketName,
-        goalSurface: sessionMeta.goalSurface,
-        bucketSurface: sessionMeta.bucketSurface,
         repeatingRuleId: sessionMeta.repeatingRuleId,
         repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
         repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
@@ -4499,8 +4392,6 @@ useEffect(() => {
         taskId: source.taskId ?? null,
         taskDifficulty: source.taskDifficulty ?? null,
         priority: source.priority ?? null,
-        goalSurface: source.goalSurface ? ensureSurfaceStyle(source.goalSurface, DEFAULT_SURFACE_STYLE) : null,
-        bucketSurface: source.bucketSurface ? ensureSurfaceStyle(source.bucketSurface, DEFAULT_SURFACE_STYLE) : null,
         notes: sanitizedNotes,
         subtasks: sanitizedSubtasks,
         repeatingRuleId: source.repeatingRuleId ?? null,
@@ -4567,8 +4458,6 @@ useEffect(() => {
         sessionKey: currentSessionKeyRef.current,
         goalName: sessionMeta.goalName,
         bucketName: sessionMeta.bucketName,
-        goalSurface: sessionMeta.goalSurface,
-        bucketSurface: sessionMeta.bucketSurface,
         repeatingRuleId: sessionMeta.repeatingRuleId,
         repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
         repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
@@ -4598,8 +4487,6 @@ useEffect(() => {
         sessionKey?: string | null
         goalName?: string | null
         bucketName?: string | null
-        goalSurface?: SurfaceStyle | null
-        bucketSurface?: SurfaceStyle | null
         repeatingRuleId?: string | null
         repeatingOccurrenceDate?: string | null
         repeatingOriginalTime?: number | null
@@ -4641,18 +4528,6 @@ useEffect(() => {
         context?.goalName !== undefined ? context.goalName : sessionMeta.goalName
       const bucketName =
         context?.bucketName !== undefined ? context.bucketName : sessionMeta.bucketName
-      const goalSurfaceCandidate =
-        context?.goalSurface !== undefined ? context.goalSurface : sessionMeta.goalSurface
-      const bucketSurfaceCandidate =
-        context?.bucketSurface !== undefined ? context.bucketSurface : sessionMeta.bucketSurface
-      const normalizedGoalSurface = ensureSurfaceStyle(
-        goalSurfaceCandidate ?? DEFAULT_SURFACE_STYLE,
-        DEFAULT_SURFACE_STYLE,
-      )
-      const normalizedBucketSurface =
-        bucketSurfaceCandidate !== undefined && bucketSurfaceCandidate !== null
-          ? ensureSurfaceStyle(bucketSurfaceCandidate, DEFAULT_SURFACE_STYLE)
-          : null
       const derivedOccurrenceDate =
         contextRepeatingOccurrenceDate ??
         (typeof contextRepeatingOriginalTime === 'number' && Number.isFinite(contextRepeatingOriginalTime)
@@ -4667,7 +4542,7 @@ useEffect(() => {
         entryColor = goalGradientById.get(contextGoalId) ?? null
       }
       if (!entryColor) {
-        entryColor = gradientFromSurface(normalizedGoalSurface)
+        entryColor = NEUTRAL_ENTRY_GRADIENT
       }
 
       const entry: HistoryEntry = {
@@ -4681,8 +4556,8 @@ useEffect(() => {
         goalId: contextGoalId ?? null,
         bucketId: contextBucketId ?? null,
         taskId: contextTaskId ?? null,
-        goalSurface: normalizedGoalSurface,
-        bucketSurface: normalizedBucketSurface,
+        goalSurface: NEUTRAL_SURFACE,
+        bucketSurface: NEUTRAL_SURFACE,
         entryColor,
         notes: '',
         subtasks: [],
@@ -4758,8 +4633,6 @@ useEffect(() => {
             taskId: fallbackContext.taskId,
             goalName: fallbackContext.goalName,
             bucketName: fallbackContext.bucketName,
-            goalSurface: fallbackContext.goalSurface,
-            bucketSurface: fallbackContext.bucketSurface,
             sessionKey: sessionMeta.sessionKey,
             taskLabel: sessionMeta.taskLabel,
             repeatingRuleId: fallbackContext.repeatingRuleId,
@@ -4775,8 +4648,6 @@ useEffect(() => {
         sessionKey: currentSessionKeyRef.current,
         goalName: sourceMeta.goalName,
         bucketName: sourceMeta.bucketName,
-        goalSurface: sourceMeta.goalSurface,
-        bucketSurface: sourceMeta.bucketSurface,
         repeatingRuleId: sourceMeta.repeatingRuleId ?? null,
         repeatingOccurrenceDate: sourceMeta.repeatingOccurrenceDate ?? null,
         repeatingOriginalTime: sourceMeta.repeatingOriginalTime ?? null,
@@ -4796,11 +4667,6 @@ useEffect(() => {
     const labelParts = [durationLabel, reasonLabel]
     const markerTaskName = `Snapback • ${labelParts.join(' – ')}`.slice(0, MAX_TASK_STORAGE_LENGTH)
     const context = focusContextRef.current
-    const markerGoalSurface = ensureSurfaceStyle(context.goalSurface ?? DEFAULT_SURFACE_STYLE, DEFAULT_SURFACE_STYLE)
-    const markerBucketSurface =
-      context.bucketSurface !== undefined && context.bucketSurface !== null
-        ? ensureSurfaceStyle(context.bucketSurface, DEFAULT_SURFACE_STYLE)
-        : null
     const markerEntry: HistoryEntry = {
       id: makeHistoryId(),
       taskName: markerTaskName,
@@ -4812,8 +4678,8 @@ useEffect(() => {
       goalId: context.goalId,
       bucketId: context.bucketId,
       taskId: context.taskId,
-      goalSurface: markerGoalSurface,
-      bucketSurface: markerBucketSurface,
+      goalSurface: NEUTRAL_SURFACE,
+      bucketSurface: NEUTRAL_SURFACE,
       notes: '',
       subtasks: [],
     }
@@ -4906,11 +4772,6 @@ useEffect(() => {
       const taskName = detail.taskName?.trim().slice(0, MAX_TASK_STORAGE_LENGTH) ?? ''
       const goalName = detail.goalName?.trim().slice(0, MAX_TASK_STORAGE_LENGTH) ?? ''
       const bucketName = detail.bucketName?.trim().slice(0, MAX_TASK_STORAGE_LENGTH) ?? ''
-      const safeGoalSurface = ensureSurfaceStyle(detail.goalSurface ?? DEFAULT_SURFACE_STYLE, DEFAULT_SURFACE_STYLE)
-      const safeBucketSurface =
-        detail.bucketSurface !== undefined && detail.bucketSurface !== null
-          ? ensureSurfaceStyle(detail.bucketSurface, DEFAULT_SURFACE_STYLE)
-          : null
       const detailNotes = typeof detail.notes === 'string' ? detail.notes : ''
       const detailSubtasks = sanitizeNotebookSubtasks(detail.subtasks)
       const nextSource: FocusSource = {
@@ -4921,8 +4782,6 @@ useEffect(() => {
         taskId: detail.taskId ?? null,
         taskDifficulty: detail.taskDifficulty ?? null,
         priority: detail.priority ?? null,
-        goalSurface: safeGoalSurface,
-        bucketSurface: safeBucketSurface,
         notes: detailNotes,
         subtasks: detailSubtasks,
         repeatingRuleId: detail.repeatingRuleId ?? null,
@@ -4955,8 +4814,6 @@ useEffect(() => {
             sessionKey: previousSessionKey,
             goalName: previousSessionMeta.goalName ?? previousContext.goalName,
             bucketName: previousSessionMeta.bucketName ?? previousContext.bucketName,
-            goalSurface: previousSessionMeta.goalSurface ?? previousContext.goalSurface,
-            bucketSurface: previousSessionMeta.bucketSurface ?? previousContext.bucketSurface,
             repeatingRuleId: previousSessionMeta.repeatingRuleId ?? previousContext.repeatingRuleId,
             repeatingOccurrenceDate:
               previousSessionMeta.repeatingOccurrenceDate ?? previousContext.repeatingOccurrenceDate,
@@ -4977,8 +4834,6 @@ useEffect(() => {
           taskId: detail.taskId ?? null,
           goalName: goalName.length > 0 ? goalName : null,
           bucketName: bucketName.length > 0 ? bucketName : null,
-          goalSurface: safeGoalSurface,
-          bucketSurface: safeBucketSurface,
           sessionKey: autoSessionKey,
           taskLabel: autoTaskLabel,
           repeatingRuleId: detail.repeatingRuleId ?? null,
@@ -5203,8 +5058,6 @@ useEffect(() => {
                                     taskId: task.taskId,
                                     taskDifficulty: task.difficulty,
                                     priority: true,
-                                    goalSurface: DEFAULT_SURFACE_STYLE,
-                                    bucketSurface: DEFAULT_SURFACE_STYLE,
                                     notes: task.notes,
                                     subtasks: task.subtasks,
                                     repeatingRuleId: task.repeatingRuleId,
@@ -5306,8 +5159,6 @@ useEffect(() => {
                                     taskId: task.taskId,
                                     taskDifficulty: task.difficulty,
                                     priority: true,
-                                    goalSurface: DEFAULT_SURFACE_STYLE,
-                                    bucketSurface: DEFAULT_SURFACE_STYLE,
                                     notes: task.notes,
                                     subtasks: task.subtasks,
                                     repeatingRuleId: task.repeatingRuleId,
@@ -5393,8 +5244,6 @@ useEffect(() => {
                                     taskId: task.id,
                                     taskDifficulty: 'none',
                                     priority: false,
-                                    goalSurface: DEFAULT_SURFACE_STYLE,
-                                    bucketSurface: DEFAULT_SURFACE_STYLE,
                                     notes: '',
                                     subtasks: [],
                                     repeatingRuleId: null,
@@ -5480,8 +5329,6 @@ useEffect(() => {
                                       taskId: task.taskId,
                                       taskDifficulty: task.difficulty,
                                       priority: task.priority,
-                                      goalSurface: task.goalSurface,
-                                      bucketSurface: task.bucketSurface,
                                       notes: task.notes,
                                       subtasks: task.subtasks,
                                       repeatingRuleId: null,
@@ -5610,8 +5457,6 @@ useEffect(() => {
                                                             taskId: task.id,
                                                             taskDifficulty: task.difficulty ?? 'none',
                                                             priority: task.priority ?? false,
-                                                            goalSurface: DEFAULT_SURFACE_STYLE,
-                                                            bucketSurface: DEFAULT_SURFACE_STYLE,
                                                             notes: task.notes,
                                                             subtasks: task.subtasks,
                                                             repeatingRuleId: null,
@@ -5865,8 +5710,6 @@ useEffect(() => {
                               taskId: task.taskId,
                               taskDifficulty: task.difficulty,
                               priority: true,
-                            goalSurface: task.goalSurface,
-                            bucketSurface: task.bucketSurface,
                             notes: task.notes,
                             subtasks: task.subtasks,
                             repeatingRuleId: task.repeatingRuleId,
@@ -5968,8 +5811,6 @@ useEffect(() => {
                               taskId: task.taskId,
                               taskDifficulty: task.difficulty,
                               priority: task.priority,
-                              goalSurface: DEFAULT_SURFACE_STYLE,
-                              bucketSurface: DEFAULT_SURFACE_STYLE,
                               notes: task.notes,
                               subtasks: task.subtasks,
                               repeatingRuleId: task.repeatingRuleId,
@@ -6055,8 +5896,6 @@ useEffect(() => {
                               taskId: task.id,
                               taskDifficulty: 'none',
                               priority: false,
-                              goalSurface: DEFAULT_SURFACE_STYLE,
-                              bucketSurface: DEFAULT_SURFACE_STYLE,
                               notes: '',
                               subtasks: [],
                               repeatingRuleId: null,
@@ -6136,17 +5975,15 @@ useEffect(() => {
                                       goalId: task.goalId,
                                       bucketId: task.bucketId,
                                       goalName: task.goalName,
-                                      bucketName: task.bucketName,
-                                      taskId: task.taskId,
-                                      taskDifficulty: task.difficulty,
-                                      priority: task.priority,
-                                      goalSurface: task.goalSurface,
-                                      bucketSurface: task.bucketSurface,
-                                      notes: task.notes,
-                                      subtasks: task.subtasks,
-                                      repeatingRuleId: null,
-                                      repeatingOccurrenceDate: null,
-                                      repeatingOriginalTime: null,
+                                    bucketName: task.bucketName,
+                                    taskId: task.taskId,
+                                    taskDifficulty: task.difficulty,
+                                    priority: task.priority,
+                                    notes: task.notes,
+                                    subtasks: task.subtasks,
+                                    repeatingRuleId: null,
+                                    repeatingOccurrenceDate: null,
+                                    repeatingOriginalTime: null,
                                     })
                                   }
                                 >
@@ -6270,8 +6107,6 @@ useEffect(() => {
                                                       taskId: task.id,
                                                       taskDifficulty: task.difficulty ?? 'none',
                                                       priority: task.priority ?? false,
-                                                      goalSurface: DEFAULT_SURFACE_STYLE,
-                                                      bucketSurface: DEFAULT_SURFACE_STYLE,
                                                       notes: task.notes,
                                                       subtasks: task.subtasks,
                                                       repeatingRuleId: null,
