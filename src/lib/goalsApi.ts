@@ -2,18 +2,22 @@ import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
-const FALLBACK_GOAL_COLOR = 'from-fuchsia-500 to-purple-500'
+const GOAL_COLOUR_CHOICES = [
+  'from-fuchsia-500 to-purple-500',
+  'from-emerald-500 to-cyan-500',
+  'from-lime-400 to-emerald-500',
+  'from-sky-500 to-indigo-500',
+  'from-amber-400 to-orange-500',
+] as const
+const FALLBACK_GOAL_COLOR = GOAL_COLOUR_CHOICES[0]
 
-const sanitizeGoalColour = (value: string | null | undefined): string => {
-  if (typeof value !== 'string') return FALLBACK_GOAL_COLOR
+const sanitizeGoalColour = (value: string | null | undefined): string | null => {
+  if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  if (!trimmed) return FALLBACK_GOAL_COLOR
+  if (!trimmed) return null
   const normalized = trimmed.toLowerCase()
-  if (normalized.startsWith('custom:') || normalized.startsWith('linear-gradient(')) {
-    // Persist a safe preset token; custom gradients are kept client-side only
-    return FALLBACK_GOAL_COLOR
-  }
-  return trimmed
+  const match = GOAL_COLOUR_CHOICES.find((choice) => choice.toLowerCase() === normalized)
+  return match ?? null
 }
 
 export type DbGoal = {
@@ -520,15 +524,16 @@ export async function createGoal(name: string, color: string) {
   if (!session?.user?.id) {
     return null
   }
-    const sort_index = await nextSortIndex('goals')
-    const payload = {
-      user_id: session.user.id,
-      name,
-      goal_colour: sanitizeGoalColour(color),
-      sort_index,
-      starred: false,
-      goal_archive: false,
-    }
+  const sort_index = await nextSortIndex('goals')
+  const safeColour = sanitizeGoalColour(color) ?? FALLBACK_GOAL_COLOR
+  const payload = {
+    user_id: session.user.id,
+    name,
+    goal_colour: safeColour,
+    sort_index,
+    starred: false,
+    goal_archive: false,
+  }
   let created: any | null = null
   {
     const { data, error } = await supabase
@@ -552,13 +557,17 @@ export async function setGoalColor(goalId: string, color: string) {
   const userId = await getActiveUserId()
   if (!userId) return
   const primary = sanitizeGoalColour(color)
+  if (!primary) {
+    // If the chosen value isn't in the allowed list, skip remote update to avoid constraint errors.
+    return
+  }
   let { error } = await supabase
     .from('goals')
     .update({ goal_colour: primary })
     .eq('id', goalId)
     .eq('user_id', userId)
   if (error && String((error as any)?.code || '') === '23514') {
-    // Constraint failure (e.g., enum/check); fall back to a safe default gradient
+    // Constraint failure; fall back to the first allowed option
     const fallback = FALLBACK_GOAL_COLOR
     const retry = await supabase
       .from('goals')
