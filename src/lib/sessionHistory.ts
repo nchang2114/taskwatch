@@ -38,7 +38,8 @@ const parseEnvToggle = (value: unknown): boolean | null => {
   return null
 }
 const ENV_ENABLE_HISTORY_NOTES = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_HISTORY_NOTES)
-const ENV_ENABLE_HISTORY_SUBTASKS = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_HISTORY_SUBTASKS)
+// Subtasks are disabled for session_history persistence to avoid DB column issues.
+const ENV_ENABLE_HISTORY_SUBTASKS = false
 const ENV_ENABLE_REPEAT_ORIGINAL = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_REPEAT_ORIGINAL)
 const ENV_ENABLE_HISTORY_FUTURE_SESSION = parseEnvToggle(
   (import.meta as any)?.env?.VITE_ENABLE_HISTORY_FUTURE_SESSION,
@@ -102,20 +103,8 @@ const disableHistoryNotes = () => {
   flags.historyNotes = false
   writeFeatureFlags(flags)
 }
-const isHistorySubtasksEnabled = (): boolean => {
-  const override = envOverride(ENV_ENABLE_HISTORY_SUBTASKS)
-  if (override !== null) {
-    return override
-  }
-  const flags = readFeatureFlags()
-  return flags.historySubtasks !== false
-}
-const disableHistorySubtasks = () => {
-  const flags = readFeatureFlags()
-  if (flags.historySubtasks === false) return
-  flags.historySubtasks = false
-  writeFeatureFlags(flags)
-}
+const isHistorySubtasksEnabled = (): boolean => false
+const disableHistorySubtasks = () => {}
 const HISTORY_BASE_SELECT_COLUMNS =
   'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, entry_colour, created_at, updated_at, future_session'
 
@@ -124,9 +113,7 @@ const buildHistorySelectColumns = (): string => {
   if (isHistoryNotesEnabled()) {
     columns += ', notes'
   }
-  if (isHistorySubtasksEnabled()) {
-    columns += ', subtasks'
-  }
+  // Subtasks column intentionally excluded
   if (isRepeatOriginalEnabled()) {
     columns += ', repeating_session_id, original_time'
   }
@@ -217,7 +204,7 @@ const upsertHistoryPayloads = async (
     const missingRepeatColumns =
       errorMentionsColumn(resp.error, 'repeating_session_id') || errorMentionsColumn(resp.error, 'original_time')
     const missingNotesColumn = errorMentionsColumn(resp.error, 'notes')
-    const missingSubtasksColumn = errorMentionsColumn(resp.error, 'subtasks')
+    const missingSubtasksColumn = false
     const missingFutureColumn = errorMentionsColumn(resp.error, 'future_session')
     const removalNeeded = missingRepeatColumns || missingNotesColumn || missingSubtasksColumn || missingFutureColumn
     if (!removalNeeded) {
@@ -778,41 +765,6 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
     pendingAction: null,
   }))
 }
-const sanitizeHistorySubtasks = (value: unknown): HistorySubtask[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value
-    .map((item, index) => {
-      if (typeof item !== 'object' || item === null) {
-        return null
-      }
-      const candidate = item as Record<string, unknown>
-      const rawId = typeof candidate.id === 'string' ? candidate.id : null
-      if (!rawId) {
-        return null
-      }
-      const text = typeof candidate.text === 'string' ? candidate.text : ''
-      const completed = Boolean(candidate.completed)
-      const sortSource = candidate.sortIndex
-      const sortIndex =
-        typeof sortSource === 'number' && Number.isFinite(sortSource)
-          ? sortSource
-          : typeof sortSource === 'string'
-            ? Number(sortSource)
-            : index
-      const normalizedSortIndex = Number.isFinite(sortIndex) ? sortIndex : index
-      return {
-        id: rawId,
-        text,
-        completed,
-        sortIndex: normalizedSortIndex,
-      }
-    })
-    .filter((subtask): subtask is HistorySubtask => Boolean(subtask))
-    .sort((a, b) => a.sortIndex - b.sortIndex)
-}
-
 export const areHistorySubtasksEqual = (a: HistorySubtask[], b: HistorySubtask[]): boolean => {
   if (a === b) {
     return true
@@ -903,7 +855,7 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
       const bucketSurfaceRaw = sanitizeSurfaceStyle(candidate.bucketSurface)
       const entryColorRaw = typeof (candidate as any).entryColor === 'string' ? ((candidate as any).entryColor as string) : null
       const notesRaw = typeof candidate.notes === 'string' ? candidate.notes : ''
-      const subtasksRaw = sanitizeHistorySubtasks(candidate.subtasks)
+      const subtasksRaw: HistorySubtask[] = []
       const futureSessionRaw = Boolean((candidate as any).futureSession)
       const repeatingSessionIdRaw: string | null =
         typeof (candidate as any).repeatingSessionId === 'string' ? ((candidate as any).repeatingSessionId as string) : null
@@ -1384,7 +1336,7 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
       const missingRepeat =
         errorMentionsColumn(fetchError, 'repeating_session_id') || errorMentionsColumn(fetchError, 'original_time')
       const missingNotes = errorMentionsColumn(fetchError, 'notes')
-      const missingSubtasks = errorMentionsColumn(fetchError, 'subtasks')
+      const missingSubtasks = false
       let changed = false
       if (missingRepeat && isRepeatOriginalEnabled()) {
         disableRepeatOriginal()
@@ -1392,10 +1344,6 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
       }
       if (missingNotes && isHistoryNotesEnabled()) {
         disableHistoryNotes()
-        changed = true
-      }
-      if (missingSubtasks && isHistorySubtasksEnabled()) {
-        disableHistorySubtasks()
         changed = true
       }
       if (!changed) {
