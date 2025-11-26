@@ -37,6 +37,26 @@ export const SURFACE_STYLES = [
   'papaya',
 ] as const
 
+// Server-enforced allowlist for buckets (mirrors DB check constraint)
+const SERVER_BUCKET_STYLE_ALLOWLIST = new Set<string>([
+  'glass',
+  'coastal',
+  'cherry',
+  'linen',
+  'frost',
+  'grove',
+  'lagoon',
+  'ember',
+  'deep-indigo',
+  'warm-amber',
+  'fresh-teal',
+  'sunset-orange',
+  'cool-blue',
+  'soft-magenta',
+  'muted-lavender',
+  'neutral-grey-blue',
+])
+
 export type SurfaceStyle = (typeof SURFACE_STYLES)[number]
 
 export const DEFAULT_SURFACE_STYLE: SurfaceStyle = 'glass'
@@ -53,3 +73,14 @@ export const ensureSurfaceStyle = (
   value: unknown,
   fallback: SurfaceStyle = DEFAULT_SURFACE_STYLE,
 ): SurfaceStyle => sanitizeSurfaceStyle(value) ?? fallback
+
+export const ensureServerBucketStyle = (
+  value: unknown,
+  fallback: SurfaceStyle = DEFAULT_SURFACE_STYLE,
+): SurfaceStyle => {
+  const normalized = sanitizeSurfaceStyle(value)
+  if (normalized && SERVER_BUCKET_STYLE_ALLOWLIST.has(normalized)) {
+    return normalized as SurfaceStyle
+  }
+  return fallback
+}

@@ -1,5 +1,5 @@
 import { ensureSingleUserSession, supabase } from './supabaseClient'
-import { ensureSurfaceStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
+import { ensureServerBucketStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
 import type { QuickItem, QuickSubtask } from './quickList'
 
 export const QUICK_LIST_GOAL_NAME = 'Quick List (Hidden)'
@@ -127,7 +127,7 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
           ? existingBucket.id
           : generateUuid()
       if (!existingBucket?.id) {
-        const surface = ensureSurfaceStyle(DEFAULT_SURFACE_STYLE)
+        const surface = ensureServerBucketStyle(DEFAULT_SURFACE_STYLE)
         const bucketPayload = {
           id: bucketId,
           user_id: userId,

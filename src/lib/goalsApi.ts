@@ -1,6 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
-import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle } from './surfaceStyles'
+import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, ensureServerBucketStyle } from './surfaceStyles'
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
 const GOAL_COLOUR_PRESETS: Record<string, string> = {
@@ -32,7 +32,7 @@ const normalizeGoalColour = (value: string | null | undefined): string | null =>
 
 const sanitizeBucketSurfaceStyle = (value: string | null | undefined): string | null => {
   if (value === null || value === undefined) return null
-  return ensureSurfaceStyle(value, DEFAULT_SURFACE_STYLE)
+  return ensureServerBucketStyle(value, DEFAULT_SURFACE_STYLE)
 }
 
 export type DbGoal = {

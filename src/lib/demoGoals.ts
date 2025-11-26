@@ -1,5 +1,5 @@
 import type { GoalSeed } from './goalsApi'
-import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle } from './surfaceStyles'
+import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 
 type DemoTask = {
   id: string
@@ -183,14 +183,14 @@ export const DEMO_GOALS: DemoGoal[] = [
 export const DEMO_GOAL_SEEDS: GoalSeed[] = DEMO_GOALS.map((goal) => ({
   name: goal.name,
   goalColour: goal.goalColour,
-  surfaceStyle: ensureSurfaceStyle(goal.surfaceStyle, DEFAULT_SURFACE_STYLE),
+  surfaceStyle: ensureServerBucketStyle(goal.surfaceStyle, DEFAULT_SURFACE_STYLE),
   starred: Boolean(goal.starred),
   archived: Boolean(goal.archived),
   buckets: goal.buckets.map((bucket) => ({
     name: bucket.name,
     favorite: bucket.favorite,
     archived: bucket.archived,
-    surfaceStyle: ensureSurfaceStyle(bucket.surfaceStyle, DEFAULT_SURFACE_STYLE),
+    surfaceStyle: ensureServerBucketStyle(bucket.surfaceStyle, DEFAULT_SURFACE_STYLE),
     tasks: bucket.tasks.map((task) => ({
       text: task.text,
       completed: task.completed,
