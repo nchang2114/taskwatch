@@ -2809,6 +2809,14 @@ export default function ReflectionPage() {
       const absRaw = Math.abs(effectiveRaw)
       const direction = effectiveRaw >= 0 ? 1 : -1
 
+      if (view !== '3d') {
+        // Day/week: always page by at least one chunk based on swipe direction (no half-threshold)
+        const steps = Math.max(1, Math.round(absRaw + 0.1))
+        const snap = direction * steps * snapUnitSpan
+        const targetOffset = state.baseOffset - snap
+        return { snap, targetOffset }
+      }
+
       const quickTouchFling = Boolean(state.isTouch) && state.mode === 'hdrag' && (elapsedMs < 450 || absRaw > 0.2)
       let snapUnits: number
       if (quickTouchFling) {
@@ -2880,6 +2888,7 @@ const [showInspectorExtras, setShowInspectorExtras] = useState(false)
 const [showEditorExtras, setShowEditorExtras] = useState(false)
 const [showInlineExtras, setShowInlineExtras] = useState(false)
 const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string | null>(null)
+  const calendarTouchAction = useMemo(() => (calendarView === '3d' ? 'pan-x' : 'pan-y'), [calendarView])
   // Ref to the session name input inside the calendar editor modal (for autofocus on new entries)
   const calendarEditorNameInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -7900,11 +7909,15 @@ useEffect(() => {
       const allDayMaxLane = allDayBars.reduce((m, b) => Math.max(m, b.lane), -1)
       const allDayRowCount = Math.max(0, allDayMaxLane + 1)
       const allDayTrackRows = Math.max(1, allDayRowCount)
-      const body = (
-        <div className="calendar-vertical__body">
-          {/* All‑day row inside the body grid so it behaves as an extension of the days area */}
-          <div className="calendar-allday-axis">All-day</div>
-          <div className="calendar-allday-wrapper" onPointerDown={handleCalendarAreaPointerDown}>
+          const body = (
+            <div className="calendar-vertical__body">
+              {/* All‑day row inside the body grid so it behaves as an extension of the days area */}
+              <div className="calendar-allday-axis">All-day</div>
+              <div
+                className="calendar-allday-wrapper"
+                onPointerDown={handleCalendarAreaPointerDown}
+                style={{ touchAction: calendarTouchAction }}
+              >
             <div
               className="calendar-alldays"
               ref={calendarAllDayRef}
@@ -8053,7 +8066,12 @@ useEffect(() => {
               </div>
             ))}
           </div>
-          <div className="calendar-days-area" ref={calendarDaysAreaRef} onPointerDown={handleCalendarAreaPointerDown}>
+          <div
+            className="calendar-days-area"
+            ref={calendarDaysAreaRef}
+            onPointerDown={handleCalendarAreaPointerDown}
+            style={{ touchAction: calendarTouchAction }}
+          >
             <div className="calendar-gridlines" aria-hidden>
               {hours.map((h) => (
                 <div key={`g-${h}`} className="calendar-gridline" style={{ top: `${(h / 24) * 100}%` }} />
@@ -8527,7 +8545,11 @@ useEffect(() => {
         <div className="calendar-vertical" aria-label="Time grid" style={styleVars}>
           <div className="calendar-vertical__header">
             <div className="calendar-axis-header" />
-            <div className="calendar-header-wrapper" onPointerDown={handleCalendarAreaPointerDown}>
+          <div
+            className="calendar-header-wrapper"
+            onPointerDown={handleCalendarAreaPointerDown}
+            style={{ touchAction: calendarTouchAction }}
+          >
               <div
                 className="calendar-header-track"
                 ref={calendarHeadersRef}
