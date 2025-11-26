@@ -1,8 +1,10 @@
 import { ensureSingleUserSession, supabase } from './supabaseClient'
+import { ensureSurfaceStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
 import type { QuickItem, QuickSubtask } from './quickList'
 
 export const QUICK_LIST_GOAL_NAME = 'Quick List (Hidden)'
 const QUICK_LIST_BUCKET_NAME = 'Quick List'
+const QUICK_LIST_GOAL_COLOUR = 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)'
 
 let ensurePromise: Promise<{ goalId: string; bucketId: string } | null> | null = null
 
@@ -51,6 +53,17 @@ const mapTasksToQuickItems = (tasks: any[], subtasksByTaskId: Map<string, QuickS
   })
 }
 
+const normalizeQuickListGoalColour = (value: string | null | undefined): string => {
+  if (typeof value !== 'string') {
+    return QUICK_LIST_GOAL_COLOUR
+  }
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith('linear-gradient(')) {
+    return trimmed
+  }
+  return QUICK_LIST_GOAL_COLOUR
+}
+
 export async function ensureQuickListRemoteStructures(): Promise<{ goalId: string; bucketId: string } | null> {
   if (!supabase) return null
   if (ensurePromise) {
@@ -65,7 +78,7 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
     try {
       const { data: existingGoal, error: goalLookupError } = await supabase
         .from('goals')
-        .select('id')
+        .select('id, goal_colour')
         .eq('user_id', userId)
         .eq('name', QUICK_LIST_GOAL_NAME)
         .limit(1)
@@ -78,11 +91,12 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
           ? existingGoal.id
           : generateUuid()
       if (!existingGoal?.id) {
+        const goal_colour = normalizeQuickListGoalColour((existingGoal as any)?.goal_colour)
         const goalPayload = {
           id: goalId,
           user_id: userId,
           name: QUICK_LIST_GOAL_NAME,
-          color: 'from-blue-500 to-indigo-600',
+          goal_colour,
           sort_index: 10_000_000,
           starred: false,
           goal_archive: true,
@@ -90,6 +104,11 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
         const { error: goalInsertError } = await supabase.from('goals').insert(goalPayload)
         if (goalInsertError) {
           return null
+        }
+      } else {
+        const normalized = normalizeQuickListGoalColour((existingGoal as any)?.goal_colour)
+        if (normalized !== (existingGoal as any)?.goal_colour) {
+          await supabase.from('goals').update({ goal_colour: normalized }).eq('id', goalId).eq('user_id', userId)
         }
       }
       const { data: existingBucket, error: bucketLookupError } = await supabase
@@ -108,6 +127,7 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
           ? existingBucket.id
           : generateUuid()
       if (!existingBucket?.id) {
+        const surface = ensureSurfaceStyle(DEFAULT_SURFACE_STYLE)
         const bucketPayload = {
           id: bucketId,
           user_id: userId,
@@ -116,7 +136,7 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
           favorite: false,
           sort_index: 10_000_000,
           bucket_archive: true,
-          buckets_card_style: 'glass',
+          buckets_card_style: surface,
         }
         const { error: bucketInsertError } = await supabase.from('buckets').insert(bucketPayload)
         if (bucketInsertError) {

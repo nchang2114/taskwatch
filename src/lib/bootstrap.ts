@@ -14,6 +14,7 @@ import {
 import { readStoredLifeRoutines, pushLifeRoutinesToSupabase } from './lifeRoutines'
 import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
+import { ensureSurfaceStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -207,6 +208,7 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
         }
         return generated
       })()
+      const surfaceStyle = ensureSurfaceStyle(bucket.surfaceStyle, DEFAULT_SURFACE_STYLE)
       bucketRows.push({
         id: bucketId,
         user_id: userId,
@@ -214,7 +216,7 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
         name: sanitizeBucketName(bucket.name),
         favorite: Boolean(bucket.favorite),
         sort_index: (bucketIndex + 1) * GOAL_SORT_STEP,
-        buckets_card_style: bucket.surfaceStyle ?? null,
+        buckets_card_style: surfaceStyle,
         bucket_archive: Boolean(bucket.archived),
       })
       ;(bucket.tasks ?? []).forEach((task, taskIndex) => {
