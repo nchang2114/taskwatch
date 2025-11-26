@@ -283,7 +283,8 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
   }
   const blurb = typeof row.blurb === 'string' ? row.blurb : ''
   const surfaceColor = typeof (row as any).surface_colour === 'string' ? ((row as any).surface_colour as string) : null
-  const surfaceStyle = ensureSurfaceStyle(row.surface_style, DEFAULT_SURFACE_STYLE)
+  // Surface style is legacy; keep visuals consistent by defaulting to the app default.
+  const surfaceStyle = DEFAULT_SURFACE_STYLE
   const sortIndex = typeof row.sort_index === 'number' && Number.isFinite(row.sort_index) ? row.sort_index : 0
   return {
     id,

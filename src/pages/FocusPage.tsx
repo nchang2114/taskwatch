@@ -110,6 +110,7 @@ type FocusCandidate = {
   difficulty: 'none' | 'green' | 'yellow' | 'red'
   goalSurface: SurfaceStyle
   bucketSurface: SurfaceStyle
+  entryColor?: string | null
   notes: string
   subtasks: NotebookSubtask[]
   repeatingRuleId: string | null
@@ -1350,6 +1351,7 @@ useEffect(() => {
   const focusCandidates = useMemo<FocusCandidate[]>(() => {
     const candidates: FocusCandidate[] = []
     activeGoalSnapshots.forEach((goal) => {
+      const goalGradient = typeof goal.color === 'string' && goal.color.trim().length > 0 ? goal.color.trim() : null
       goal.buckets
         .filter((bucket) => !bucket.archived)
         .forEach((bucket) => {
@@ -1366,23 +1368,24 @@ useEffect(() => {
                         : NOTEBOOK_SUBTASK_SORT_STEP,
                   }))
                 : []
-            candidates.push({
-              goalId: goal.id,
-              goalName: goal.name,
-              bucketId: bucket.id,
-              bucketName: bucket.name,
-              taskId: task.id,
-              taskName: task.text,
-              completed: task.completed,
-              priority: task.priority,
-              difficulty: task.difficulty,
-              goalSurface: goal.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
-              bucketSurface: bucket.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
-              notes: typeof task.notes === 'string' ? task.notes : '',
-              subtasks: candidateSubtasks,
-              repeatingRuleId: null,
-              repeatingOccurrenceDate: null,
-              repeatingOriginalTime: null,
+              candidates.push({
+                goalId: goal.id,
+                goalName: goal.name,
+                bucketId: bucket.id,
+                bucketName: bucket.name,
+                taskId: task.id,
+                taskName: task.text,
+                completed: task.completed,
+                priority: task.priority,
+                difficulty: task.difficulty,
+                goalSurface: goal.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
+                bucketSurface: bucket.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
+                entryColor: goalGradient,
+                notes: typeof task.notes === 'string' ? task.notes : '',
+                subtasks: candidateSubtasks,
+                repeatingRuleId: null,
+                repeatingOccurrenceDate: null,
+                repeatingOriginalTime: null,
             })
           })
         })
@@ -1395,6 +1398,7 @@ useEffect(() => {
     }
     const goalId = quickListRemoteIds?.goalId ?? QUICK_LIST_GOAL_ID
     const bucketId = quickListRemoteIds?.bucketId ?? QUICK_LIST_BUCKET_ID
+    const quickGradient = goalGradientById.get(goalId) ?? null
     return quickListItems.map((item) => ({
       goalId,
       goalName: QUICK_LIST_NAME,
@@ -1407,6 +1411,7 @@ useEffect(() => {
       difficulty: item.difficulty ?? 'none',
       goalSurface: QUICK_LIST_SURFACE,
       bucketSurface: QUICK_LIST_SURFACE,
+      entryColor: quickGradient,
       notes: typeof item.notes === 'string' ? item.notes : '',
       subtasks: Array.isArray(item.subtasks)
         ? item.subtasks.map((subtask, index) => ({
@@ -1477,12 +1482,12 @@ useEffect(() => {
           for (let bi = 0; bi < goal.buckets.length; bi += 1) {
             const bucket = goal.buckets[bi]
             const task = bucket.tasks.find((t) => t.id === entry.taskId)
-            if (task) {
-              match = {
-                goalId: goal.id,
-                goalName: goal.name,
-                bucketId: bucket.id,
-                bucketName: bucket.name,
+          if (task) {
+            match = {
+              goalId: goal.id,
+              goalName: goal.name,
+              bucketId: bucket.id,
+              bucketName: bucket.name,
                 taskId: task.id,
                 taskName: task.text,
                 completed: task.completed,
@@ -1561,25 +1566,23 @@ useEffect(() => {
         difficulty: 'none',
         goalSurface: ensureSurfaceStyle(entry.goalSurface, DEFAULT_SURFACE_STYLE),
         bucketSurface: ensureSurfaceStyle(entry.bucketSurface ?? undefined, DEFAULT_SURFACE_STYLE),
+        entryColor: entry.entryColor ?? null,
         notes: entry.notes ?? '',
         subtasks: [],
         repeatingRuleId: entry.repeatingSessionId ?? null,
         repeatingOccurrenceDate: entryOccurrenceDate,
         repeatingOriginalTime: entryOriginalTime,
       }
-      // Life routine color restoration: if this represents a Daily Life entry but the bucket surface
-      // is missing or defaulted, look up the surface from current life routine config.
-      if (
-        (entry.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
-        candidate.bucketName.trim().length > 0 &&
-        (!candidate.bucketSurface || candidate.bucketSurface === DEFAULT_SURFACE_STYLE)
-      ) {
-        const lrSurface = lifeRoutineSurfaceLookup.get(candidate.bucketName.trim().toLowerCase())
-        if (lrSurface) {
-          // Maintain goal as Daily Life and apply routine-specific surface
-          candidate.goalSurface = LIFE_ROUTINES_SURFACE
-          candidate.bucketSurface = lrSurface
+      // Life routine color restoration: prefer gradient from routine config
+      if ((entry.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()) {
+        const lrColor = candidate.bucketId ? lifeRoutineColorByBucket.get(candidate.bucketId) : null
+        if (lrColor) {
+          candidate.entryColor = lrColor
         }
+      }
+      if (!candidate.entryColor) {
+        const goalGradient = goalGradientById.get(candidate.goalId)
+        candidate.entryColor = goalGradient ?? entry.entryColor ?? null
       }
       suggestions.push({ ...candidate, startedAt: entry.startedAt, endedAt: entry.endedAt, isGuide: false })
     })
@@ -1884,6 +1887,7 @@ useEffect(() => {
               difficulty: (task.difficulty as any) ?? 'none',
               goalSurface: goal.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
               bucketSurface: bucket.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
+              entryColor: goalGradientById.get(goal.id) ?? null,
               notes: typeof task.notes === 'string' ? task.notes : '',
               subtasks: Array.isArray(task.subtasks)
                 ? task.subtasks.map((s, idx) => ({ id: s.id, text: s.text, completed: s.completed, sortIndex: typeof s.sortIndex === 'number' ? s.sortIndex : (idx + 1) * NOTEBOOK_SUBTASK_SORT_STEP }))
@@ -2071,15 +2075,24 @@ useEffect(() => {
   const focusGoalIdentifier = focusSource?.goalId ?? activeFocusCandidate?.goalId ?? null
   const isLifeRoutineFocus = focusGoalIdentifier === LIFE_ROUTINES_GOAL_ID
   const isQuickListFocus = isQuickListGoal(focusGoalIdentifier)
+  const focusGradient = useMemo(() => {
+    if (isLifeRoutineFocus && activeFocusCandidate?.bucketId) {
+      return lifeRoutineColorByBucket.get(activeFocusCandidate.bucketId) ?? null
+    }
+    if (focusGoalIdentifier) {
+      return goalGradientById.get(focusGoalIdentifier) ?? null
+    }
+    return null
+  }, [activeFocusCandidate?.bucketId, focusGoalIdentifier, goalGradientById, isLifeRoutineFocus, lifeRoutineColorByBucket])
   const focusSurfaceClasses = useMemo(() => {
     if (isQuickListFocus) {
       return ['surface-quick-list']
     }
-    if (isLifeRoutineFocus && effectiveBucketSurface) {
-      return ['surface-life-routine', `surface-life-routine--${effectiveBucketSurface}`]
-    }
     return []
-  }, [effectiveBucketSurface, isLifeRoutineFocus, isQuickListFocus])
+  }, [isQuickListFocus])
+  const focusInlineStyle: React.CSSProperties | undefined = focusGradient
+    ? { backgroundImage: focusGradient }
+    : undefined
   const notebookKey = useMemo(
     () => computeNotebookKey(focusSource, normalizedCurrentTask),
     [focusSource, normalizedCurrentTask],
@@ -5085,6 +5098,7 @@ useEffect(() => {
                 ]
                   .filter(Boolean)
                   .join(' ')}
+                style={focusInlineStyle}
                 ref={focusTaskContainerRef}
               >
                 <button
@@ -5188,10 +5202,10 @@ useEffect(() => {
                             task.difficulty && task.difficulty !== 'none' ? `goal-task-row--diff-${task.difficulty}` : ''
                           const isLifeSuggestion =
                             (task.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-                          const lifeSurfaceClasses =
-                            isLifeSuggestion && task.bucketSurface
-                              ? ['surface-life-routine', `surface-life-routine--${task.bucketSurface}`]
-                              : []
+                          const gradientStyle: React.CSSProperties | undefined =
+                            task.entryColor && task.entryColor.toLowerCase().includes('gradient')
+                              ? { backgroundImage: task.entryColor }
+                              : undefined
                           const isQuickListTask = isQuickListGoal(task.goalId)
                           const quickSurfaceClasses = isQuickListTask ? ['surface-quick-list'] : []
                           const rowClassName = [
@@ -5199,7 +5213,6 @@ useEffect(() => {
                             'goal-task-row',
                             diffClass,
                             'goal-task-row--priority',
-                            ...lifeSurfaceClasses,
                             ...quickSurfaceClasses,
                             isQuickListTask ? 'task-selector__task--quick-list' : '',
                             matches ? 'task-selector__task--active' : '',
@@ -5218,6 +5231,8 @@ useEffect(() => {
                               <button
                                 type="button"
                                 className={rowClassName}
+                                style={gradientStyle}
+                                style={gradientStyle}
                                 onClick={() =>
                                   handleSelectTask(task.taskName, {
                                     goalId: task.goalId,
@@ -5227,8 +5242,8 @@ useEffect(() => {
                                     taskId: task.taskId,
                                     taskDifficulty: task.difficulty,
                                     priority: true,
-                                    goalSurface: task.goalSurface,
-                                    bucketSurface: task.bucketSurface,
+                                    goalSurface: DEFAULT_SURFACE_STYLE,
+                                    bucketSurface: DEFAULT_SURFACE_STYLE,
                                     notes: task.notes,
                                     subtasks: task.subtasks,
                                     repeatingRuleId: task.repeatingRuleId,
@@ -5297,12 +5312,6 @@ useEffect(() => {
                             : !isDefaultTask && candidateLower === currentTaskLower
                           const diffClass =
                             task.difficulty && task.difficulty !== 'none' ? `goal-task-row--diff-${task.difficulty}` : ''
-                          const isLifePriority =
-                            (task.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-                          const lifeRowClasses =
-                            isLifePriority && task.bucketSurface
-                              ? ['surface-life-routine', `surface-life-routine--${task.bucketSurface}`]
-                              : []
                           const isQuickListTask = isQuickListGoal(task.goalId)
                           const quickRowClasses = isQuickListTask ? ['surface-quick-list', 'task-selector__task--quick-list'] : []
                           const rowClassName = [
@@ -5310,12 +5319,15 @@ useEffect(() => {
                             'goal-task-row',
                             diffClass,
                             task.priority ? 'goal-task-row--priority' : '',
-                            ...lifeRowClasses,
                             ...quickRowClasses,
                             matches ? 'task-selector__task--active' : '',
                           ]
                             .filter(Boolean)
                             .join(' ')
+                          const gradientStyle: React.CSSProperties | undefined =
+                            task.entryColor && task.entryColor.toLowerCase().includes('gradient')
+                              ? { backgroundImage: task.entryColor }
+                              : undefined
                           const diffBadgeClass =
                             task.difficulty && task.difficulty !== 'none'
                               ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
@@ -5328,6 +5340,7 @@ useEffect(() => {
                               <button
                                 type="button"
                                 className={rowClassName}
+                                style={gradientStyle}
                                 onClick={() =>
                                   handleSelectTask(task.taskName, {
                                     goalId: task.goalId,
@@ -5337,8 +5350,8 @@ useEffect(() => {
                                     taskId: task.taskId,
                                     taskDifficulty: task.difficulty,
                                     priority: true,
-                                    goalSurface: task.goalSurface,
-                                    bucketSurface: task.bucketSurface,
+                                    goalSurface: DEFAULT_SURFACE_STYLE,
+                                    bucketSurface: DEFAULT_SURFACE_STYLE,
                                     notes: task.notes,
                                     subtasks: task.subtasks,
                                     repeatingRuleId: task.repeatingRuleId,
@@ -5379,10 +5392,10 @@ useEffect(() => {
                     <h2 className="task-selector__section-title">{LIFE_ROUTINES_NAME}</h2>
                     <button
                       type="button"
-                      className={`task-selector__goal-toggle surface-goal surface-goal--${LIFE_ROUTINES_SURFACE}`}
-                      onClick={() => setLifeRoutinesExpanded((value) => !value)}
-                      aria-expanded={lifeRoutinesExpanded}
-                    >
+                className="task-selector__goal-toggle surface-goal surface-goal--glass"
+                onClick={() => setLifeRoutinesExpanded((value) => !value)}
+                aria-expanded={lifeRoutinesExpanded}
+              >
                       <span className="task-selector__goal-info">
                         <span className="task-selector__goal-badge" aria-hidden="true">
                           System
@@ -5402,12 +5415,14 @@ useEffect(() => {
                               focusSource.bucketId === task.bucketId &&
                               currentTaskLower === taskLower
                             : !isDefaultTask && currentTaskLower === taskLower
-                          const surfaceClass = `surface-life-routine surface-life-routine--${task.surfaceStyle}`
+                          const gradientStyle: React.CSSProperties | undefined =
+                            task.surfaceColor && task.surfaceColor.toLowerCase().includes('gradient')
+                              ? { backgroundImage: task.surfaceColor }
+                              : undefined
                           const rowClassName = [
                             'task-selector__task',
                             'goal-task-row',
                             'task-selector__task--life-routine',
-                            surfaceClass,
                             matches ? 'task-selector__task--active' : '',
                           ]
                             .filter(Boolean)
@@ -5426,8 +5441,8 @@ useEffect(() => {
                                     taskId: task.id,
                                     taskDifficulty: 'none',
                                     priority: false,
-                                    goalSurface: LIFE_ROUTINES_SURFACE,
-                                    bucketSurface: task.surfaceStyle,
+                                    goalSurface: DEFAULT_SURFACE_STYLE,
+                                    bucketSurface: DEFAULT_SURFACE_STYLE,
                                     notes: '',
                                     subtasks: [],
                                     repeatingRuleId: null,
@@ -5551,8 +5566,7 @@ useEffect(() => {
                       <ul className="task-selector__goals">
                         {activeGoalSnapshots.map((goal) => {
                           const goalExpanded = expandedGoals.has(goal.id)
-                          const goalSurface = goal.surfaceStyle ?? DEFAULT_SURFACE_STYLE
-                          const goalToggleClass = `task-selector__goal-toggle surface-goal surface-goal--${goalSurface}`
+                          const goalToggleClass = 'task-selector__goal-toggle surface-goal surface-goal--glass'
                           return (
                             <li key={goal.id} className="task-selector__goal">
                               <button
@@ -5869,12 +5883,6 @@ useEffect(() => {
                       : !isDefaultTask && candidateLower === currentTaskLower
                           const diffClass =
                             task.difficulty && task.difficulty !== 'none' ? `goal-task-row--diff-${task.difficulty}` : ''
-                          const isLifeSuggestion =
-                            (task.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-                          const lifeSurfaceClasses =
-                            isLifeSuggestion && task.bucketSurface
-                              ? ['surface-life-routine', `surface-life-routine--${task.bucketSurface}`]
-                              : []
                           const isQuickListTask = isQuickListGoal(task.goalId)
                           const quickSurfaceClasses = isQuickListTask ? ['surface-quick-list'] : []
                           const rowClassName = [
@@ -5882,20 +5890,23 @@ useEffect(() => {
                             'goal-task-row',
                             diffClass,
                             'goal-task-row--priority',
-                            ...lifeSurfaceClasses,
                             ...quickSurfaceClasses,
                             isQuickListTask ? 'task-selector__task--quick-list' : '',
                             matches ? 'task-selector__task--active' : '',
                           ]
-                      .filter(Boolean)
-                      .join(' ')
-                    const diffBadgeClass =
-                      task.difficulty && task.difficulty !== 'none'
-                        ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
                             .filter(Boolean)
                             .join(' ')
-                        : ['goal-task-diff', 'goal-task-diff--none', 'task-selector__diff', 'task-selector__diff-chip']
-                            .join(' ')
+                          const gradientStyle: React.CSSProperties | undefined =
+                            task.entryColor && task.entryColor.toLowerCase().includes('gradient')
+                              ? { backgroundImage: task.entryColor }
+                              : undefined
+                          const diffBadgeClass =
+                            task.difficulty && task.difficulty !== 'none'
+                              ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
+                                  .filter(Boolean)
+                                  .join(' ')
+                              : ['goal-task-diff', 'goal-task-diff--none', 'task-selector__diff', 'task-selector__diff-chip']
+                                  .join(' ')
                     return (
                       <li key={`sched-${task.taskId || task.taskName}`} className="task-selector__item">
                         <button
@@ -5980,12 +5991,6 @@ useEffect(() => {
                       : !isDefaultTask && candidateLower === currentTaskLower
                     const diffClass =
                       task.difficulty && task.difficulty !== 'none' ? `goal-task-row--diff-${task.difficulty}` : ''
-                    const isLifePriority =
-                      (task.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-                    const lifeRowClasses =
-                      isLifePriority && task.bucketSurface
-                        ? ['surface-life-routine', `surface-life-routine--${task.bucketSurface}`]
-                        : []
                     const isQuickListTask = isQuickListGoal(task.goalId)
                     const quickRowClasses = isQuickListTask ? ['surface-quick-list', 'task-selector__task--quick-list'] : []
                     const rowClassName = [
@@ -5993,12 +5998,15 @@ useEffect(() => {
                       'goal-task-row',
                       diffClass,
                       task.priority ? 'goal-task-row--priority' : '',
-                      ...lifeRowClasses,
                       ...quickRowClasses,
                       matches ? 'task-selector__task--active' : '',
                     ]
                       .filter(Boolean)
                       .join(' ')
+                    const gradientStyle: React.CSSProperties | undefined =
+                      task.entryColor && task.entryColor.toLowerCase().includes('gradient')
+                        ? { backgroundImage: task.entryColor }
+                        : undefined
                     const diffBadgeClass =
                       task.difficulty && task.difficulty !== 'none'
                         ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
@@ -6011,6 +6019,7 @@ useEffect(() => {
                         <button
                           type="button"
                           className={rowClassName}
+                          style={gradientStyle}
                           onClick={() =>
                             handleSelectTask(task.taskName, {
                               goalId: task.goalId,
@@ -6020,13 +6029,13 @@ useEffect(() => {
                               taskId: task.taskId,
                               taskDifficulty: task.difficulty,
                               priority: task.priority,
-                            goalSurface: task.goalSurface,
-                            bucketSurface: task.bucketSurface,
-                            notes: task.notes,
-                            subtasks: task.subtasks,
-                            repeatingRuleId: task.repeatingRuleId,
-                            repeatingOccurrenceDate: task.repeatingOccurrenceDate,
-                            repeatingOriginalTime: task.repeatingOriginalTime,
+                              goalSurface: DEFAULT_SURFACE_STYLE,
+                              bucketSurface: DEFAULT_SURFACE_STYLE,
+                              notes: task.notes,
+                              subtasks: task.subtasks,
+                              repeatingRuleId: task.repeatingRuleId,
+                              repeatingOccurrenceDate: task.repeatingOccurrenceDate,
+                              repeatingOriginalTime: task.repeatingOriginalTime,
                           })
                         }
                         >
@@ -6062,7 +6071,7 @@ useEffect(() => {
               <h2 className="task-selector__section-title">{LIFE_ROUTINES_NAME}</h2>
               <button
                 type="button"
-                className={`task-selector__goal-toggle surface-goal surface-goal--${LIFE_ROUTINES_SURFACE}`}
+                className="task-selector__goal-toggle surface-goal surface-goal--glass"
                 onClick={() => setLifeRoutinesExpanded((value) => !value)}
                 aria-expanded={lifeRoutinesExpanded}
               >
@@ -6085,12 +6094,14 @@ useEffect(() => {
                         focusSource.bucketId === task.bucketId &&
                         currentTaskLower === taskLower
                       : !isDefaultTask && currentTaskLower === taskLower
-                    const surfaceClass = `surface-life-routine surface-life-routine--${task.surfaceStyle}`
+                    const gradientStyle: React.CSSProperties | undefined =
+                      task.surfaceColor && task.surfaceColor.toLowerCase().includes('gradient')
+                        ? { backgroundImage: task.surfaceColor }
+                        : undefined
                     const rowClassName = [
                       'task-selector__task',
                       'goal-task-row',
                       'task-selector__task--life-routine',
-                      surfaceClass,
                       matches ? 'task-selector__task--active' : '',
                     ]
                       .filter(Boolean)
@@ -6100,24 +6111,25 @@ useEffect(() => {
                         <button
                           type="button"
                           className={rowClassName}
-                          onClick={() =>
-                            handleSelectTask(task.title, {
-                              goalId: LIFE_ROUTINES_GOAL_ID,
-                              bucketId: task.bucketId,
-                              goalName: LIFE_ROUTINES_NAME,
-                              bucketName: task.title,
-                              taskId: task.id,
-                              taskDifficulty: 'none',
-                              priority: false,
-                            goalSurface: LIFE_ROUTINES_SURFACE,
-                            bucketSurface: task.surfaceStyle,
-                            notes: '',
-                            subtasks: [],
-                            repeatingRuleId: null,
-                            repeatingOccurrenceDate: null,
-                            repeatingOriginalTime: null,
-                          })
-                        }
+                            onClick={() =>
+                              handleSelectTask(task.title, {
+                                goalId: LIFE_ROUTINES_GOAL_ID,
+                                bucketId: task.bucketId,
+                                goalName: LIFE_ROUTINES_NAME,
+                                bucketName: task.title,
+                                taskId: task.id,
+                                taskDifficulty: 'none',
+                                priority: false,
+                                goalSurface: DEFAULT_SURFACE_STYLE,
+                                bucketSurface: DEFAULT_SURFACE_STYLE,
+                                notes: '',
+                                subtasks: [],
+                                repeatingRuleId: null,
+                                repeatingOccurrenceDate: null,
+                                repeatingOriginalTime: null,
+                              })
+                            }
+                            style={gradientStyle}
                         >
                           <div className="task-selector__task-main">
                             <div className="task-selector__task-content">
@@ -6232,8 +6244,7 @@ useEffect(() => {
                 <ul className="task-selector__goals">
                   {activeGoalSnapshots.map((goal) => {
                     const goalExpanded = expandedGoals.has(goal.id)
-                    const goalSurface = goal.surfaceStyle ?? DEFAULT_SURFACE_STYLE
-                    const goalToggleClass = `task-selector__goal-toggle surface-goal surface-goal--${goalSurface}`
+                    const goalToggleClass = 'task-selector__goal-toggle surface-goal surface-goal--glass'
                     return (
                       <li key={goal.id} className="task-selector__goal">
                         <button
