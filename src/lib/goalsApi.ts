@@ -13,7 +13,7 @@ const errorMentionsColumn = (err: any, column: string): boolean => {
 export type DbGoal = {
   id: string
   name: string
-  color: string
+  goal_colour: string
   sort_index: number
   card_surface?: string | null
   starred: boolean
@@ -170,11 +170,10 @@ export async function fetchGoalsHierarchy(): Promise<
   let goals: any[] | null = null
   let gErr: any = null
   let includeMilestones = true
-  let includeGoalColour = true
   {
     const { data, error } = await supabase
       .from('goals')
-      .select('id, name, color, goal_colour, sort_index, starred, goal_archive, created_at, milestones_shown')
+      .select('id, name, goal_colour, sort_index, starred, goal_archive, created_at, milestones_shown')
       .order('sort_index', { ascending: true })
     goals = data as any[] | null
     gErr = error
@@ -182,14 +181,9 @@ export async function fetchGoalsHierarchy(): Promise<
     // Only fall back when the column truly does not exist (PG code 42703)
     if (gErr && code === '42703') {
       includeMilestones = false
-      includeGoalColour = !errorMentionsColumn(error, 'goal_colour')
       const retry = await supabase
         .from('goals')
-        .select(
-          includeGoalColour
-            ? 'id, name, color, goal_colour, sort_index, starred, goal_archive, created_at'
-            : 'id, name, color, sort_index, starred, goal_archive, created_at',
-        )
+        .select('id, name, goal_colour, sort_index, starred, goal_archive, created_at')
         .order('sort_index', { ascending: true })
       goals = retry.data as any[] | null
       gErr = retry.error
@@ -292,7 +286,7 @@ export async function fetchGoalsHierarchy(): Promise<
   })
 
   const tree = goals.map((g) => {
-    const goalColor = (g as any).goal_colour ?? g.color ?? FALLBACK_GOAL_COLOR
+    const goalColor = (g as any).goal_colour ?? FALLBACK_GOAL_COLOR
     return {
       id: g.id,
       name: g.name,
@@ -524,7 +518,6 @@ export async function createGoal(name: string, color: string) {
   const payload = {
     user_id: session.user.id,
     name,
-    color,
     goal_colour: color,
     sort_index,
     starred: false,
@@ -535,21 +528,10 @@ export async function createGoal(name: string, color: string) {
     const { data, error } = await supabase
       .from('goals')
       .insert([payload])
-      .select('id, name, color, goal_colour, sort_index, starred, goal_archive')
+      .select('id, name, goal_colour, sort_index, starred, goal_archive')
       .single()
     if (!error) {
       created = data
-    } else if (String((error as any)?.code || '') === '42703' && errorMentionsColumn(error, 'goal_colour')) {
-      const fallbackPayload = { ...payload }
-      delete (fallbackPayload as any).goal_colour
-      const retry = await supabase
-        .from('goals')
-        .insert([fallbackPayload])
-        .select('id, name, color, sort_index, starred, goal_archive')
-        .single()
-      if (!retry.error) {
-        created = retry.data
-      }
     }
   }
   const base = (created ?? null) as DbGoal | null
@@ -565,11 +547,11 @@ export async function setGoalColor(goalId: string, color: string) {
   if (!userId) return
   const { error } = await supabase
     .from('goals')
-    .update({ color, goal_colour: color })
+    .update({ goal_colour: color })
     .eq('id', goalId)
     .eq('user_id', userId)
-  if (error && String((error as any)?.code || '') === '42703' && errorMentionsColumn(error, 'goal_colour')) {
-    await supabase.from('goals').update({ color }).eq('id', goalId).eq('user_id', userId)
+  if (error) {
+    throw error
   }
 }
 

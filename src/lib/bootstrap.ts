@@ -190,7 +190,6 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
       id: goalId,
       user_id: userId,
       name: sanitizeGoalName(goal.name),
-      color: normalizeGradient(goal.color),
       goal_colour: normalizeGradient(goal.color),
       sort_index: (goalIndex + 1) * GOAL_SORT_STEP,
       starred: Boolean(goal.starred),
