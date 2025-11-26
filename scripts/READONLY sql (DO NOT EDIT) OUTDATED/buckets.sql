@@ -11,7 +11,50 @@ create table public.buckets (
   bucket_archive boolean null default false,
   constraint buckets_pkey primary key (id),
   constraint buckets_goal_id_fkey foreign KEY (goal_id) references goals (id) on delete CASCADE,
-  constraint buckets_user_goal_fk foreign KEY (user_id, goal_id) references goals (user_id, id) on delete CASCADE
+  constraint buckets_user_goal_fk foreign KEY (user_id, goal_id) references goals (user_id, id) on delete CASCADE,
+  constraint buckets_card_style_check check (
+    (
+      (buckets_card_style is null)
+      or (
+        buckets_card_style = any (
+          array[
+            'glass'::text,
+            'midnight'::text,
+            'slate'::text,
+            'charcoal'::text,
+            'linen'::text,
+            'frost'::text,
+            'grove'::text,
+            'lagoon'::text,
+            'ember'::text,
+            'deep-indigo'::text,
+            'warm-amber'::text,
+            'fresh-teal'::text,
+            'sunset-orange'::text,
+            'cool-blue'::text,
+            'soft-magenta'::text,
+            'muted-lavender'::text,
+            'neutral-grey-blue'::text,
+            'leaf'::text,
+            'sprout'::text,
+            'fern'::text,
+            'sage'::text,
+            'meadow'::text,
+            'willow'::text,
+            'pine'::text,
+            'basil'::text,
+            'mint'::text,
+            'coral'::text,
+            'peach'::text,
+            'apricot'::text,
+            'salmon'::text,
+            'tangerine'::text,
+            'papaya'::text
+          ]
+        )
+      )
+    )
+  )
 ) TABLESPACE pg_default;
 
 create index IF not exists buckets_user_goal_sort_idx on public.buckets using btree (user_id, goal_id, sort_index) TABLESPACE pg_default;
