@@ -1027,10 +1027,11 @@ const GOAL_SURFACE_CLASS_MAP: Partial<Record<GoalSurfaceStyle, string>> = {
 }
 
 // Same Partial strategy for bucket surfaces.
-const BUCKET_SURFACE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
+const BUCKET_STYLE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
   glass: 'goal-bucket-item--surface-glass',
-  midnight: 'goal-bucket-item--surface-midnight',
+  coastal: 'goal-bucket-item--surface-slate',
   slate: 'goal-bucket-item--surface-slate',
+  midnight: 'goal-bucket-item--surface-midnight',
   charcoal: 'goal-bucket-item--surface-charcoal',
   linen: 'goal-bucket-item--surface-linen',
   frost: 'goal-bucket-item--surface-frost',
@@ -1047,28 +1048,28 @@ const BUCKET_SURFACE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
   'neutral-grey-blue': 'goal-bucket-item--surface-neutral-grey-blue',
 }
 
-const BUCKET_SURFACE_PRESETS: Array<{
+const BUCKET_STYLE_PRESETS: Array<{
   id: BucketSurfaceStyle
   label: string
   description: string
 }> = [
-  { id: 'glass', label: 'Simple', description: 'Barely-there wash with a soft outline.' },
-  { id: 'slate', label: 'Coastal', description: 'Airy blue tint for relaxed columns.' },
+  { id: 'glass', label: 'Glass', description: 'Barely-there wash with a soft outline.' },
+  { id: 'coastal', label: 'Coastal', description: 'Airy blue tint for relaxed columns.' },
   { id: 'midnight', label: 'Midnight', description: 'Cool indigo haze for subtle depth.' },
-  { id: 'charcoal', label: 'Cherry', description: 'Blush pink highlight with a pastel glow.' },
-  { id: 'linen', label: 'Warm', description: 'Golden peach accent with gentle warmth.' },
+  { id: 'charcoal', label: 'Charcoal', description: 'Deep charcoal with a gentle glow.' },
+  { id: 'linen', label: 'Linen', description: 'Golden peach accent with gentle warmth.' },
   { id: 'frost', label: 'Frost', description: 'Minty aqua highlight with a breezy feel.' },
   { id: 'grove', label: 'Grove', description: 'Fresh green lift with botanical energy.' },
   { id: 'lagoon', label: 'Lagoon', description: 'Crystal blue blend for clean focus.' },
   { id: 'ember', label: 'Ember', description: 'Radiant amber spark with soft glow.' },
-  { id: 'deep-indigo', label: 'Indigo', description: 'Deep indigo-violet with focused depth.' },
-  { id: 'warm-amber', label: 'Amber', description: 'Soft amber warmth with a mellow glow.' },
-  { id: 'fresh-teal', label: 'Teal', description: 'Refreshing teal lift with calm energy.' },
-  { id: 'sunset-orange', label: 'Sunset', description: 'Dusky orange fade with evening vibe.' },
+  { id: 'deep-indigo', label: 'Deep Indigo', description: 'Deep indigo-violet with focused depth.' },
+  { id: 'warm-amber', label: 'Warm Amber', description: 'Soft amber warmth with a mellow glow.' },
+  { id: 'fresh-teal', label: 'Fresh Teal', description: 'Refreshing teal lift with calm energy.' },
+  { id: 'sunset-orange', label: 'Sunset Orange', description: 'Dusky orange fade with evening vibe.' },
   { id: 'cool-blue', label: 'Cool Blue', description: 'Balanced blue tone with crisp clarity.' },
-  { id: 'soft-magenta', label: 'Magenta', description: 'Gentle magenta bloom with subtle pop.' },
-  { id: 'muted-lavender', label: 'Lavender', description: 'Muted lavender haze for quiet focus.' },
-  { id: 'neutral-grey-blue', label: 'Grey Blue', description: 'Neutral grey-blue base for minimalism.' },
+  { id: 'soft-magenta', label: 'Soft Magenta', description: 'Gentle magenta bloom with subtle pop.' },
+  { id: 'muted-lavender', label: 'Muted Lavender', description: 'Muted lavender haze for quiet focus.' },
+  { id: 'neutral-grey-blue', label: 'Neutral Grey Blue', description: 'Neutral grey-blue base for minimalism.' },
 ]
 
 const formatGradientLabel = (value: string) =>
@@ -1078,21 +1079,65 @@ const formatGradientLabel = (value: string) =>
     .replace(/-/g, ' ')
 
 // Life routine theme choices (ordered as requested)
+const BUCKET_STYLE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
+  glass: 'goal-bucket-item--surface-glass',
+  coastal: 'goal-bucket-item--surface-slate',
+  cherry: 'goal-bucket-item--surface-charcoal',
+  midnight: 'goal-bucket-item--surface-midnight',
+  linen: 'goal-bucket-item--surface-linen',
+  frost: 'goal-bucket-item--surface-frost',
+  grove: 'goal-bucket-item--surface-grove',
+  lagoon: 'goal-bucket-item--surface-lagoon',
+  ember: 'goal-bucket-item--surface-ember',
+  'deep-indigo': 'goal-bucket-item--surface-deep-indigo',
+  'warm-amber': 'goal-bucket-item--surface-warm-amber',
+  'fresh-teal': 'goal-bucket-item--surface-fresh-teal',
+  'sunset-orange': 'goal-bucket-item--surface-sunset-orange',
+  'cool-blue': 'goal-bucket-item--surface-cool-blue',
+  'soft-magenta': 'goal-bucket-item--surface-soft-magenta',
+  'muted-lavender': 'goal-bucket-item--surface-muted-lavender',
+  'neutral-grey-blue': 'goal-bucket-item--surface-neutral-grey-blue',
+}
+
+const BUCKET_STYLE_PRESETS: Array<{
+  id: BucketSurfaceStyle
+  label: string
+  description: string
+}> = [
+  { id: 'glass', label: 'Glass', description: 'Barely-there wash with a soft outline.' },
+  { id: 'coastal', label: 'Coastal', description: 'Airy blue tint for relaxed columns.' },
+  { id: 'midnight', label: 'Midnight', description: 'Cool indigo haze for subtle depth.' },
+  { id: 'cherry', label: 'Cherry', description: 'Blush pink highlight with a pastel glow.' },
+  { id: 'linen', label: 'Linen', description: 'Golden peach accent with gentle warmth.' },
+  { id: 'frost', label: 'Frost', description: 'Minty aqua highlight with a breezy feel.' },
+  { id: 'grove', label: 'Grove', description: 'Fresh green lift with botanical energy.' },
+  { id: 'lagoon', label: 'Lagoon', description: 'Crystal blue blend for clean focus.' },
+  { id: 'ember', label: 'Ember', description: 'Radiant amber spark with soft glow.' },
+  { id: 'deep-indigo', label: 'Deep Indigo', description: 'Deep indigo-violet with focused depth.' },
+  { id: 'warm-amber', label: 'Warm Amber', description: 'Soft amber warmth with a mellow glow.' },
+  { id: 'fresh-teal', label: 'Fresh Teal', description: 'Refreshing teal lift with calm energy.' },
+  { id: 'sunset-orange', label: 'Sunset Orange', description: 'Dusky orange fade with evening vibe.' },
+  { id: 'cool-blue', label: 'Cool Blue', description: 'Balanced blue tone with crisp clarity.' },
+  { id: 'soft-magenta', label: 'Soft Magenta', description: 'Gentle magenta bloom with subtle pop.' },
+  { id: 'muted-lavender', label: 'Muted Lavender', description: 'Muted lavender haze for quiet focus.' },
+  { id: 'neutral-grey-blue', label: 'Neutral Grey Blue', description: 'Neutral grey-blue base for minimalism.' },
+]
+
 const LIFE_ROUTINE_THEME_OPTIONS: BucketSurfaceStyle[] = [
   'midnight',          // 1
   'grove',             // 4
   'cool-blue',         // 11
   'muted-lavender',    // 13
   'neutral-grey-blue', // 14
-  'charcoal',          // 2
+  'cherry',            // 2 (was charcoal)
   'ember',             // 3
   'soft-magenta',      // 12
   'fresh-teal',        // 9
   'glass',             // 6
 ]
 
-const getSurfaceLabel = (surface: BucketSurfaceStyle): string =>
-  BUCKET_SURFACE_PRESETS.find((preset) => preset.id === surface)?.label ?? surface
+const getBucketStyleLabel = (style: BucketSurfaceStyle): string =>
+  BUCKET_STYLE_PRESETS.find((preset) => preset.id === style)?.label ?? style
 
 // Components
 const ThinProgress: React.FC<{ value: number; gradient: string; className?: string }> = ({ value, gradient, className }) => {
@@ -1279,7 +1324,7 @@ const BucketCustomizer = React.forwardRef<HTMLDivElement, BucketCustomizerProps>
         <div className="goal-customizer__section">
           <p className="goal-customizer__label">Card surface</p>
           <div className="goal-customizer__surface-grid">
-            {BUCKET_SURFACE_PRESETS.map((preset) => {
+            {BUCKET_STYLE_PRESETS.map((preset) => {
               const isActive = surfaceStyle === preset.id
               return (
                 <button
@@ -1356,7 +1401,7 @@ const LifeRoutineCustomizer = React.forwardRef<HTMLDivElement, LifeRoutineCustom
                   type="button"
                   className={classNames('goal-customizer__swatch', isActive && 'goal-customizer__swatch--active')}
                   onClick={() => onUpdate(option)}
-                  aria-label={`Select ${getSurfaceLabel(option)} theme colour`}
+                  aria-label={`Select ${getBucketStyleLabel(option)} theme colour`}
                   aria-pressed={isActive}
                 >
                   <span
@@ -3710,7 +3755,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                 const isCompletedCollapsed = completedCollapsed[b.id] ?? true
                 const draftValue = taskDrafts[b.id]
                 const bucketSurface = normalizeBucketSurfaceStyle(b.surfaceStyle as BucketSurfaceStyle | null | undefined)
-                const bucketSurfaceClass = BUCKET_SURFACE_CLASS_MAP[bucketSurface] || BUCKET_SURFACE_CLASS_MAP.glass
+                const bucketSurfaceClass = BUCKET_STYLE_CLASS_MAP[bucketSurface] || BUCKET_STYLE_CLASS_MAP.glass
                 return (
                   <li key={b.id} className={classNames('goal-bucket-item rounded-xl border', bucketSurfaceClass)}>
                     <div

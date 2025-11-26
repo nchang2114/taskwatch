@@ -4477,17 +4477,17 @@ html[data-theme='light'] .goal-task-row--diff-green {
   border-color: rgba(118, 142, 255, 0.16);
 }
 
+.goal-customizer__surface-preview--coastal {
+  background: linear-gradient(135deg, rgba(151, 227, 255, 0.24), rgba(120, 198, 255, 0.14));
+  border-color: rgba(82, 168, 255, 0.2);
+}
+
 .goal-customizer__surface-preview--midnight {
   background: linear-gradient(135deg, rgba(142, 153, 255, 0.24), rgba(110, 138, 255, 0.14));
   border-color: rgba(121, 132, 255, 0.2);
 }
 
-.goal-customizer__surface-preview--slate {
-  background: linear-gradient(135deg, rgba(151, 227, 255, 0.24), rgba(120, 198, 255, 0.14));
-  border-color: rgba(82, 168, 255, 0.2);
-}
-
-.goal-customizer__surface-preview--charcoal {
+.goal-customizer__surface-preview--cherry {
   background: linear-gradient(135deg, rgba(255, 188, 213, 0.26), rgba(255, 214, 229, 0.16));
   border-color: rgba(231, 174, 206, 0.22);
 }
@@ -4567,11 +4567,13 @@ html[data-theme='light'] .goal-task-row--diff-green {
   border-color: rgba(142, 149, 255, 0.38);
 }
 
+.goal-customizer--life-routine .goal-customizer__surface-preview--coastal,
 .goal-customizer--life-routine .goal-customizer__surface-preview--slate {
   background: linear-gradient(135deg, rgba(151, 227, 255, 0.3), rgba(96, 180, 255, 0.22));
   border-color: rgba(120, 198, 255, 0.36);
 }
 
+.goal-customizer--life-routine .goal-customizer__surface-preview--cherry,
 .goal-customizer--life-routine .goal-customizer__surface-preview--charcoal {
   background: linear-gradient(135deg, rgba(255, 188, 213, 0.34), rgba(244, 174, 206, 0.26));
   border-color: rgba(231, 174, 206, 0.36);
@@ -4646,11 +4648,13 @@ html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surfac
   border-color: rgba(92, 91, 255, 0.38);
 }
 
+html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surface-preview--coastal,
 html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surface-preview--slate {
   background: rgba(222, 244, 255, 0.92);
   border-color: rgba(82, 168, 255, 0.36);
 }
 
+html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surface-preview--cherry,
 html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surface-preview--charcoal {
   background: rgba(255, 236, 246, 0.92);
   border-color: rgba(255, 155, 201, 0.36);
@@ -4911,11 +4915,13 @@ html[data-theme='light'] .goal-customizer__surface-preview--midnight {
   border-color: rgba(92, 91, 255, 0.2);
 }
 
+html[data-theme='light'] .goal-customizer__surface-preview--coastal,
 html[data-theme='light'] .goal-customizer__surface-preview--slate {
   background: linear-gradient(135deg, rgba(120, 215, 255, 0.18), rgba(162, 220, 255, 0.12));
   border-color: rgba(31, 200, 255, 0.2);
 }
 
+html[data-theme='light'] .goal-customizer__surface-preview--cherry,
 html[data-theme='light'] .goal-customizer__surface-preview--charcoal {
   background: linear-gradient(135deg, rgba(255, 188, 213, 0.18), rgba(255, 222, 232, 0.12));
   border-color: rgba(255, 155, 201, 0.2);

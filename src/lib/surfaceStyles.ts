@@ -1,13 +1,13 @@
 export const SURFACE_STYLES = [
   'glass',
   'midnight',
-  'slate',
-  'charcoal',
+  'coastal',
   'linen',
   'frost',
   'grove',
   'lagoon',
   'ember',
+  'cherry',
   // New themes
   'deep-indigo',
   'warm-amber',
