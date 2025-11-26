@@ -619,18 +619,16 @@ html[data-theme='light'] .goal-task-row.surface-quick-list {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  border: 1px solid var(--surface-border, var(--control-border));
+  border: 1px solid var(--control-border);
   border-radius: 0.75rem;
   padding: 0.55rem 0.8rem;
-  background: var(--surface-bg, var(--control-surface));
+  background: var(--control-surface);
   color: var(--text-primary);
   font-size: 0.92rem;
   cursor: pointer;
-  box-shadow: var(--surface-shadow, none);
-  transition: border-color 150ms ease, background 150ms ease;
+  box-shadow: none;
+  transition: none;
 }
-.task-selector__goal-toggle { --surface-bg: rgba(46, 56, 120, 0.68); --surface-border: rgba(102, 126, 234, 0.5); --surface-shadow: 0 12px 28px rgba(10, 12, 36, 0.32); --surface-bg-hover: rgba(66, 80, 156, 0.74); --surface-border-hover: rgba(129, 140, 248, 0.6); }
-html[data-theme='light'] .task-selector__goal-toggle { --surface-bg: rgba(224, 230, 255, 0.92); --surface-border: rgba(148, 163, 255, 0.45); --surface-shadow: 0 10px 20px rgba(108, 122, 224, 0.16); --surface-bg-hover: rgba(210, 220, 255, 0.95); --surface-border-hover: rgba(117, 129, 236, 0.55); }
 .task-selector__goal-info,
 .task-selector__bucket-info { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; min-width: 0; flex: 1; }
 .task-selector__goal-badge,
@@ -641,16 +639,10 @@ html[data-theme='light'] .task-selector__goal-badge { background: rgba(145, 154,
 html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 245, 208, 0.2); color: rgba(26, 126, 98, 0.9); box-shadow: inset 0 0 0 1px rgba(64, 196, 140, 0.3); }
 .task-selector__goal-name,
 .task-selector__bucket-name { font-size: 0.95rem; letter-spacing: 0.01em; font-weight: 600; color: inherit; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-selector__bucket-toggle { background: rgba(17, 27, 55, 0.52); border-color: rgba(86, 119, 204, 0.36); box-shadow: 0 8px 24px rgba(9, 12, 24, 0.26); }
-html[data-theme='light'] .task-selector__bucket-toggle { background: rgba(236, 249, 255, 0.9); border-color: rgba(96, 202, 173, 0.4); box-shadow: 0 10px 20px rgba(64, 177, 148, 0.16); }
-.task-selector__bucket-toggle:hover,
-.task-selector__bucket-toggle:focus-visible { background: rgba(27, 38, 76, 0.62); border-color: rgba(106, 134, 218, 0.52); }
-html[data-theme='light'] .task-selector__bucket-toggle:hover,
-html[data-theme='light'] .task-selector__bucket-toggle:focus-visible { background: rgba(224, 245, 255, 0.92); border-color: rgba(72, 188, 156, 0.5); }
 .task-selector__goal-toggle:hover,
 .task-selector__goal-toggle:focus-visible,
 .task-selector__bucket-toggle:hover,
-.task-selector__bucket-toggle:focus-visible { border-color: var(--surface-border-hover, var(--surface-border, var(--control-border))); background: var(--surface-bg-hover, var(--surface-bg, var(--control-surface-hover))); }
+.task-selector__bucket-toggle:focus-visible { background: var(--control-surface); border-color: var(--control-border); box-shadow: none; }
 .task-selector__goal-toggle:focus-visible,
 .task-selector__bucket-toggle:focus-visible,
 .task-selector__task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
