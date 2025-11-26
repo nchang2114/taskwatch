@@ -804,7 +804,11 @@ const snapToNearestMinute = (ms: number): number => {
 
 const normalizeEntryTimes = (entry: HistoryEntry): HistoryEntry => {
   const started = snapToNearestMinute(entry.startedAt)
-  const ended = snapToNearestMinute(entry.endedAt)
+  let ended = snapToNearestMinute(entry.endedAt)
+  // Ensure at least 1 minute duration for short entries that would otherwise be snapped to 0
+  if (ended <= started && entry.endedAt > entry.startedAt) {
+    ended = started + MINUTE_MS
+  }
   const elapsed = Math.max(0, ended - started)
   if (started === entry.startedAt && ended === entry.endedAt && elapsed === entry.elapsed) return entry
   return { ...entry, startedAt: started, endedAt: ended, elapsed }

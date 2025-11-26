@@ -755,6 +755,66 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
 .stopwatch-heading { margin: 0; align-self: center; font-family: var(--font-display); font-weight: 600; letter-spacing: 0.06em; font-size: clamp(2.2rem, 6vw, 3.8rem); color: var(--text-primary); }
 /* Dashboard header scales a touch differently without affecting standard layout */
 .taskwatch--dashboard .stopwatch-heading { letter-spacing: 0.05em; font-size: clamp(1.9rem, 5vw, 3rem); }
+.time-mode-toggle {
+  display: inline-flex;
+  width: min(420px, 100%);
+  height: 46px;
+  margin: 0.75rem 0 1.1rem;
+  padding: 4px;
+  gap: 0.35rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(26, 32, 58, 0.92) 0%, rgba(14, 18, 36, 0.9) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 16px 40px rgba(6, 10, 30, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.time-mode-toggle__button {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 200ms ease, box-shadow 200ms ease;
+}
+.time-mode-toggle__button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #3a6df0 0%, #5b4ee0 50%, #7e3af2 100%);
+  opacity: 0;
+  transition: opacity 200ms ease;
+  z-index: -1;
+}
+.time-mode-toggle__button--active::before {
+  opacity: 1;
+}
+.time-mode-toggle__button--active {
+  background: transparent;
+  color: #ffffff;
+  box-shadow: none;
+}
+html[data-theme='light'] .time-mode-toggle {
+  border-color: rgba(0, 0, 0, 0.06);
+  background: linear-gradient(135deg, rgba(245, 248, 255, 0.96) 0%, rgba(236, 240, 255, 0.96) 100%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+html[data-theme='light'] .time-mode-toggle__button {
+  color: rgba(20, 28, 60, 0.68);
+}
+html[data-theme='light'] .time-mode-toggle__button::before {
+  background: linear-gradient(135deg, #6390ff 0%, #7e84fc 50%, #9d7efc 100%);
+}
+html[data-theme='light'] .time-mode-toggle__button--active {
+  color: #ffffff;
+  box-shadow: none;
+}
 
 /* Stopwatch card */
 .stopwatch-card { position: relative; display: flex; flex-direction: column; gap: clamp(1.25rem, 3vw, 2rem); padding: clamp(1.8rem, 4.8vw, 2.6rem); padding-top: clamp(2.4rem, 5.4vw, 3.1rem); width: 100%; max-width: min(720px, 100%); border-radius: clamp(18px, 4vw, 28px); border: 1px solid rgba(128, 152, 236, 0.4); background: linear-gradient(155deg, rgba(34, 42, 86, 0.9) 0%, rgba(20, 28, 60, 0.92) 60%, rgba(12, 18, 40, 0.95) 100%); box-shadow: 0 28px 60px -26px rgba(6, 12, 36, 0.85), inset 0 0 0 1px rgba(255, 255, 255, 0.05); overflow: hidden; backdrop-filter: blur(18px); }

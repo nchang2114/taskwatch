@@ -2257,6 +2257,7 @@ type ActiveSessionState = {
   bucketSurface: SurfaceStyle | null
   startedAt: number | null
   baseElapsed: number
+  committedElapsed?: number
   isRunning: boolean
   updatedAt: number
 }
@@ -2351,8 +2352,12 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
   const sanitizedBucketSurface = sanitizeSurfaceStyle(candidate.bucketSurface)
   const bucketSurface = sanitizedBucketSurface ?? null
   const startedAt = typeof candidate.startedAt === 'number' ? candidate.startedAt : null
-  const baseElapsed = typeof candidate.baseElapsed === 'number' ? Math.max(0, candidate.baseElapsed) : 0
-  const isRunning = Boolean(candidate.isRunning)
+  const rawBaseElapsed = typeof candidate.baseElapsed === 'number' ? candidate.baseElapsed : 0
+  const baseElapsed = Number.isFinite(rawBaseElapsed) ? Math.max(0, rawBaseElapsed) : 0
+  const rawCommittedElapsed = typeof candidate.committedElapsed === 'number' ? candidate.committedElapsed : 0
+  const committedElapsed = Number.isFinite(rawCommittedElapsed) ? Math.max(0, rawCommittedElapsed) : 0
+  const rawIsRunning = Boolean(candidate.isRunning)
+  const isRunning = rawIsRunning
   const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : Date.now()
   return {
     taskName,
@@ -2365,6 +2370,7 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
     bucketSurface,
     startedAt,
     baseElapsed,
+    committedElapsed,
     isRunning,
     updatedAt,
   }
@@ -4746,22 +4752,24 @@ useEffect(() => {
     }
     const now = Date.now()
     const baseElapsed = Math.max(0, activeSession.baseElapsed)
+    const committedElapsed = Number.isFinite(activeSession.committedElapsed) ? Math.max(0, activeSession.committedElapsed!) : 0
     const runningElapsed =
       activeSession.isRunning && typeof activeSession.startedAt === 'number'
         ? Math.max(0, now - activeSession.startedAt)
         : 0
     const totalElapsed = baseElapsed + runningElapsed
-    if (totalElapsed <= 0) {
+    const effectiveElapsed = Math.max(0, totalElapsed - committedElapsed)
+    if (effectiveElapsed <= 0) {
       return history
     }
-    const defaultStart = now - totalElapsed
+    const defaultStart = now - effectiveElapsed
     const startCandidate =
       typeof activeSession.startedAt === 'number'
         ? activeSession.startedAt
-        : activeSession.updatedAt - totalElapsed
+        : activeSession.updatedAt - effectiveElapsed
     const startedAt = Math.min(startCandidate, now)
     const safeStartedAt = Number.isFinite(startedAt) ? startedAt : defaultStart
-    const endedAt = activeSession.isRunning ? now : safeStartedAt + totalElapsed
+    const endedAt = activeSession.isRunning ? now : safeStartedAt + effectiveElapsed
     const taskLabel =
       activeSession.taskName.length > 0
         ? activeSession.taskName
@@ -4771,7 +4779,7 @@ useEffect(() => {
     const activeEntry: HistoryEntry = {
       id: 'active-session',
       taskName: taskLabel,
-      elapsed: totalElapsed,
+      elapsed: effectiveElapsed,
       startedAt: safeStartedAt,
       endedAt,
       goalName: activeSession.goalName ?? null,

@@ -141,6 +141,21 @@ type SessionMetadata = {
   repeatingOriginalTime: number | null
 }
 
+type TimeMode = 'focus' | 'break'
+type ModeSnapshot = {
+  taskName: string
+  source: FocusSource | null
+  customTaskDraft: string
+  elapsed: number
+  sessionStart: number | null
+  isRunning: boolean
+  sessionMeta: SessionMetadata
+  currentSessionKey: string | null
+  lastLoggedSessionKey: string | null
+  lastTick: number | null
+  lastCommittedElapsed: number
+}
+
 const getNextDifficulty = (value: FocusCandidate['difficulty'] | null): FocusCandidate['difficulty'] => {
   switch (value) {
     case 'green':
@@ -604,6 +619,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const SNAPBACK_CUSTOM_TRIGGERS_KEY = 'nc-taskwatch-snapback-custom-triggers'
   const SNAPBACK_OVERVIEW_TRIGGERS_KEY = 'nc-taskwatch-overview-triggers'
   const [overviewTriggersVersion, setOverviewTriggersVersion] = useState(0)
+  const [timeMode, setTimeMode] = useState<TimeMode>('focus')
 
   useEffect(() => {
     if (isSnapbackOpen) {
@@ -621,6 +637,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   }, [isSnapbackOpen])
 
   const [currentTaskName, setCurrentTaskName] = useState<string>(initialTaskName)
+  const [customTaskDraft, setCustomTaskDraft] = useState<string>(initialTaskName)
   const [sessionStart, setSessionStart] = useState<number | null>(null)
   const [currentTime, setCurrentTime] = useState(() => Date.now())
   const [notebookState, setNotebookState] = useState<NotebookState>(() => {
@@ -642,6 +659,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const [, setNotebookSubtasksCollapsed] = useState(false)
   const frameRef = useRef<number | null>(null)
   const lastTickRef = useRef<number | null>(null)
+  const timeDisplayRef = useRef<HTMLSpanElement | null>(null)
   const selectorButtonRef = useRef<HTMLButtonElement | null>(null)
   const selectorPopoverRef = useRef<HTMLDivElement | null>(null)
   const focusTaskContainerRef = useRef<HTMLDivElement | null>(null)
@@ -674,6 +692,35 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   })
   const currentSessionKeyRef = useRef<string | null>(null)
   const lastLoggedSessionKeyRef = useRef<string | null>(null)
+  const lastCommittedElapsedRef = useRef(0)
+  const modeStateRef = useRef<Record<TimeMode, ModeSnapshot>>({
+    focus: {
+      taskName: initialTaskName,
+      source: null,
+      customTaskDraft,
+      elapsed: 0,
+      sessionStart: null,
+      isRunning: false,
+      sessionMeta: createEmptySessionMetadata(initialTaskName || 'Focus Session'),
+      currentSessionKey: null,
+      lastLoggedSessionKey: null,
+      lastTick: null,
+      lastCommittedElapsed: 0,
+    },
+    break: {
+      taskName: 'Break',
+      source: null,
+      customTaskDraft: 'Break',
+      elapsed: 0,
+      sessionStart: null,
+      isRunning: false,
+      sessionMeta: createEmptySessionMetadata('Break'),
+      currentSessionKey: null,
+      lastLoggedSessionKey: null,
+      lastTick: null,
+      lastCommittedElapsed: 0,
+    },
+  })
   const [isSelectorOpen, setIsSelectorOpen] = useState(false)
   const goalsSnapshotSignatureRef = useRef<string | null>(null)
   const [goalsSnapshot, setGoalsSnapshot] = useState<GoalSnapshot[]>(() => {
@@ -865,7 +912,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
     refreshQuickListFromSupabase('owner-change')
   }, [quickListOwnerSignal, refreshQuickListFromSupabase])
   const [focusSource, setFocusSource] = useState<FocusSource | null>(() => readStoredFocusSource())
-  const [customTaskDraft, setCustomTaskDraft] = useState('')
   const [isCompletingFocus, setIsCompletingFocus] = useState(false)
   void _viewportWidth
   // Track repeating exceptions so guide suppression follows skips/reschedules immediately
@@ -1177,13 +1223,27 @@ useEffect(() => {
       return
     }
 
-    const update = (timestamp: number) => {
-      if (lastTickRef.current === null) {
-        lastTickRef.current = timestamp
+    const update = () => {
+      if (sessionStart === null) return
+      const now = Date.now()
+      const currentElapsed = now - sessionStart
+      
+      if (timeDisplayRef.current) {
+        const text = formatTime(currentElapsed)
+        timeDisplayRef.current.textContent = text
+        
+        const isLong = currentElapsed >= 3600000
+        const charCount = text.length
+        let lenClass = ''
+        if (charCount >= 15) lenClass = 'time-length-xxs'
+        else if (charCount >= 13) lenClass = 'time-length-xs'
+        else if (charCount >= 11) lenClass = 'time-length-sm'
+        
+        const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
+        const longClass = isLong ? 'time-value--long' : ''
+        timeDisplayRef.current.className = `time-value ${longClass} ${lenClass} ${hiddenClass}`
       }
-      const delta = timestamp - lastTickRef.current
-      lastTickRef.current = timestamp
-      setElapsed((prev) => prev + delta)
+      
       frameRef.current = requestAnimationFrame(update)
     }
 
@@ -1195,7 +1255,7 @@ useEffect(() => {
         frameRef.current = null
       }
     }
-  }, [isRunning])
+  }, [isRunning, sessionStart, isTimeHidden])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !import.meta.env.DEV) return
@@ -1307,6 +1367,10 @@ useEffect(() => {
   const safeTaskName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
   const sessionMetadataRef = useRef<SessionMetadata>(createEmptySessionMetadata(safeTaskName))
   const elapsedSeconds = Math.floor(elapsed / 1000)
+  const computeCurrentElapsed = useCallback(
+    () => (isRunning && sessionStart !== null ? (Date.now() - sessionStart) : elapsed),
+    [elapsed, isRunning, sessionStart],
+  )
 
   useEffect(() => {
     if (!isRunning) {
@@ -3857,6 +3921,7 @@ useEffect(() => {
       bucketName: sessionBucketName,
       startedAt: sessionStart,
       baseElapsed: elapsed,
+      committedElapsed: lastCommittedElapsedRef.current,
       isRunning,
       goalId: sessionGoalId,
       bucketId: sessionBucketId,
@@ -4292,9 +4357,11 @@ useEffect(() => {
     setIsCompletingFocus(true)
 
     const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
-    if (elapsed > 0) {
+    const currentElapsed = isRunning && sessionStart !== null ? Date.now() - sessionStart : elapsed
+    const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
+    if (delta > 0) {
       const sessionMeta = sessionMetadataRef.current
-      registerNewHistoryEntry(elapsed, entryName, {
+      registerNewHistoryEntry(delta, entryName, {
         goalId: sessionMeta.goalId ?? goalId,
         bucketId: sessionMeta.bucketId ?? bucketId,
         taskId: sessionMeta.taskId ?? taskId,
@@ -4313,6 +4380,7 @@ useEffect(() => {
     lastTickRef.current = null
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
+    lastCommittedElapsedRef.current = 0
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
 
     if (isQuickListFocusTarget) {
@@ -4412,6 +4480,12 @@ useEffect(() => {
     setCurrentTaskName(trimmed)
     setFocusSource(sanitizedSource)
     setCustomTaskDraft(trimmed)
+    modeStateRef.current[timeMode] = {
+      ...modeStateRef.current[timeMode],
+      taskName: trimmed,
+      customTaskDraft: trimmed,
+      source: sanitizedSource,
+    }
     setIsSelectorOpen(false)
     selectorButtonRef.current?.focus()
   }
@@ -4422,6 +4496,12 @@ useEffect(() => {
     setCurrentTaskName(trimmed)
     setFocusSource(null)
     setCustomTaskDraft(trimmed)
+    modeStateRef.current[timeMode] = {
+      ...modeStateRef.current[timeMode],
+      taskName: trimmed,
+      customTaskDraft: trimmed,
+      source: null,
+    }
     setIsSelectorOpen(false)
     selectorButtonRef.current?.focus()
   }
@@ -4432,29 +4512,65 @@ useEffect(() => {
   }
 
   const handleStartStop = () => {
-    setIsRunning((current) => {
-      if (current) {
-        currentSessionKeyRef.current = null
+    if (isRunning) {
+      const now = Date.now()
+      const currentElapsed = sessionStart !== null ? now - sessionStart : 0
+      const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
+
+      if (delta > 0) {
+        const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+        const sessionMeta = sessionMetadataRef.current
+        // Capture metadata to restore it after registration (which wipes it)
+        const preservedMeta = { ...sessionMeta }
+
+        registerNewHistoryEntry(delta, entryName, {
+          goalId: sessionMeta.goalId,
+          bucketId: sessionMeta.bucketId,
+          taskId: sessionMeta.taskId,
+          sessionKey: currentSessionKeyRef.current,
+          goalName: sessionMeta.goalName,
+          bucketName: sessionMeta.bucketName,
+          repeatingRuleId: sessionMeta.repeatingRuleId,
+          repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
+          repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
+          startedAt: now - delta,
+        })
+
+        // Restore metadata and clear lock to allow resuming/logging same task
+        sessionMetadataRef.current = preservedMeta
         lastLoggedSessionKeyRef.current = null
-        return false
       }
 
+      setIsRunning(false)
+      setElapsed(currentElapsed)
+      setSessionStart(null)
+      lastCommittedElapsedRef.current = currentElapsed
+      // Do not clear session metadata or keys so we can resume
+    } else {
       const now = Date.now()
+      // Resume from current elapsed
       setSessionStart(now - elapsed)
+      setIsRunning(true)
       lastTickRef.current = null
-      const metadata = deriveSessionMetadata()
-      sessionMetadataRef.current = metadata
-      currentSessionKeyRef.current = metadata.sessionKey
-      lastLoggedSessionKeyRef.current = null
-      return true
-    })
+      
+      // If we are starting fresh (elapsed 0), ensure committed is 0
+      if (elapsed === 0) {
+        lastCommittedElapsedRef.current = 0
+        const metadata = deriveSessionMetadata()
+        sessionMetadataRef.current = metadata
+        currentSessionKeyRef.current = metadata.sessionKey
+        lastLoggedSessionKeyRef.current = null
+      }
+    }
   }
 
   const handleReset = () => {
-    if (elapsed > 0) {
+    const currentElapsed = isRunning && sessionStart !== null ? Date.now() - sessionStart : elapsed
+    const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
+    if (delta > 0) {
       const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
       const sessionMeta = sessionMetadataRef.current
-      registerNewHistoryEntry(elapsed, entryName, {
+      registerNewHistoryEntry(delta, entryName, {
         goalId: sessionMeta.goalId,
         bucketId: sessionMeta.bucketId,
         taskId: sessionMeta.taskId,
@@ -4464,6 +4580,7 @@ useEffect(() => {
         repeatingRuleId: sessionMeta.repeatingRuleId,
         repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
         repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
+        startedAt: Date.now() - delta,
       })
     }
     setIsRunning(false)
@@ -4472,6 +4589,7 @@ useEffect(() => {
     lastTickRef.current = null
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
+    lastCommittedElapsedRef.current = 0
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
   }
 
@@ -4493,10 +4611,11 @@ useEffect(() => {
         repeatingRuleId?: string | null
         repeatingOccurrenceDate?: string | null
         repeatingOriginalTime?: number | null
+        startedAt?: number
       },
     ) => {
       const now = Date.now()
-      const startedAt = sessionStart ?? now - elapsedMs
+      const startedAt = context?.startedAt ?? sessionStart ?? now - elapsedMs
       const sessionMeta = sessionMetadataRef.current
       const contextGoalId =
         context?.goalId !== undefined ? context.goalId : sessionMeta.goalId
@@ -4596,6 +4715,9 @@ useEffect(() => {
   )
 
   const handleOpenSnapback = useCallback(() => {
+    if (isRunning && sessionStart !== null) {
+      setElapsed(Date.now() - sessionStart)
+    }
     setIsRunning(false)
     setSnapbackDurationMin(5)
     setSnapbackDurationMode('preset')
@@ -4606,7 +4728,7 @@ useEffect(() => {
     setSnapbackCustomReason('')
     setSnapbackCustomDuration('')
     setIsSnapbackOpen(true)
-  }, [])
+  }, [isRunning, sessionStart])
 
   const handleCloseSnapback = useCallback(() => {
     setIsSnapbackOpen(false)
@@ -4642,9 +4764,12 @@ useEffect(() => {
             repeatingOccurrenceDate: fallbackContext.repeatingOccurrenceDate,
             repeatingOriginalTime: fallbackContext.repeatingOriginalTime,
           }
-    const trimmedElapsed = Math.max(0, Math.round(elapsed - snapDurationMs))
-    if (trimmedElapsed > 0) {
-      registerNewHistoryEntry(trimmedElapsed, entryName, {
+    // Calculate effective work time: (Total Elapsed - Snapback Duration) - Already Logged
+    const effectiveTotal = Math.max(0, elapsed - snapDurationMs)
+    const delta = Math.max(0, effectiveTotal - lastCommittedElapsedRef.current)
+    
+    if (delta > 0) {
+      registerNewHistoryEntry(delta, entryName, {
         goalId: sourceMeta.goalId,
         bucketId: sourceMeta.bucketId,
         taskId: sourceMeta.taskId,
@@ -4654,11 +4779,13 @@ useEffect(() => {
         repeatingRuleId: sourceMeta.repeatingRuleId ?? null,
         repeatingOccurrenceDate: sourceMeta.repeatingOccurrenceDate ?? null,
         repeatingOriginalTime: sourceMeta.repeatingOriginalTime ?? null,
+        startedAt: now - delta,
       })
     }
     setElapsed(0)
     setSessionStart(null)
     lastTickRef.current = null
+    lastCommittedElapsedRef.current = 0
   } else {
     setSessionStart(null)
   }
@@ -4741,6 +4868,86 @@ useEffect(() => {
     snapbackReason,
   ])
 
+  const pauseAndLogCurrentSession = useCallback(() => {
+    const totalElapsed = computeCurrentElapsed()
+    if (isRunning && totalElapsed > 0) {
+      const delta = Math.max(0, totalElapsed - lastCommittedElapsedRef.current)
+      if (delta > 0) {
+        const meta = sessionMetadataRef.current
+        const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'Focus Session'
+        registerNewHistoryEntry(delta, entryName, {
+          goalId: meta.goalId,
+          bucketId: meta.bucketId,
+          taskId: meta.taskId,
+          sessionKey: currentSessionKeyRef.current,
+          goalName: meta.goalName,
+          bucketName: meta.bucketName,
+          repeatingRuleId: meta.repeatingRuleId,
+          repeatingOccurrenceDate: meta.repeatingOccurrenceDate,
+          repeatingOriginalTime: meta.repeatingOriginalTime,
+          startedAt: Date.now() - delta,
+        })
+      }
+    }
+    const snappedElapsed = computeCurrentElapsed()
+    setIsRunning(false)
+    setElapsed(snappedElapsed)
+    setSessionStart(null)
+    lastTickRef.current = null
+    currentSessionKeyRef.current = null
+    lastLoggedSessionKeyRef.current = null
+    lastCommittedElapsedRef.current = snappedElapsed
+  }, [computeCurrentElapsed, isRunning, normalizedCurrentTask, registerNewHistoryEntry])
+
+  const saveCurrentModeSnapshot = useCallback(
+    (mode: TimeMode) => {
+      const totalElapsed = computeCurrentElapsed()
+      modeStateRef.current[mode] = {
+        ...modeStateRef.current[mode],
+        taskName: currentTaskName,
+        customTaskDraft,
+        source: focusSource,
+        elapsed: totalElapsed,
+        sessionStart: null,
+        isRunning: false,
+        sessionMeta: { ...sessionMetadataRef.current },
+        currentSessionKey: null,
+        lastLoggedSessionKey: null,
+        lastTick: null,
+        lastCommittedElapsed: lastCommittedElapsedRef.current,
+      }
+    },
+    [computeCurrentElapsed, currentTaskName, customTaskDraft, focusSource],
+  )
+
+  const restoreModeSnapshot = useCallback((mode: TimeMode) => {
+    const snapshot = modeStateRef.current[mode]
+    setCurrentTaskName(snapshot.taskName)
+    setCustomTaskDraft(snapshot.customTaskDraft)
+    setFocusSource(snapshot.source)
+    setElapsed(snapshot.elapsed)
+    setSessionStart(snapshot.sessionStart)
+    setIsRunning(Boolean(snapshot.isRunning && snapshot.sessionStart !== null))
+    sessionMetadataRef.current = { ...snapshot.sessionMeta }
+    currentSessionKeyRef.current = snapshot.currentSessionKey
+    lastLoggedSessionKeyRef.current = snapshot.lastLoggedSessionKey
+    lastTickRef.current = snapshot.lastTick
+    lastCommittedElapsedRef.current = snapshot.lastCommittedElapsed
+  }, [])
+
+  const handleSwitchTimeMode = useCallback(
+    (mode: TimeMode) => {
+      if (mode === timeMode) return
+      if (isRunning || elapsed > 0) {
+        pauseAndLogCurrentSession()
+      }
+      saveCurrentModeSnapshot(timeMode)
+      restoreModeSnapshot(mode)
+      setTimeMode(mode)
+    },
+    [elapsed, isRunning, pauseAndLogCurrentSession, restoreModeSnapshot, saveCurrentModeSnapshot, timeMode],
+  )
+
   useEffect(() => {
     if (!isSnapbackOpen) {
       return
@@ -4807,27 +5014,33 @@ useEffect(() => {
       if (detail.autoStart) {
         const now = Date.now()
         const previousSessionKey = currentSessionKeyRef.current
-        if (elapsed > 0) {
-          const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
-          const previousSessionMeta = sessionMetadataRef.current
-          registerNewHistoryEntry(elapsed, entryName, {
-            goalId: previousSessionMeta.goalId ?? previousContext.goalId,
-            bucketId: previousSessionMeta.bucketId ?? previousContext.bucketId,
-            taskId: previousSessionMeta.taskId ?? previousContext.taskId,
-            sessionKey: previousSessionKey,
-            goalName: previousSessionMeta.goalName ?? previousContext.goalName,
-            bucketName: previousSessionMeta.bucketName ?? previousContext.bucketName,
-            repeatingRuleId: previousSessionMeta.repeatingRuleId ?? previousContext.repeatingRuleId,
-            repeatingOccurrenceDate:
-              previousSessionMeta.repeatingOccurrenceDate ?? previousContext.repeatingOccurrenceDate,
-            repeatingOriginalTime:
-              previousSessionMeta.repeatingOriginalTime ?? previousContext.repeatingOriginalTime,
-          })
+        const currentElapsed = isRunning && sessionStart !== null ? now - sessionStart : elapsed
+        if (currentElapsed > 0) {
+          const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
+          if (delta > 0) {
+            const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+            const previousSessionMeta = sessionMetadataRef.current
+            registerNewHistoryEntry(delta, entryName, {
+              goalId: previousSessionMeta.goalId ?? previousContext.goalId,
+              bucketId: previousSessionMeta.bucketId ?? previousContext.bucketId,
+              taskId: previousSessionMeta.taskId ?? previousContext.taskId,
+              sessionKey: previousSessionKey,
+              goalName: previousSessionMeta.goalName ?? previousContext.goalName,
+              bucketName: previousSessionMeta.bucketName ?? previousContext.bucketName,
+              repeatingRuleId: previousSessionMeta.repeatingRuleId ?? previousContext.repeatingRuleId,
+              repeatingOccurrenceDate:
+                previousSessionMeta.repeatingOccurrenceDate ?? previousContext.repeatingOccurrenceDate,
+              repeatingOriginalTime:
+                previousSessionMeta.repeatingOriginalTime ?? previousContext.repeatingOriginalTime,
+              startedAt: now - delta,
+            })
+          }
         }
         setElapsed(0)
         setSessionStart(now)
         lastTickRef.current = null
         setIsRunning(true)
+        lastCommittedElapsedRef.current = 0
         const autoSessionKey = makeSessionKey(detail.goalId ?? null, detail.bucketId ?? null, detail.taskId ?? null)
         const autoTaskLabel =
           taskName.length > 0 ? taskName : goalName.length > 0 ? goalName : 'New Task'
@@ -4852,7 +5065,7 @@ useEffect(() => {
     return () => {
       window.removeEventListener(FOCUS_EVENT_TYPE, handleFocusBroadcast as EventListener)
     }
-  }, [elapsed, normalizedCurrentTask, registerNewHistoryEntry, scrollFocusToTop, updateNotebookForKey])
+  }, [elapsed, normalizedCurrentTask, registerNewHistoryEntry, scrollFocusToTop, updateNotebookForKey, isRunning, sessionStart])
 
   const formattedTime = useMemo(() => formatTime(elapsed), [elapsed])
   const formattedClock = useMemo(() => formatClockTime(currentTime), [currentTime])
@@ -4875,6 +5088,13 @@ useEffect(() => {
   const timeToggleTitle = isTimeHidden ? 'Show stopwatch time' : 'Hide stopwatch time'
   const statusText = isRunning ? 'running' : elapsed > 0 ? 'paused' : 'idle'
   const primaryLabel = isRunning ? 'Pause' : elapsed > 0 ? 'Resume' : 'Start'
+  const timeModeOptions = useMemo(
+    () => [
+      { id: 'focus' as TimeMode, label: 'Focus' },
+      { id: 'break' as TimeMode, label: 'Break' },
+    ],
+    [],
+  )
 
   // Keep standard view as default; dashboard toggles on demand
   const [dashboardLayout, setDashboardLayout] = useState(false)
@@ -4910,6 +5130,20 @@ useEffect(() => {
           <h1 className="stopwatch-heading">Taskwatch</h1>
         </>
       )}
+      <div className="time-mode-toggle" role="tablist" aria-label="Timer mode">
+        {timeModeOptions.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={timeMode === option.id}
+            className={classNames('time-mode-toggle__button', timeMode === option.id && 'time-mode-toggle__button--active')}
+            onClick={() => handleSwitchTimeMode(option.id)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
       {dashboardLayout ? (
         <div className="taskwatch-columns">
           <div className="taskwatch-col taskwatch-col--left">
@@ -5519,7 +5753,7 @@ useEffect(() => {
               </time>
               <div className="time-display">
                 <span className="time-label">elapsed</span>
-                <span className={timeValueClassName} aria-hidden={isTimeHidden}>
+                <span className={timeValueClassName} aria-hidden={isTimeHidden} ref={timeDisplayRef}>
                   {formattedTime}
                 </span>
               </div>
@@ -5546,7 +5780,7 @@ useEffect(() => {
                   className="control control-secondary"
                   type="button"
                   onClick={handleReset}
-                  disabled={elapsed === 0}
+                  disabled={!isRunning && elapsed === 0}
                 >
                   Reset
                 </button>
@@ -6170,7 +6404,7 @@ useEffect(() => {
         </time>
         <div className="time-display">
           <span className="time-label">elapsed</span>
-          <span className={timeValueClassName} aria-hidden={isTimeHidden}>
+          <span className={timeValueClassName} aria-hidden={isTimeHidden} ref={timeDisplayRef}>
             {formattedTime}
           </span>
         </div>
@@ -6197,7 +6431,7 @@ useEffect(() => {
             className="control control-secondary"
             type="button"
             onClick={handleReset}
-            disabled={elapsed === 0}
+            disabled={!isRunning && elapsed === 0}
           >
             Reset
           </button>
