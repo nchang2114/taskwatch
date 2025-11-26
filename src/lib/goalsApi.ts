@@ -2,22 +2,31 @@ import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
-const GOAL_COLOUR_CHOICES = [
-  'from-fuchsia-500 to-purple-500',
-  'from-emerald-500 to-cyan-500',
-  'from-lime-400 to-emerald-500',
-  'from-sky-500 to-indigo-500',
-  'from-amber-400 to-orange-500',
-] as const
-const FALLBACK_GOAL_COLOR = GOAL_COLOUR_CHOICES[0]
+const GOAL_COLOUR_PRESETS: Record<string, string> = {
+  'from-fuchsia-500 to-purple-500': 'linear-gradient(135deg, #f471b5 0%, #a855f7 50%, #6b21a8 100%)',
+  'from-emerald-500 to-cyan-500': 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
+  'from-lime-400 to-emerald-500': 'linear-gradient(135deg, #bef264 0%, #4ade80 45%, #22c55e 100%)',
+  'from-sky-500 to-indigo-500': 'linear-gradient(135deg, #38bdf8 0%, #60a5fa 50%, #6366f1 100%)',
+  'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
+}
+const FALLBACK_GOAL_COLOR = GOAL_COLOUR_PRESETS['from-fuchsia-500 to-purple-500']
 
-const sanitizeGoalColour = (value: string | null | undefined): string | null => {
+const normalizeGoalColour = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   if (!trimmed) return null
-  const normalized = trimmed.toLowerCase()
-  const match = GOAL_COLOUR_CHOICES.find((choice) => choice.toLowerCase() === normalized)
-  return match ?? null
+  if (trimmed.toLowerCase().startsWith('linear-gradient(')) {
+    return trimmed
+  }
+  const preset = GOAL_COLOUR_PRESETS[trimmed]
+  if (preset) return preset
+  // If a plain hex is provided, convert to a simple two-stop gradient
+  const hexMatch = trimmed.match(/^#?[0-9a-fA-F]{6}$/)
+  if (hexMatch) {
+    const hex = trimmed.startsWith('#') ? trimmed : `#${trimmed}`
+    return `linear-gradient(135deg, ${hex} 0%, ${hex} 100%)`
+  }
+  return null
 }
 
 export type DbGoal = {
@@ -525,7 +534,7 @@ export async function createGoal(name: string, color: string) {
     return null
   }
   const sort_index = await nextSortIndex('goals')
-  const safeColour = sanitizeGoalColour(color) ?? FALLBACK_GOAL_COLOR
+  const safeColour = normalizeGoalColour(color) ?? FALLBACK_GOAL_COLOR
   const payload = {
     user_id: session.user.id,
     name,
@@ -556,11 +565,7 @@ export async function setGoalColor(goalId: string, color: string) {
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  const primary = sanitizeGoalColour(color)
-  if (!primary) {
-    // If the chosen value isn't in the allowed list, skip remote update to avoid constraint errors.
-    return
-  }
+  const primary = normalizeGoalColour(color) ?? FALLBACK_GOAL_COLOR
   let { error } = await supabase
     .from('goals')
     .update({ goal_colour: primary })
@@ -1110,7 +1115,7 @@ export async function seedGoalsIfEmpty(seeds: GoalSeed[]): Promise<boolean> {
     const goalInserts = seeds.map((goal, index) => ({
       user_id: userId,
       name: goal.name,
-      goal_colour: goal.goalColour ?? 'from-fuchsia-500 to-purple-500',
+      goal_colour: normalizeGoalColour(goal.goalColour) ?? FALLBACK_GOAL_COLOR,
       sort_index: (index + 1) * STEP,
       starred: Boolean(goal.starred),
       goal_archive: Boolean(goal.archived),

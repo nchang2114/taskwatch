@@ -921,6 +921,19 @@ const BASE_GRADIENT_PREVIEW: Record<string, string> = {
   'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
 }
 
+const presetGradientForToken = (token: string): string | undefined => BASE_GRADIENT_PREVIEW[token]
+const findTokenForGradient = (gradient: string | null | undefined): string | null => {
+  const target = (gradient ?? '').trim().toLowerCase()
+  if (!target) return null
+  for (const key of GOAL_GRADIENTS) {
+    const preset = BASE_GRADIENT_PREVIEW[key]
+    if (preset && preset.toLowerCase() === target) {
+      return key
+    }
+  }
+  return null
+}
+
 const DEFAULT_CUSTOM_GRADIENT_ANGLE = 135
 
 const createCustomGradientString = (from: string, to: string, angle = DEFAULT_CUSTOM_GRADIENT_ANGLE) =>
@@ -1127,8 +1140,8 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
   }, [goal.id, initialFrom, initialTo])
 
   const customPreview = useMemo(() => createCustomGradientString(customStops.from, customStops.to), [customStops])
-  const activeGradient =
-    goal.customGradient || !BASE_GRADIENT_PREVIEW[goal.goalColour] ? 'custom' : goal.goalColour
+  const matchedPreset = useMemo(() => findTokenForGradient(goal.goalColour), [goal.goalColour])
+  const activeGradient = goal.customGradient ? 'custom' : matchedPreset ?? 'custom'
   const gradientSwatches = useMemo(() => [...GOAL_GRADIENTS, 'custom'], [])
   const gradientPreviewMap = useMemo<Record<string, string>>(
     () => ({
@@ -1143,7 +1156,8 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
       onUpdate({ customGradient: { ...customStops } })
       return
     }
-    onUpdate({ goalColour: value, customGradient: null })
+    const resolved = presetGradientForToken(value) ?? value
+    onUpdate({ goalColour: resolved, customGradient: null })
   }
 
   const handleCustomStopChange = (key: 'from' | 'to') => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -9147,7 +9161,10 @@ export default function GoalsPage(): ReactElement {
       }
       return
     }
-    const gradientForGoal = selectedGoalGradient === 'custom' ? customGradientPreview : selectedGoalGradient
+    const gradientForGoal =
+      selectedGoalGradient === 'custom'
+        ? customGradientPreview
+        : presetGradientForToken(selectedGoalGradient) ?? selectedGoalGradient
     apiCreateGoal(trimmed, gradientForGoal)
       .then((db) => {
         const id = db?.id ?? `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
