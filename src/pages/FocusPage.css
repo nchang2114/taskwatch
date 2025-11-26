@@ -800,6 +800,29 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
   color: #ffffff;
   box-shadow: none;
 }
+
+.time-mode-toggle__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--status-idle);
+  box-shadow: 0 0 6px var(--status-idle);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  margin-left: 0.4rem;
+  opacity: 0.6;
+}
+.time-mode-toggle__dot.status-running {
+  background-color: var(--status-running);
+  box-shadow: 0 0 8px var(--status-running);
+  opacity: 1;
+}
+.time-mode-toggle__dot.status-paused {
+  background-color: var(--status-paused);
+  box-shadow: 0 0 8px var(--status-paused);
+  opacity: 1;
+}
+
 html[data-theme='light'] .time-mode-toggle {
   border-color: rgba(0, 0, 0, 0.06);
   background: linear-gradient(135deg, rgba(245, 248, 255, 0.96) 0%, rgba(236, 240, 255, 0.96) 100%);

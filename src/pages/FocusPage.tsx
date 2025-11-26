@@ -4547,6 +4547,7 @@ useEffect(() => {
       lastCommittedElapsedRef.current = currentElapsed
       // Do not clear session metadata or keys so we can resume
     } else {
+      pauseBackgroundModes()
       const now = Date.now()
       // Resume from current elapsed
       setSessionStart(now - elapsed)
@@ -4565,31 +4566,7 @@ useEffect(() => {
   }
 
   const handleReset = () => {
-    const currentElapsed = isRunning && sessionStart !== null ? Date.now() - sessionStart : elapsed
-    const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
-    if (delta > 0) {
-      const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
-      const sessionMeta = sessionMetadataRef.current
-      registerNewHistoryEntry(delta, entryName, {
-        goalId: sessionMeta.goalId,
-        bucketId: sessionMeta.bucketId,
-        taskId: sessionMeta.taskId,
-        sessionKey: currentSessionKeyRef.current,
-        goalName: sessionMeta.goalName,
-        bucketName: sessionMeta.bucketName,
-        repeatingRuleId: sessionMeta.repeatingRuleId,
-        repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
-        repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
-        startedAt: Date.now() - delta,
-      })
-    }
-    setIsRunning(false)
-    setElapsed(0)
-    setSessionStart(null)
-    lastTickRef.current = null
-    currentSessionKeyRef.current = null
-    lastLoggedSessionKeyRef.current = null
-    lastCommittedElapsedRef.current = 0
+    pauseAndLogCurrentSession()
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
   }
 
@@ -4868,6 +4845,43 @@ useEffect(() => {
     snapbackReason,
   ])
 
+  const pauseBackgroundModes = useCallback(() => {
+    const now = Date.now()
+    Object.entries(modeStateRef.current).forEach(([key, snapshot]) => {
+      const modeKey = key as TimeMode
+      if (modeKey !== timeMode && snapshot.isRunning && snapshot.sessionStart !== null) {
+        const totalElapsed = now - snapshot.sessionStart
+        const delta = Math.max(0, totalElapsed - snapshot.lastCommittedElapsed)
+
+        if (delta > 0) {
+          const meta = snapshot.sessionMeta
+          const entryName = snapshot.taskName.trim().length > 0 ? snapshot.taskName.trim() : 'Focus Session'
+          registerNewHistoryEntry(delta, entryName, {
+            goalId: meta.goalId,
+            bucketId: meta.bucketId,
+            taskId: meta.taskId,
+            sessionKey: snapshot.currentSessionKey,
+            goalName: meta.goalName,
+            bucketName: meta.bucketName,
+            repeatingRuleId: meta.repeatingRuleId,
+            repeatingOccurrenceDate: meta.repeatingOccurrenceDate,
+            repeatingOriginalTime: meta.repeatingOriginalTime,
+            startedAt: now - delta,
+          })
+        }
+
+        modeStateRef.current[modeKey] = {
+          ...snapshot,
+          isRunning: false,
+          sessionStart: null,
+          elapsed: totalElapsed,
+          lastCommittedElapsed: totalElapsed,
+          lastLoggedSessionKey: null,
+        }
+      }
+    })
+  }, [registerNewHistoryEntry, timeMode])
+
   const pauseAndLogCurrentSession = useCallback(() => {
     const totalElapsed = computeCurrentElapsed()
     if (isRunning && totalElapsed > 0) {
@@ -4902,22 +4916,25 @@ useEffect(() => {
   const saveCurrentModeSnapshot = useCallback(
     (mode: TimeMode) => {
       const totalElapsed = computeCurrentElapsed()
+      const currentIsRunning = isRunning
+      const currentSessionStart = sessionStart
+      
       modeStateRef.current[mode] = {
         ...modeStateRef.current[mode],
         taskName: currentTaskName,
         customTaskDraft,
         source: focusSource,
         elapsed: totalElapsed,
-        sessionStart: null,
-        isRunning: false,
+        sessionStart: currentSessionStart,
+        isRunning: currentIsRunning,
         sessionMeta: { ...sessionMetadataRef.current },
-        currentSessionKey: null,
-        lastLoggedSessionKey: null,
-        lastTick: null,
+        currentSessionKey: currentSessionKeyRef.current,
+        lastLoggedSessionKey: lastLoggedSessionKeyRef.current,
+        lastTick: lastTickRef.current,
         lastCommittedElapsed: lastCommittedElapsedRef.current,
       }
     },
-    [computeCurrentElapsed, currentTaskName, customTaskDraft, focusSource],
+    [computeCurrentElapsed, currentTaskName, customTaskDraft, focusSource, isRunning, sessionStart],
   )
 
   const restoreModeSnapshot = useCallback((mode: TimeMode) => {
@@ -4938,14 +4955,11 @@ useEffect(() => {
   const handleSwitchTimeMode = useCallback(
     (mode: TimeMode) => {
       if (mode === timeMode) return
-      if (isRunning || elapsed > 0) {
-        pauseAndLogCurrentSession()
-      }
       saveCurrentModeSnapshot(timeMode)
       restoreModeSnapshot(mode)
       setTimeMode(mode)
     },
-    [elapsed, isRunning, pauseAndLogCurrentSession, restoreModeSnapshot, saveCurrentModeSnapshot, timeMode],
+    [restoreModeSnapshot, saveCurrentModeSnapshot, timeMode],
   )
 
   useEffect(() => {
@@ -5131,18 +5145,31 @@ useEffect(() => {
         </>
       )}
       <div className="time-mode-toggle" role="tablist" aria-label="Timer mode">
-        {timeModeOptions.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            role="tab"
-            aria-selected={timeMode === option.id}
-            className={classNames('time-mode-toggle__button', timeMode === option.id && 'time-mode-toggle__button--active')}
-            onClick={() => handleSwitchTimeMode(option.id)}
-          >
-            {option.label}
-          </button>
-        ))}
+        {timeModeOptions.map((option) => {
+          const isCurrent = timeMode === option.id
+          const modeIsRunning = isCurrent ? isRunning : modeStateRef.current[option.id].isRunning
+          const modeElapsed = isCurrent ? elapsed : modeStateRef.current[option.id].elapsed
+          let dotClass = 'status-idle'
+          if (modeIsRunning) {
+            dotClass = 'status-running'
+          } else if (modeElapsed > 0) {
+            dotClass = 'status-paused'
+          }
+
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              aria-selected={isCurrent}
+              className={classNames('time-mode-toggle__button', isCurrent && 'time-mode-toggle__button--active')}
+              onClick={() => handleSwitchTimeMode(option.id)}
+            >
+              {option.label}
+              <span className={`time-mode-toggle__dot ${dotClass}`} />
+            </button>
+          )
+        })}
       </div>
       {dashboardLayout ? (
         <div className="taskwatch-columns">
