@@ -124,7 +124,7 @@ export async function fetchGoalsHierarchy(): Promise<
       goals: Array<{
         id: string
         name: string
-        color: string
+        goalColour: string
         createdAt?: string
         surfaceStyle?: string | null
         starred?: boolean
