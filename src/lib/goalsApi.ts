@@ -2,7 +2,19 @@ import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
-const FALLBACK_GOAL_COLOR = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
+const FALLBACK_GOAL_COLOR = 'from-fuchsia-500 to-purple-500'
+
+const sanitizeGoalColour = (value: string | null | undefined): string => {
+  if (typeof value !== 'string') return FALLBACK_GOAL_COLOR
+  const trimmed = value.trim()
+  if (!trimmed) return FALLBACK_GOAL_COLOR
+  const normalized = trimmed.toLowerCase()
+  if (normalized.startsWith('custom:') || normalized.startsWith('linear-gradient(')) {
+    // Persist a safe preset token; custom gradients are kept client-side only
+    return FALLBACK_GOAL_COLOR
+  }
+  return trimmed
+}
 
 export type DbGoal = {
   id: string
@@ -508,15 +520,15 @@ export async function createGoal(name: string, color: string) {
   if (!session?.user?.id) {
     return null
   }
-  const sort_index = await nextSortIndex('goals')
-  const payload = {
-    user_id: session.user.id,
-    name,
-    goal_colour: color,
-    sort_index,
-    starred: false,
-    goal_archive: false,
-  }
+    const sort_index = await nextSortIndex('goals')
+    const payload = {
+      user_id: session.user.id,
+      name,
+      goal_colour: sanitizeGoalColour(color),
+      sort_index,
+      starred: false,
+      goal_archive: false,
+    }
   let created: any | null = null
   {
     const { data, error } = await supabase
@@ -539,11 +551,22 @@ export async function setGoalColor(goalId: string, color: string) {
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  const { error } = await supabase
+  const primary = sanitizeGoalColour(color)
+  let { error } = await supabase
     .from('goals')
-    .update({ goal_colour: color })
+    .update({ goal_colour: primary })
     .eq('id', goalId)
     .eq('user_id', userId)
+  if (error && String((error as any)?.code || '') === '23514') {
+    // Constraint failure (e.g., enum/check); fall back to a safe default gradient
+    const fallback = FALLBACK_GOAL_COLOR
+    const retry = await supabase
+      .from('goals')
+      .update({ goal_colour: fallback })
+      .eq('id', goalId)
+      .eq('user_id', userId)
+    error = retry.error
+  }
   if (error) {
     throw error
   }

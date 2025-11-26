@@ -1083,10 +1083,7 @@ const getSurfaceLabel = (surface: BucketSurfaceStyle): string =>
 
 // Components
 const ThinProgress: React.FC<{ value: number; gradient: string; className?: string }> = ({ value, gradient, className }) => {
-  const isCustomGradient = gradient.startsWith('custom:')
-  const customGradientValue = isCustomGradient ? gradient.slice(7) : undefined
   const resolvedGradient =
-    customGradientValue ||
     (gradient.toLowerCase().startsWith('linear-gradient(') ? gradient : BASE_GRADIENT_PREVIEW[gradient]) ||
     'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)'
   return (
@@ -1115,11 +1112,9 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
     if (goal.customGradient) {
       return goal.customGradient
     }
-    if (goal.goalColour.startsWith('custom:')) {
-      const parsed = extractStopsFromGradient(goal.goalColour.slice(7))
-      if (parsed) {
-        return { ...parsed }
-      }
+    const parsed = extractStopsFromGradient(goal.goalColour)
+    if (parsed) {
+      return { ...parsed }
     }
     return { ...DEFAULT_CUSTOM_STOPS }
   }, [goal.goalColour, goal.customGradient])
@@ -1132,7 +1127,8 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
   }, [goal.id, initialFrom, initialTo])
 
   const customPreview = useMemo(() => createCustomGradientString(customStops.from, customStops.to), [customStops])
-  const activeGradient = goal.goalColour.startsWith('custom:') ? 'custom' : goal.goalColour
+  const activeGradient =
+    goal.customGradient || !BASE_GRADIENT_PREVIEW[goal.goalColour] ? 'custom' : goal.goalColour
   const gradientSwatches = useMemo(() => [...GOAL_GRADIENTS, 'custom'], [])
   const gradientPreviewMap = useMemo<Record<string, string>>(
     () => ({
@@ -8420,7 +8416,7 @@ export default function GoalsPage(): ReactElement {
           if (custom) {
             const gradientString = createCustomGradientString(custom.from, custom.to)
             next.customGradient = { ...custom }
-            const newColor = `custom:${gradientString}`
+            const newColor = gradientString
             next.goalColour = newColor
             if (newColor !== previousColor) {
               colorToPersist = newColor
@@ -8432,9 +8428,7 @@ export default function GoalsPage(): ReactElement {
 
         if (updates.goalColour) {
           next.goalColour = updates.goalColour
-          if (!updates.goalColour.startsWith('custom:')) {
-            next.customGradient = undefined
-          }
+          next.customGradient = undefined
           if (updates.goalColour !== previousColor) {
             colorToPersist = updates.goalColour
           }
@@ -9153,7 +9147,7 @@ export default function GoalsPage(): ReactElement {
       }
       return
     }
-    const gradientForGoal = selectedGoalGradient === 'custom' ? `custom:${customGradientPreview}` : selectedGoalGradient
+    const gradientForGoal = selectedGoalGradient === 'custom' ? customGradientPreview : selectedGoalGradient
     apiCreateGoal(trimmed, gradientForGoal)
       .then((db) => {
         const id = db?.id ?? `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
