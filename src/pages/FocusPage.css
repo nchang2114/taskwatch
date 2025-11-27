@@ -673,7 +673,7 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
 
 /* Dashboard: ensure focus card fully fills the column and content can shrink/wrap */
 .taskwatch--dashboard .task-selector-container { width: 100% !important; max-width: none !important; }
-.taskwatch--dashboard .focus-task { width: 100%; max-width: none; display: flex; align-items: center; /* keep side widths symmetric so center aligns with full card */ --focus-side-width: clamp(0.8rem, 2.8vw, 1.2rem); }
+.taskwatch--dashboard .focus-task { width: 100%; max-width: none; display: flex; align-items: center; /* keep side widths symmetric so center aligns with full card */ --focus-side-width: 1.1rem; }
 .taskwatch--dashboard .focus-task__body { width: auto; max-width: 100%; min-width: 0; flex: 0 1 auto; margin-inline: auto; display: flex; align-items: center; justify-content: center; }
 .taskwatch--dashboard .focus-task__content { width: auto; max-width: 100%; }
 .taskwatch--dashboard .focus-task__main { width: 100%; }
@@ -712,7 +712,7 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
 }
 
 /* Apply the same centering and symmetric side sizing in standard view (Focus page only) */
-.taskwatch-page .focus-task { --focus-side-width: clamp(0.8rem, 2.8vw, 1.2rem); }
+.taskwatch-page .focus-task { --focus-side-width: 1.1rem; }
 .taskwatch-page .goal-task-marker { flex: 0 0 var(--focus-side-width); width: var(--focus-side-width); height: var(--focus-side-width); display: flex; align-items: center; justify-content: center; }
 .taskwatch-page .goal-task-marker--action { width: var(--focus-side-width); height: var(--focus-side-width); border-radius: 0.35rem; }
 .taskwatch-page .focus-task__indicators { flex: 0 0 var(--focus-side-width); width: var(--focus-side-width); display: flex; align-items: center; justify-content: flex-end; margin-left: 0; }
