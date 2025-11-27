@@ -1813,13 +1813,47 @@ useEffect(() => {
       if (!Number.isFinite(source as number)) return null
       return monthDayKey(source as number)
     }
+    const ruleMonthlyPattern = (rule: RepeatingSessionRule): 'day' | 'first' | 'last' =>
+      (rule as any).monthlyPattern === 'first' || (rule as any).monthlyPattern === 'last'
+        ? ((rule as any).monthlyPattern as 'first' | 'last')
+        : 'day'
+    const ruleMonthlyWeekday = (rule: RepeatingSessionRule): number | null => {
+      const days = Array.isArray((rule as any).dayOfWeek) ? (rule as any).dayOfWeek : []
+      if (days.length > 0 && Number.isFinite(days[0])) {
+        const v = Math.round(days[0])
+        if (v >= 0 && v <= 6) return v
+      }
+      const source =
+        Number.isFinite((rule as any).startAtMs as number)
+          ? ((rule as any).startAtMs as number)
+          : Number.isFinite((rule as any).createdAtMs as number)
+            ? ((rule as any).createdAtMs as number)
+            : null
+      if (!Number.isFinite(source as number)) return null
+      return new Date(source as number).getDay()
+    }
     const matchesMonthlyDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
-      const anchorDay = ruleDayOfMonth(rule)
-      if (!Number.isFinite(anchorDay as number)) return false
       const d = new Date(dayStart)
-      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-      const expectedDay = Math.min(anchorDay as number, lastDay)
-      return d.getDate() === expectedDay
+      const pattern = ruleMonthlyPattern(rule)
+      if (pattern === 'day') {
+        const anchorDay = ruleDayOfMonth(rule)
+        if (!Number.isFinite(anchorDay as number)) return false
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+        const expectedDay = Math.min(anchorDay as number, lastDay)
+        return d.getDate() === expectedDay
+      }
+      const weekday = ruleMonthlyWeekday(rule)
+      if (!Number.isFinite(weekday as number)) return false
+      if (pattern === 'first') {
+        const firstOfMonth = new Date(d.getFullYear(), d.getMonth(), 1)
+        const offset = ((weekday as number) - firstOfMonth.getDay() + 7) % 7
+        const firstOccurrence = 1 + offset
+        return d.getDate() === firstOccurrence
+      }
+      const lastOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+      const offset = (lastOfMonth.getDay() - (weekday as number) + 7) % 7
+      const lastOccurrence = lastOfMonth.getDate() - offset
+      return d.getDate() === lastOccurrence
     }
     const now = Date.now()
     const toDayStart = (t: number) => { const x = new Date(t); x.setHours(0,0,0,0); return x.getTime() }

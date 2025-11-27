@@ -282,13 +282,47 @@ const ruleDayOfMonth = (rule: RepeatingSessionRule): number | null => {
   if (!Number.isFinite(source as number)) return null
   return new Date(source as number).getDate()
 }
+const ruleMonthlyPattern = (rule: RepeatingSessionRule): 'day' | 'first' | 'last' =>
+  (rule as any).monthlyPattern === 'first' || (rule as any).monthlyPattern === 'last'
+    ? ((rule as any).monthlyPattern as 'first' | 'last')
+    : 'day'
+const ruleMonthlyWeekday = (rule: RepeatingSessionRule): number | null => {
+  const days = Array.isArray((rule as any).dayOfWeek) ? (rule as any).dayOfWeek : []
+  if (days.length > 0 && Number.isFinite(days[0])) {
+    const v = Math.round(days[0])
+    if (v >= 0 && v <= 6) return v
+  }
+  const source =
+    Number.isFinite((rule as any).startAtMs as number)
+      ? ((rule as any).startAtMs as number)
+      : Number.isFinite((rule as any).createdAtMs as number)
+        ? ((rule as any).createdAtMs as number)
+        : null
+  if (!Number.isFinite(source as number)) return null
+  return new Date(source as number).getDay()
+}
 const matchesMonthlyDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
-  const anchorDay = ruleDayOfMonth(rule)
-  if (!Number.isFinite(anchorDay as number)) return false
   const d = new Date(dayStart)
-  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-  const expectedDay = Math.min(anchorDay as number, lastDay)
-  return d.getDate() === expectedDay
+  const pattern = ruleMonthlyPattern(rule)
+  if (pattern === 'day') {
+    const anchorDay = ruleDayOfMonth(rule)
+    if (!Number.isFinite(anchorDay as number)) return false
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    const expectedDay = Math.min(anchorDay as number, lastDay)
+    return d.getDate() === expectedDay
+  }
+  const weekday = ruleMonthlyWeekday(rule)
+  if (!Number.isFinite(weekday as number)) return false
+  if (pattern === 'first') {
+    const firstOfMonth = new Date(d.getFullYear(), d.getMonth(), 1)
+    const offset = ((weekday as number) - firstOfMonth.getDay() + 7) % 7
+    const firstOccurrence = 1 + offset
+    return d.getDate() === firstOccurrence
+  }
+  const lastOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+  const offset = (lastOfMonth.getDay() - (weekday as number) + 7) % 7
+  const lastOccurrence = lastOfMonth.getDate() - offset
+  return d.getDate() === lastOccurrence
 }
 
 type CustomRecurrenceUnit = 'day' | 'week' | 'month' | 'year'
@@ -298,7 +332,7 @@ type CustomRecurrenceDraft = {
   unit: CustomRecurrenceUnit
   weeklyDays: Set<number>
   monthlyDay: number
-  monthlyPattern: 'day' | 'nth' | 'last'
+  monthlyPattern: 'day' | 'first' | 'last'
   ends: CustomRecurrenceEnds
   endDate: string
   occurrences: number
@@ -11047,6 +11081,36 @@ useEffect(() => {
           const handleModalClick = (e: MouseEvent) => {
             e.stopPropagation()
           }
+          const isFirstWeekdayOfMonth = (date: Date): boolean => {
+            const firstOfMonth = new Date(date.getFullYear(), date.getMonth(), 1)
+            const offset = (date.getDay() - firstOfMonth.getDay() + 7) % 7
+            const firstOccurrence = 1 + offset
+            return date.getDate() === firstOccurrence
+          }
+          const isLastWeekdayOfMonth = (date: Date): boolean => {
+            const lastOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+            const offset = (lastOfMonth.getDay() - date.getDay() + 7) % 7
+            const lastOccurrence = lastOfMonth.getDate() - offset
+            return date.getDate() === lastOccurrence
+          }
+          const monthlyOptions = (() => {
+            const opts: Array<{ value: CustomRecurrenceDraft['monthlyPattern']; label: string }> = [
+              { value: 'day', label: `Monthly on day ${draft.monthlyDay}` },
+            ]
+            const weekdayLabel = weekdayFull[baseDate.getDay()]
+            const qualifiesFirst = isFirstWeekdayOfMonth(baseDate)
+            const qualifiesLast = isLastWeekdayOfMonth(baseDate)
+            if (qualifiesFirst) {
+              opts.push({ value: 'first', label: `Monthly on the first ${weekdayLabel}` })
+            } else if (qualifiesLast) {
+              opts.push({ value: 'last', label: `Monthly on the last ${weekdayLabel}` })
+            }
+            return opts
+          })()
+          const resolvedMonthlyPattern =
+            monthlyOptions.some((opt) => opt.value === draft.monthlyPattern) ? draft.monthlyPattern : monthlyOptions[0].value
+          const selectedMonthlyLabel =
+            monthlyOptions.find((opt) => opt.value === resolvedMonthlyPattern)?.label ?? monthlyOptions[0].label
           const endDateValueMs = (() => {
             const parsed = parseLocalDateInput(draft.endDate)
             if (Number.isFinite(parsed as number)) return parsed as number
@@ -11062,6 +11126,7 @@ useEffect(() => {
     const DAY_MS = 24 * 60 * 60 * 1000
     const createOptions: {
       weeklyDays?: number[]
+      monthlyPattern?: 'day' | 'first' | 'last'
       endDateMs?: number
       endAfterOccurrences?: number
       repeatEvery?: number
@@ -11081,6 +11146,11 @@ useEffect(() => {
               createOptions.weeklyDays = Array.from(draft.weeklyDays)
             } else if (draft.unit === 'month') {
               frequency = 'monthly'
+              if (resolvedMonthlyPattern === 'first' || resolvedMonthlyPattern === 'last') {
+                createOptions.monthlyPattern = resolvedMonthlyPattern
+              } else {
+                createOptions.monthlyPattern = 'day'
+              }
             } else if (draft.unit === 'year') {
               frequency = 'annually'
             } else {
@@ -11198,27 +11268,19 @@ useEffect(() => {
                           onClick={() => setCustomMonthlyMenuOpen((prev) => !prev)}
                         >
                           <span className="custom-recur__select-label">
-                            {draft.monthlyPattern === 'day'
-                              ? `Monthly on day ${draft.monthlyDay}`
-                              : draft.monthlyPattern === 'nth'
-                                ? `Monthly on the fourth ${weekdayFull[baseDate.getDay()]}`
-                                : `Monthly on the last ${weekdayFull[baseDate.getDay()]}`}
+                            {selectedMonthlyLabel}
                           </span>
                           <span className="custom-recur__chevron" aria-hidden="true">▾</span>
                         </button>
                         {customMonthlyMenuOpen ? (
                           <div className="custom-recur__menu" role="listbox" aria-label="Monthly pattern options">
-                            {([
-                              { value: 'day', label: `Monthly on day ${draft.monthlyDay}` },
-                              { value: 'nth', label: `Monthly on the fourth ${weekdayFull[baseDate.getDay()]}` },
-                              { value: 'last', label: `Monthly on the last ${weekdayFull[baseDate.getDay()]}` },
-                            ] as const).map((opt) => (
+                            {monthlyOptions.map((opt) => (
                               <button
                                 key={opt.value}
                                 type="button"
                                 role="option"
-                                aria-selected={draft.monthlyPattern === opt.value}
-                                className={`custom-recur__option${draft.monthlyPattern === opt.value ? ' is-selected' : ''}`}
+                                aria-selected={resolvedMonthlyPattern === opt.value}
+                                className={`custom-recur__option${resolvedMonthlyPattern === opt.value ? ' is-selected' : ''}`}
                                 onClick={() => {
                                   setCustomRecurrenceDraft((prev) => ({ ...prev, monthlyPattern: opt.value }))
                                   setCustomMonthlyMenuOpen(false)
