@@ -9027,6 +9027,9 @@ useEffect(() => {
         id: makeHistoryId(),
         notes: source.notes,
         subtasks: source.subtasks.map((subtask) => ({ ...subtask })),
+        // A duplicated entry should not stay linked to a repeating rule
+        repeatingSessionId: null,
+        originalTime: null,
       }
       updateHistory((current) => {
         const next = [...current, newEntry]
