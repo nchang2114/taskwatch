@@ -195,7 +195,7 @@
   position: absolute;
   top: calc(100% + 0.45rem);
   left: 0;
-  z-index: 40;
+  z-index: 1200;
   box-sizing: border-box;
   border-radius: 0.75rem;
   border: 1px solid rgba(148, 160, 255, 0.35);
@@ -3823,6 +3823,27 @@ body.scroll-lock .calendar-day-column {
   margin-left: 0.35rem;
 }
 
+.custom-recur__date-picker {
+  grid-column: 2;
+  margin-left: 0.35rem;
+}
+
+.custom-recur__date-picker .inspector-picker__button {
+  border: 1px solid #d4daf8;
+  background: #f5f7ff;
+  color: #1f2937;
+  padding: 0.48rem 0.6rem;
+  border-radius: 0.5rem;
+  min-width: 150px;
+  font-size: 0.9rem;
+  width: 100%;
+  text-align: left;
+}
+
+.custom-recur__date-picker.is-disabled {
+  opacity: 0.7;
+}
+
 .custom-recur__date {
   border: 1px solid #d4daf8;
   background: #f5f7ff;
@@ -3974,6 +3995,12 @@ html[data-theme='dark'] .custom-recur__date {
   color: #d3dcff;
 }
 
+html[data-theme='dark'] .custom-recur__date-picker .inspector-picker__button {
+  border-color: #24315d;
+  background: #0c1227;
+  color: #d3dcff;
+}
+
 html[data-theme='dark'] .custom-recur__ghost {
   color: #a7bcff;
 }
@@ -3981,5 +4008,3 @@ html[data-theme='dark'] .custom-recur__ghost {
 html[data-theme='dark'] .custom-recur__primary {
   box-shadow: 0 10px 22px rgba(46, 109, 255, 0.28);
 }
-
-

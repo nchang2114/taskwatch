@@ -1294,6 +1294,26 @@ const formatDateDisplay = (timestamp: number): string => {
   })
 }
 
+const formatLocalDateYmd = (ms: number): string => {
+  const date = new Date(ms)
+  date.setHours(0, 0, 0, 0)
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const parseLocalDateInput = (value: string): number | null => {
+  const parts = value.split('-').map((p) => Number(p))
+  if (parts.length !== 3) return null
+  const [y, m, d] = parts
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  const dt = new Date(y, m - 1, d)
+  dt.setHours(0, 0, 0, 0)
+  const ms = dt.getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
 const startOfMonth = (value: number): number => {
   const date = new Date(value)
   date.setHours(0, 0, 0, 0)
@@ -1314,6 +1334,7 @@ const InspectorDateInput = ({ value, onChange, ariaLabel }: InspectorDateInputPr
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(value))
+  const [popoverCoords, setPopoverCoords] = useState<{ top: number; left: number } | null>(null)
 
   useEffect(() => {
     if (!open) {
@@ -1345,6 +1366,44 @@ const InspectorDateInput = ({ value, onChange, ariaLabel }: InspectorDateInputPr
       window.removeEventListener('keydown', handleKey)
     }
   }, [open])
+
+  const updatePopoverPosition = useCallback(() => {
+    if (!open) return
+    if (!triggerRef.current || !popoverRef.current) return
+    const margin = 10
+    const triggerRect = triggerRef.current.getBoundingClientRect()
+    const popRect = popoverRef.current.getBoundingClientRect()
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : popRect.width
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : popRect.height
+    let top = triggerRect.bottom + margin
+    let left = triggerRect.left
+    if (top + popRect.height > viewportHeight - margin) {
+      const aboveTop = triggerRect.top - margin - popRect.height
+      if (aboveTop >= margin) {
+        top = aboveTop
+      } else {
+        top = Math.max(margin, Math.min(top, viewportHeight - margin - popRect.height))
+      }
+    }
+    if (left + popRect.width > viewportWidth - margin) {
+      left = viewportWidth - margin - popRect.width
+    }
+    left = Math.max(margin, left)
+    setPopoverCoords({ top, left })
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const rafId = typeof window !== 'undefined' ? window.requestAnimationFrame(updatePopoverPosition) : 0
+    const handle = () => updatePopoverPosition()
+    window.addEventListener('resize', handle)
+    window.addEventListener('scroll', handle, true)
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId)
+      window.removeEventListener('resize', handle)
+      window.removeEventListener('scroll', handle, true)
+    }
+  }, [open, updatePopoverPosition])
 
   const monthDate = new Date(visibleMonth)
   const monthLabel = monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -1399,7 +1458,12 @@ const InspectorDateInput = ({ value, onChange, ariaLabel }: InspectorDateInputPr
         {formatDateDisplay(value)}
       </button>
       {open ? (
-        <div className="inspector-picker__popover inspector-picker__popover--date" ref={popoverRef} role="dialog">
+        <div
+          className="inspector-picker__popover inspector-picker__popover--date"
+          ref={popoverRef}
+          role="dialog"
+          style={popoverCoords ? { position: 'fixed', top: popoverCoords.top, left: popoverCoords.left, zIndex: 9999 } : undefined}
+        >
           <div className="inspector-date-picker">
             <div className="inspector-date-picker__header">
               <button type="button" className="inspector-date-picker__nav" onClick={() => handleMonthShift(-1)} aria-label="Previous month">
@@ -10925,34 +10989,31 @@ useEffect(() => {
           const handleModalClick = (e: MouseEvent) => {
             e.stopPropagation()
           }
+          const endDateValueMs = (() => {
+            const parsed = parseLocalDateInput(draft.endDate)
+            if (Number.isFinite(parsed as number)) return parsed as number
+            const fallback = new Date(baseDate)
+            fallback.setHours(0, 0, 0, 0)
+            return fallback.getTime()
+          })()
           const handleCustomSave = async () => {
             if (!customRecurrenceEntry) {
               closeCustomRecurrence()
               return
             }
-            const DAY_MS = 24 * 60 * 60 * 1000
-            const parseLocalDateMs = (value: string): number | null => {
-              const parts = value.split('-').map((p) => Number(p))
-              if (parts.length !== 3) return null
-              const [y, m, d] = parts
-              if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
-              const dt = new Date(y, m - 1, d)
-              dt.setHours(0, 0, 0, 0)
-              const ms = dt.getTime()
-              return Number.isFinite(ms) ? ms : null
-            }
-            const createOptions: {
-              weeklyDays?: number[]
-              endDateMs?: number
-              endAfterOccurrences?: number
-            } = {}
-            if (draft.ends === 'on') {
-              const endMs = parseLocalDateMs(draft.endDate)
-              if (Number.isFinite(endMs as number)) {
-                createOptions.endDateMs = (endMs as number) + DAY_MS
-              }
-            } else if (draft.ends === 'after') {
-              createOptions.endAfterOccurrences = draft.occurrences
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const createOptions: {
+      weeklyDays?: number[]
+      endDateMs?: number
+      endAfterOccurrences?: number
+    } = {}
+    if (draft.ends === 'on') {
+      const endMs = parseLocalDateInput(draft.endDate)
+      if (Number.isFinite(endMs as number)) {
+        createOptions.endDateMs = (endMs as number) + DAY_MS
+      }
+    } else if (draft.ends === 'after') {
+      createOptions.endAfterOccurrences = draft.occurrences
             }
             let frequency: 'daily' | 'weekly' | 'monthly' | 'annually' = 'daily'
             if (draft.unit === 'week') {
@@ -11128,13 +11189,18 @@ useEffect(() => {
                           onChange={() => handleEndChange('on')}
                         />
                         <span>On</span>
-                        <input
-                          type="date"
-                          className="custom-recur__date"
-                          value={draft.endDate}
-                          disabled={draft.ends !== 'on'}
-                          onChange={(e) => setCustomRecurrenceDraft((prev) => ({ ...prev, endDate: e.target.value }))}
-                        />
+                        <div className={`custom-recur__date-picker${draft.ends !== 'on' ? ' is-disabled' : ''}`}>
+                          <InspectorDateInput
+                            value={endDateValueMs}
+                            onChange={(nextTs) => {
+                              setCustomRecurrenceDraft((prev) => ({ ...prev, endDate: formatLocalDateYmd(nextTs) }))
+                              if (draft.ends !== 'on') {
+                                handleEndChange('on')
+                              }
+                            }}
+                            ariaLabel="Recurrence end date"
+                          />
+                        </div>
                       </label>
                       <label className="custom-recur__radio">
                         <input
