@@ -101,13 +101,11 @@
   gap: clamp(0.5rem, 1.6vw, 0.8rem);
   padding: clamp(0.8rem, 2.4vw, 1.2rem);
   border-radius: clamp(16px, 3.6vw, 22px);
-  border: 1px solid rgba(138, 156, 255, 0.32);
-  background:
-    linear-gradient(160deg, rgba(42, 52, 116, 0.92) 0%, rgba(22, 30, 82, 0.94) 55%, rgba(16, 22, 60, 0.96) 100%),
-    rgba(14, 18, 48, 0.92);
+  border: 1px solid rgba(128, 152, 236, 0.4);
+  background: linear-gradient(155deg, rgba(34, 42, 86, 0.95) 0%, rgba(20, 28, 60, 0.96) 60%, rgba(12, 18, 40, 0.98) 100%);
   box-shadow:
-    0 36px 72px -32px rgba(2, 6, 32, 0.82),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 36px 72px -32px rgba(2, 6, 32, 0.85),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(26px);
   outline: none;
 }
@@ -175,8 +173,8 @@
   gap: clamp(0.12rem, 0.9vw, 0.28rem);
   padding: clamp(0.45rem, 1.3vw, 0.65rem) clamp(0.7rem, 1.8vw, 0.95rem);
   border-radius: clamp(10px, 2vw, 14px);
-  background: rgba(40, 50, 118, 0.46);
-  border: 1px solid rgba(128, 150, 240, 0.28);
+  background: rgba(24, 30, 70, 0.5);
+  border: 1px solid rgba(128, 150, 240, 0.25);
 }
 
 .snapback-panel__context-label {
@@ -216,8 +214,8 @@
   gap: clamp(0.45rem, 1.4vw, 0.7rem);
   padding: clamp(0.5rem, 1.4vw, 0.75rem);
   border-radius: clamp(12px, 2.2vw, 14px);
-  border: 1px solid rgba(128, 148, 240, 0.28);
-  background: rgba(32, 40, 96, 0.46);
+  border: 1px solid rgba(128, 148, 240, 0.2);
+  background: rgba(20, 26, 60, 0.5);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -1063,7 +1061,7 @@ html[data-theme='light'] .snapback-option-input.is-active { background: linear-g
   resize: vertical;
   border-radius: clamp(12px, 2vw, 16px);
   border: 1px solid rgba(138, 158, 255, 0.32);
-  background: rgba(24, 30, 72, 0.6);
+  background: rgba(16, 22, 56, 0.6);
   color: rgba(236, 240, 255, 0.94);
   padding: clamp(0.5rem, 1.6vw, 0.7rem);
   font-size: clamp(0.82rem, 1.6vw, 0.92rem);
