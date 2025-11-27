@@ -11189,7 +11189,7 @@ useEffect(() => {
                           onChange={() => handleEndChange('on')}
                         />
                         <span>On</span>
-                        <div className={`custom-recur__date-picker${draft.ends !== 'on' ? ' is-disabled' : ''}`}>
+                        <div className="custom-recur__date-picker">
                           <InspectorDateInput
                             value={endDateValueMs}
                             onChange={(nextTs) => {

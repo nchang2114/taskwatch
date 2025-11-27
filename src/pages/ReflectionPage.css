@@ -195,11 +195,11 @@
   position: absolute;
   top: calc(100% + 0.45rem);
   left: 0;
-  z-index: 1200;
+  z-index: 2000;
   box-sizing: border-box;
   border-radius: 0.75rem;
-  border: 1px solid rgba(148, 160, 255, 0.35);
-  background: rgba(20, 24, 52, 0.96);
+  border: 1px solid rgba(148, 160, 255, 0.5);
+  background: rgba(12, 16, 36, 0.98);
   box-shadow:
     0 18px 32px rgba(6, 10, 32, 0.28),
     0 4px 12px rgba(8, 12, 28, 0.24);
@@ -3840,9 +3840,8 @@ body.scroll-lock .calendar-day-column {
   text-align: left;
 }
 
-.custom-recur__date-picker.is-disabled {
-  opacity: 0.7;
-}
+
+.custom-recur__date-picker { opacity: 1; }
 
 .custom-recur__date {
   border: 1px solid #d4daf8;
