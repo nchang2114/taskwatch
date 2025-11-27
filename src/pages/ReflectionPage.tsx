@@ -9380,15 +9380,12 @@ useEffect(() => {
                           const scheduledStart = guideDay.getTime() + guideMinutes * 60000
                           const preciseStart = Math.max(entry.startedAt, scheduledStart)
                           await setRepeatToNoneAfterTimestamp(parsedGuide.ruleId, preciseStart)
-                          // If start and end timestamps have become equal, remove the rule locally; else set end boundary
+                          // Update local cache to reflect new end boundary but keep the rule so this occurrence remains
                           setRepeatingRules((prev) => {
                             const found = prev.find((r) => r.id === parsedGuide.ruleId)
                             if (!found) return prev
-                            const startMs = (found as any).startAtMs as number | undefined
-                            if (Number.isFinite(startMs as number) && (startMs as number) === preciseStart) {
-                              return prev.filter((r) => r.id !== parsedGuide.ruleId)
-                            }
-                            return prev.map((r) => (r.id === parsedGuide.ruleId ? { ...r, endAtMs: Math.max(0, preciseStart) } : r))
+                            const nextEnd = Math.max(0, preciseStart + 1) // keep selected occurrence
+                            return prev.map((r) => (r.id === parsedGuide.ruleId ? { ...r, endAtMs: nextEnd } : r))
                           })
                         }
                       } else {

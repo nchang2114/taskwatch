@@ -1090,7 +1090,7 @@ export function isRuleWindowFullyResolved(
 }
 
 // Set repeat to none for all future occurrences after the selected occurrence date (YYYY-MM-DD, local).
-// This updates the rule's end boundary to the day BEFORE the selected occurrence and cleans up planned entries.
+// This updates the rule's end boundary to the start of the NEXT local day so the selected occurrence remains.
 export async function setRepeatToNoneAfterOccurrence(
   ruleId: string,
   occurrenceDateYmd: string,
@@ -1098,8 +1098,9 @@ export async function setRepeatToNoneAfterOccurrence(
 ): Promise<boolean> {
   const occStart = parseLocalYmd(occurrenceDateYmd)
   if (!Number.isFinite(occStart)) return false
-  // Set boundary to the start of the selected day in local time
-  const ok = await updateRepeatingRuleEndDate(ruleId, occStart)
+  const DAY_MS = 24 * 60 * 60 * 1000
+  // Set boundary to the start of the next local day so the selected occurrence is still included
+  const ok = await updateRepeatingRuleEndDate(ruleId, occStart + DAY_MS)
   try {
     await prunePlanned(ruleId, occurrenceDateYmd)
   } catch {}
@@ -1112,10 +1113,11 @@ export async function setRepeatToNoneAfterOccurrenceDefault(ruleId: string, occu
 }
 
 // Variant that uses a precise selected startedAt timestamp (ms). end_date is set to this timestamp,
-// and planned entries after the selected LOCAL day are pruned.
+// and planned entries after the selected LOCAL day are pruned. Boundary is nudged forward so the
+// selected occurrence remains visible, but subsequent ones are suppressed.
 export async function setRepeatToNoneAfterTimestamp(ruleId: string, selectedStartMs: number): Promise<boolean> {
   const ymd = formatLocalYmd(selectedStartMs)
-  const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, selectedStartMs))
+  const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, selectedStartMs) + 1)
   try {
     await pruneFuturePlannedForRuleAfter(ruleId, ymd)
   } catch {}
