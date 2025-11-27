@@ -895,6 +895,7 @@ html[data-theme='light'] .time-mode-toggle__button--active {
 .control-primary::after { opacity: 0.3; }
 .control-primary:hover:not(:disabled) { background: linear-gradient(130deg, var(--accent) 0%, var(--accent-strong) 90%); color: var(--text-control-contrast); box-shadow: var(--control-shadow), var(--control-highlight), 0 24px 44px rgba(58, 124, 255, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
 .control-secondary { color: var(--text-primary); }
+.control-end-session { font-size: clamp(0.8rem, 1.4vw, 0.94rem); letter-spacing: 0.1em; white-space: nowrap; }
 .control:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
 
 /* Footer meta */

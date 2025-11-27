@@ -221,6 +221,20 @@ const makeOccurrenceKey = (ruleId: string | null | undefined, originalTime: numb
 const makeSessionKey = (goalId: string | null, bucketId: string | null, taskId: string | null) =>
   goalId && bucketId ? `${goalId}::${bucketId}::${taskId ?? ''}` : null
 
+const makeSessionInstanceKey = (goalId: string | null, bucketId: string | null, taskId: string | null) => {
+  const scope = `${goalId ?? 'no-goal'}::${bucketId ?? 'no-bucket'}::${taskId ?? 'no-task'}`
+  let unique = ''
+  try {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+      unique = globalThis.crypto.randomUUID()
+    }
+  } catch {}
+  if (!unique) {
+    unique = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  }
+  return `session::${scope}::${unique}`
+}
+
 const classNames = (...values: Array<string | false | null | undefined>): string =>
   values.filter(Boolean).join(' ')
 
@@ -1965,6 +1979,21 @@ useEffect(() => {
       return true
     })
   }, [scheduledNowSuggestions, guideNowSuggestions, currentTime])
+  const makeScheduledSuggestionKey = useCallback((task: ScheduledSuggestion) => {
+    const parts = [
+      task.taskId,
+      task.goalId ?? task.goalName,
+      task.bucketId ?? task.bucketName,
+      task.repeatingRuleId,
+      task.repeatingOccurrenceDate,
+      task.repeatingOriginalTime,
+      task.taskName,
+    ]
+      .map((part) => (part === null || part === undefined ? '' : `${part}`.trim()))
+      .filter(Boolean)
+      .join('|')
+    return `sched-${parts.length > 0 ? parts : 'task'}`
+  }, [])
 
   const activeFocusCandidate = useMemo(() => {
     if (!focusSource) {
@@ -2024,7 +2053,7 @@ useEffect(() => {
     const taskId = focusSource?.taskId ?? activeFocusCandidate?.taskId ?? null
     const goalName = focusSource?.goalName ?? activeFocusCandidate?.goalName ?? null
     const bucketName = focusSource?.bucketName ?? activeFocusCandidate?.bucketName ?? null
-    const sessionKey = makeSessionKey(goalId, bucketId, taskId)
+    const sessionKey = makeSessionInstanceKey(goalId, bucketId, taskId)
     const repeatingRuleId = focusSource?.repeatingRuleId ?? activeFocusCandidate?.repeatingRuleId ?? null
     const repeatingOccurrenceDate =
       focusSource?.repeatingOccurrenceDate ?? activeFocusCandidate?.repeatingOccurrenceDate ?? null
@@ -4566,8 +4595,19 @@ useEffect(() => {
     }
   }
 
-  const handleReset = () => {
-    pauseAndLogCurrentSession()
+  const handleEndSession = () => {
+    if (isRunning) {
+      pauseAndLogCurrentSession()
+    } else {
+      setIsRunning(false)
+      setSessionStart(null)
+      lastTickRef.current = null
+    }
+
+    setElapsed(0)
+    lastCommittedElapsedRef.current = 0
+    currentSessionKeyRef.current = null
+    lastLoggedSessionKeyRef.current = null
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
   }
 
@@ -4613,10 +4653,13 @@ useEffect(() => {
         context?.repeatingOriginalTime !== undefined
           ? context.repeatingOriginalTime
           : sessionMeta.repeatingOriginalTime
-      const sessionKey =
+      let sessionKey: string | null =
         sessionKeyExplicit !== undefined && sessionKeyExplicit !== null
           ? sessionKeyExplicit
-          : makeSessionKey(contextGoalId, contextBucketId, contextTaskId)
+          : sessionMeta.sessionKey
+      if (!sessionKey) {
+        sessionKey = makeSessionInstanceKey(contextGoalId, contextBucketId, contextTaskId)
+      }
       if (sessionKey) {
         if (lastLoggedSessionKeyRef.current === sessionKey) {
           return
@@ -5056,7 +5099,11 @@ useEffect(() => {
         lastTickRef.current = null
         setIsRunning(true)
         lastCommittedElapsedRef.current = 0
-        const autoSessionKey = makeSessionKey(detail.goalId ?? null, detail.bucketId ?? null, detail.taskId ?? null)
+        const autoSessionKey = makeSessionInstanceKey(
+          detail.goalId ?? null,
+          detail.bucketId ?? null,
+          detail.taskId ?? null,
+        )
         const autoTaskLabel =
           taskName.length > 0 ? taskName : goalName.length > 0 ? goalName : 'New Task'
         sessionMetadataRef.current = {
@@ -5317,7 +5364,7 @@ useEffect(() => {
                               : ['goal-task-diff', 'goal-task-diff--none', 'task-selector__diff', 'task-selector__diff-chip']
                                   .join(' ')
                           return (
-                            <li key={`sched-${task.taskId || task.taskName}`} className="task-selector__item">
+                            <li key={makeScheduledSuggestionKey(task)} className="task-selector__item">
                               <button
                                 type="button"
                                 className={rowClassName}
@@ -5812,12 +5859,12 @@ useEffect(() => {
                   {primaryLabel}
                 </button>
                 <button
-                  className="control control-secondary"
+                  className="control control-secondary control-end-session"
                   type="button"
-                  onClick={handleReset}
+                  onClick={handleEndSession}
                   disabled={!isRunning && elapsed === 0}
                 >
-                  Reset
+                  End Session
                 </button>
               </div>
             </section>
@@ -5972,7 +6019,7 @@ useEffect(() => {
                               : ['goal-task-diff', 'goal-task-diff--none', 'task-selector__diff', 'task-selector__diff-chip']
                                   .join(' ')
                     return (
-                      <li key={`sched-${task.taskId || task.taskName}`} className="task-selector__item">
+                      <li key={makeScheduledSuggestionKey(task)} className="task-selector__item">
                         <button
                           type="button"
                           className={rowClassName}
@@ -6467,12 +6514,12 @@ useEffect(() => {
             {primaryLabel}
           </button>
           <button
-            className="control control-secondary"
+            className="control control-secondary control-end-session"
             type="button"
-            onClick={handleReset}
+            onClick={handleEndSession}
             disabled={!isRunning && elapsed === 0}
           >
-            Reset
+            End Session
           </button>
         </div>
       </section>
