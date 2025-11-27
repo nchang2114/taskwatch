@@ -526,7 +526,7 @@ export async function createRepeatingRuleForEntry(
       bucketName: entry.bucketName ?? null,
       timezone: tz,
       createdAtMs: Math.max(0, entry.startedAt),
-      startAtMs: Math.max(0, nextStartMs),
+      startAtMs: Math.max(0, ruleStartMs),
     }
     const current = readLocalRepeatingRules()
     const next = [...current, localRule]
