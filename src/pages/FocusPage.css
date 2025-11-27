@@ -59,9 +59,9 @@
   max-width: 100%;
   padding: clamp(0.6rem, 1.8vw, 0.85rem) clamp(1.4rem, 3.4vw, 2rem);
   border-radius: 999px;
-  border: 1px solid rgba(160, 176, 255, 0.6);
-  background: radial-gradient(circle at top, rgba(140, 152, 255, 0.9) 0%, rgba(82, 96, 220, 0.9) 70%);
-  color: #f8f9ff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, #3a6df0 0%, #5b4ee0 50%, #7e3af2 100%);
+  color: #ffffff;
   font-family: var(--font-display);
   font-size: clamp(0.9rem, 2.2vw, 1rem);
   letter-spacing: 0.08em;
@@ -69,13 +69,14 @@
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .snapback-tool__button:hover,
 .snapback-tool__button:focus-visible {
   transform: translateY(-1px);
-  box-shadow: 0 18px 38px rgba(30, 40, 140, 0.35);
-  filter: brightness(1.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  filter: brightness(1.08);
 }
 
 .snapback-tool__button:focus-visible {
@@ -144,7 +145,7 @@
   border-color: rgba(188, 202, 255, 0.5);
   background: rgba(86, 104, 198, 0.32);
   color: rgba(255, 255, 255, 0.92);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .snapback-panel__close:focus-visible {
@@ -247,12 +248,11 @@
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.snapback-option:hover,
 .snapback-option:focus-visible {
   border-color: rgba(186, 202, 255, 0.55);
   background: rgba(92, 108, 198, 0.54);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(18, 24, 70, 0.28);
+  transform: none;
+  box-shadow: none;
 }
 
 .snapback-option:focus-visible { outline: 2px solid rgba(172, 186, 255, 0.7); outline-offset: 2px; }
@@ -1025,7 +1025,7 @@ html[data-theme='light'] .taskwatch-notes__remove:focus-visible { background: rg
   .stopwatch-card { padding: 3.25rem; }
   .time-value { letter-spacing: 0.1em; }
 }
-.snapback-option--active { border-color: rgba(198, 210, 255, 0.85); background: linear-gradient(135deg, rgba(112, 130, 246, 0.92) 0%, rgba(86, 108, 230, 0.96) 100%); color: #ffffff; box-shadow: 0 12px 24px rgba(26, 34, 96, 0.4); }
+.snapback-option--active { border-color: rgba(126, 58, 242, 0.4); background: linear-gradient(135deg, #3a6df0 0%, #5b4ee0 50%, #7e3af2 100%); color: #ffffff; box-shadow: none; }
 
 .snapback-option-input {
   padding: 0.4rem 0.8rem;
@@ -1075,8 +1075,8 @@ html[data-theme='light'] .snapback-option-input.is-active { background: linear-g
 .snapback-panel__button { padding: 0.5rem 1.1rem; border-radius: 999px; border: 1px solid transparent; font-size: clamp(0.82rem, 1.8vw, 0.92rem); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
 .snapback-panel__button--ghost { background: transparent; border-color: rgba(152, 168, 255, 0.4); color: rgba(214, 220, 255, 0.82); }
 .snapback-panel__button--ghost:hover, .snapback-panel__button--ghost:focus-visible { border-color: rgba(182, 198, 255, 0.65); background: rgba(46, 54, 112, 0.65); }
-.snapback-panel__button--primary { background: linear-gradient(135deg, rgba(122, 140, 255, 0.96) 0%, rgba(86, 104, 230, 0.96) 90%); color: #f7f8ff; border-color: rgba(168, 184, 255, 0.85); box-shadow: 0 18px 34px rgba(48, 60, 156, 0.42); }
-.snapback-panel__button--primary:hover, .snapback-panel__button--primary:focus-visible { transform: translateY(-1px); box-shadow: 0 24px 46px rgba(54, 68, 168, 0.48); }
+.snapback-panel__button--primary { background: linear-gradient(135deg, #3a6df0 0%, #5b4ee0 50%, #7e3af2 100%); color: #ffffff; border-color: rgba(255, 255, 255, 0.15); box-shadow: none; }
+.snapback-panel__button--primary:hover, .snapback-panel__button--primary:focus-visible { transform: none; box-shadow: none; filter: none; }
 .snapback-panel__button:focus-visible { outline: 2px solid rgba(180, 196, 255, 0.85); outline-offset: 2px; }
 
 /* Responsive tweaks */
@@ -1093,7 +1093,7 @@ html[data-theme='light'] .snapback-tool__card { border-color: rgba(118, 138, 232
 html[data-theme='light'] .snapback-tool__title { color: rgba(36, 44, 102, 0.92); }
 html[data-theme='light'] .snapback-tool__text { color: rgba(66, 78, 132, 0.72); }
 html[data-theme='light'] .snapback-tool__last { color: rgba(76, 88, 146, 0.68); }
-html[data-theme='light'] .snapback-tool__button { border-color: rgba(120, 138, 232, 0.52); background: radial-gradient(circle at top, rgba(96, 112, 236, 0.96) 0%, rgba(82, 102, 226, 0.94) 70%); }
+html[data-theme='light'] .snapback-tool__button { border-color: rgba(255, 255, 255, 0.3); background: linear-gradient(135deg, #6390ff 0%, #7e84fc 50%, #9d7efc 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 html[data-theme='light'] .snapback-overlay { background: linear-gradient(160deg, rgba(22, 30, 52, 0.42) 0%, rgba(20, 28, 48, 0.42) 100%); }
 html[data-theme='light'] .snapback-panel { border-color: rgba(130, 150, 232, 0.38); background: linear-gradient(160deg, rgba(255, 255, 255, 0.99) 0%, rgba(240, 246, 255, 0.98) 60%, rgba(228, 236, 255, 0.97) 100%); box-shadow: 0 42px 82px -28px rgba(122, 138, 206, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.7); }
 html[data-theme='light'] .snapback-panel__close { border-color: rgba(142, 158, 232, 0.4); background: rgba(214, 220, 255, 0.72); color: rgba(54, 64, 128, 0.8); }
@@ -1106,14 +1106,14 @@ html[data-theme='light'] .snapback-panel__context-meta { color: rgba(82, 96, 150
 html[data-theme='light'] .snapback-panel__heading { color: rgba(42, 56, 122, 0.82); }
 html[data-theme='light'] .snapback-panel__section { border-color: rgba(132, 148, 230, 0.35); background: rgba(241, 245, 255, 0.9); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86); }
 html[data-theme='light'] .snapback-option { border-color: rgba(130, 146, 230, 0.42); background: rgba(230, 236, 255, 0.82); color: rgba(46, 56, 126, 0.78); }
-html[data-theme='light'] .snapback-option--active { background: linear-gradient(135deg, rgba(138, 154, 242, 0.94) 0%, rgba(108, 128, 232, 0.96) 100%); border-color: rgba(152, 170, 242, 0.82); color: #ffffff; }
+html[data-theme='light'] .snapback-option--active { background: linear-gradient(135deg, #6390ff 0%, #7e84fc 50%, #9d7efc 100%); border-color: rgba(152, 170, 242, 0.4); color: #ffffff; box-shadow: none; }
 html[data-theme='light'] .snapback-panel__label-text { color: rgba(76, 88, 146, 0.7); }
 html[data-theme='light'] .snapback-panel__optional { color: rgba(94, 108, 160, 0.5); }
 html[data-theme='light'] .snapback-panel__textarea { border-color: rgba(128, 144, 228, 0.4); background: rgba(244, 247, 255, 0.95); color: rgba(32, 42, 92, 0.9); }
 html[data-theme='light'] .snapback-panel__textarea::placeholder { color: rgba(110, 124, 178, 0.58); }
 html[data-theme='light'] .snapback-panel__button--ghost { border-color: rgba(120, 134, 214, 0.45); color: rgba(42, 56, 112, 0.82); }
 html[data-theme='light'] .snapback-panel__button--ghost:hover, html[data-theme='light'] .snapback-panel__button--ghost:focus-visible { background: rgba(214, 222, 255, 0.7); }
-html[data-theme='light'] .snapback-panel__button--primary { background: linear-gradient(135deg, rgba(120, 134, 230, 0.98) 0%, rgba(86, 106, 224, 0.95) 90%); border-color: rgba(134, 150, 230, 0.82); }
+html[data-theme='light'] .snapback-panel__button--primary { background: linear-gradient(135deg, #6390ff 0%, #7e84fc 50%, #9d7efc 100%); border-color: rgba(255, 255, 255, 0.3); box-shadow: none; }
 
 /* (dashboard-specific compaction overrides removed to restore standard card styles) */
 
