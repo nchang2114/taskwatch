@@ -2968,7 +2968,6 @@ export default function ReflectionPage() {
   const goalsSnapshotSignatureRef = useRef<string | null>(null)
   const skipNextGoalsSnapshotRef = useRef(false)
   const editorOpenRef = useRef(false)
-  const debugLogBudgetRef = useRef(50)
   const [goalsSnapshot, setGoalsSnapshot] = useState<GoalSnapshot[]>(() => {
     const stored = readStoredGoalsSnapshot()
     goalsSnapshotSignatureRef.current = JSON.stringify(stored)
@@ -3031,41 +3030,8 @@ const [showInspectorExtras, setShowInspectorExtras] = useState(false)
 const [showEditorExtras, setShowEditorExtras] = useState(false)
 const [showInlineExtras, setShowInlineExtras] = useState(false)
   const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string | null>(null)
-  const debugEditor = useCallback(
-    (message: string, data?: Record<string, unknown>) => {
-      if (debugLogBudgetRef.current <= 0) return
-      if (!calendarEditorEntryId && !calendarInspectorEntryId) return
-      debugLogBudgetRef.current -= 1
-      try {
-        if (data) {
-          console.debug('[Reflection][editor]', message, data)
-        } else {
-          console.debug('[Reflection][editor]', message)
-        }
-      } catch {}
-    },
-    [calendarEditorEntryId, calendarInspectorEntryId],
-  )
-
-  const debugCore = useCallback((message: string, data?: Record<string, unknown>) => {
-    if (debugLogBudgetRef.current <= 0) return
-    debugLogBudgetRef.current -= 1
-    try {
-      if (data) {
-        console.debug('[Reflection][core]', message, data)
-      } else {
-        console.debug('[Reflection][core]', message)
-      }
-    } catch {}
-  }, [])
-
   useEffect(() => {
     editorOpenRef.current = Boolean(calendarEditorEntryId || calendarInspectorEntryId)
-    if (editorOpenRef.current) {
-      debugCore('editor open', { editorId: calendarEditorEntryId, inspectorId: calendarInspectorEntryId })
-    } else {
-      debugCore('editor closed')
-    }
   }, [calendarEditorEntryId, calendarInspectorEntryId])
   const calendarTouchAction = useMemo(
     () => (calendarView === '3d' ? 'pan-x pan-y' : 'pan-y'),
@@ -3467,7 +3433,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       }
       if (shouldUseCache && shouldHydrateDraft) {
         if (hasLocalSubtaskEdits()) {
-          debugEditor('subtasks hydrate skipped (local edits)', { entryId: entry.id })
           return
         }
         setHistoryDraft((draftState) => {
@@ -3490,7 +3455,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         const subtasks = await fetchSubtasksForEntry(entry)
         cacheSubtasksForEntry(entry.id, subtasks)
         if (shouldHydrateDraft && !hasLocalSubtaskEdits()) {
-          debugEditor('subtasks hydrate apply', { entryId: entry.id, count: subtasks.length })
           setHistoryDraft((draftState) => {
             const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(subtasks) }
             lastCommittedHistoryDraftRef.current = {
@@ -4071,7 +4035,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
 
   const historyWithTaskNotes = useMemo(() => {
     if (editorOpenRef.current) {
-      debugCore('historyWithTaskNotes skipped (editor open)')
       return history
     }
     if (taskNotesById.size === 0) {
@@ -4088,14 +4051,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           if (cached && cached.note === taskNote) {
             return cached.entry
           }
-          if ((calendarEditorEntryId || calendarInspectorEntryId) && entry.id === selectedHistoryId) {
-            debugEditor('overlay task notes onto entry', {
-              entryId: entry.id,
-              old: entry.notes,
-              taskId: entry.taskId,
-              taskNote,
-            })
-          }
           const overlaid = { ...entry, notes: taskNote ?? '' }
           cache.set(entry.id, { note: taskNote ?? '', entry: overlaid })
           return overlaid
@@ -4103,14 +4058,11 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       }
       return entry
     })
-    if (overlays > 0 && (calendarEditorEntryId || calendarInspectorEntryId)) {
-      debugEditor('overlay task notes batch', { overlays })
-    }
     if (overlays === 0) {
       cache.clear()
     }
     return mapped
-  }, [history, taskNotesById, calendarEditorEntryId, calendarInspectorEntryId, selectedHistoryId, debugEditor, debugCore])
+  }, [history, taskNotesById])
 
   const selectedHistoryEntry = useMemo(() => {
     if (!selectedHistoryId) {
@@ -4131,9 +4083,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       selectedHistoryEntryRef.current?.id === selectedHistoryEntry.id &&
       !areHistoryDraftsEqual(historyDraftRef.current, lastCommittedHistoryDraftRef.current)
     ) {
-      debugEditor('skip draft reset (local edits present)', {
-        entryId: selectedHistoryEntry.id,
-      })
       return
     }
     if (!selectedHistoryEntry) {
@@ -4574,21 +4523,16 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     return entry.id ? { sessionId: entry.id } : null
   }, [])
 
-  const publishLocalGoalsSnapshot = useCallback(
-    (snapshot: GoalSnapshot[], reason?: string) => {
-      if (editorOpenRef.current) {
-        debugCore('publishLocalGoalsSnapshot skipped (editor open)', { reason })
-        return
-      }
-      const signature = JSON.stringify(snapshot)
-      goalsSnapshotSignatureRef.current = signature
-      skipNextGoalsSnapshotRef.current = true
-      debugCore('publishLocalGoalsSnapshot', { reason, signature })
-      setGoalsSnapshot(snapshot)
-      publishGoalsSnapshot(snapshot)
-    },
-    [debugCore],
-  )
+  const publishLocalGoalsSnapshot = useCallback((snapshot: GoalSnapshot[]) => {
+    if (editorOpenRef.current) {
+      return
+    }
+    const signature = JSON.stringify(snapshot)
+    goalsSnapshotSignatureRef.current = signature
+    skipNextGoalsSnapshotRef.current = true
+    setGoalsSnapshot(snapshot)
+    publishGoalsSnapshot(snapshot)
+  }, [])
 
   const updateTaskNotesSnapshot = useCallback(
     (taskId: string, notes: string) => {
@@ -5537,20 +5481,16 @@ useEffect(() => {
   useEffect(() => {
     const unsubscribe = subscribeToGoalsSnapshot((snapshot) => {
       if (editorOpenRef.current) {
-        debugCore('goals snapshot event skipped (editor open)')
         return
       }
       const signature = JSON.stringify(snapshot)
       if (skipNextGoalsSnapshotRef.current && signature === goalsSnapshotSignatureRef.current) {
-        debugCore('goals snapshot event skipped (self)', { signature })
         skipNextGoalsSnapshotRef.current = false
         return
       }
       if (signature === goalsSnapshotSignatureRef.current) {
-        debugCore('goals snapshot event ignored (same signature)', { signature })
         return
       }
-      debugCore('goals snapshot event applied', { signature })
       goalsSnapshotSignatureRef.current = signature
       setGoalsSnapshot(snapshot)
     })
