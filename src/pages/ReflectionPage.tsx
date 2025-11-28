@@ -3472,7 +3472,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     latestHistoryRef.current = history
   }, [history])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     historyDraftRef.current = historyDraft
   }, [historyDraft])
 
@@ -6998,7 +6998,7 @@ useEffect(() => {
       return options[options.length - 1]
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (calendarEditorEntryId || calendarInspectorEntryId || customRecurrenceOpen) {
+      if (calendarEditorEntryId || calendarInspectorEntryId || customRecurrenceOpen || editingHistoryId) {
         lastCalendarHotkeyRef.current = null
         multiDayKeyboardStateRef.current = { active: false, selection: multiDayCount }
         if (showMultiDayChooser) {
@@ -7166,6 +7166,7 @@ useEffect(() => {
     calendarEditorEntryId,
     calendarInspectorEntryId,
     customRecurrenceOpen,
+    editingHistoryId,
   ])
 
   // Outside-React updater for the calendar now-line to keep UI smooth without full re-renders
