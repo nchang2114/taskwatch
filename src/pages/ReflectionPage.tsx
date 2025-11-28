@@ -4069,7 +4069,22 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         if (taskNote !== undefined && taskNote !== entry.notes) {
           overlays += 1
           const cached = cache.get(entry.id)
-          if (cached && cached.note === taskNote) {
+          const isStale =
+            !cached ||
+            cached.note !== taskNote ||
+            cached.entry.startedAt !== entry.startedAt ||
+            cached.entry.endedAt !== entry.endedAt ||
+            cached.entry.elapsed !== entry.elapsed ||
+            cached.entry.goalName !== entry.goalName ||
+            cached.entry.bucketName !== entry.bucketName ||
+            cached.entry.taskName !== entry.taskName ||
+            cached.entry.goalId !== entry.goalId ||
+            cached.entry.bucketId !== entry.bucketId ||
+            cached.entry.taskId !== entry.taskId ||
+            cached.entry.futureSession !== entry.futureSession ||
+            (cached.entry.repeatingSessionId ?? null) !== (entry.repeatingSessionId ?? null) ||
+            (cached.entry.originalTime ?? null) !== (entry.originalTime ?? null)
+          if (!isStale) {
             return cached.entry
           }
           const overlaid = { ...entry, notes: taskNote ?? '' }
