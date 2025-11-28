@@ -353,6 +353,9 @@ function MainApp() {
   const profileButtonId = useId()
   const profileHelpMenuId = useId()
   const settingsOverlayRef = useRef<HTMLDivElement | null>(null)
+  const goalsPanelRef = useRef<HTMLElement | null>(null)
+  const focusPanelRef = useRef<HTMLElement | null>(null)
+  const reflectionPanelRef = useRef<HTMLElement | null>(null)
   const authModalRef = useRef<HTMLDivElement | null>(null)
   const previousProfileRef = useRef<UserProfile | null>(null)
   const authEmailLookupReqIdRef = useRef(0)
@@ -1085,6 +1088,41 @@ function MainApp() {
   }, [activeTab, theme, evaluateNavCollapse])
 
   useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+    const panels: Array<[TabKey, React.RefObject<HTMLElement>]> = [
+      ['goals', goalsPanelRef],
+      ['focus', focusPanelRef],
+      ['reflection', reflectionPanelRef],
+    ]
+    const activeEl = document.activeElement as HTMLElement | null
+    panels.forEach(([key, ref]) => {
+      const node = ref.current as (HTMLElement & { inert?: boolean }) | null
+      if (!node) return
+      const isInactive = key !== activeTab
+      if (isInactive) {
+        try { (node as any).inert = true } catch {}
+        node.setAttribute('data-inert', 'true')
+        if (activeEl && node.contains(activeEl)) {
+          activeEl.blur()
+        }
+      } else {
+        try { (node as any).inert = false } catch {}
+        node.removeAttribute('data-inert')
+      }
+    })
+    const activePanel = panels.find(([key]) => key === activeTab)?.[1].current
+    if (activePanel && activePanel !== document.activeElement) {
+      try {
+        activePanel.focus({ preventScroll: true })
+      } catch {
+        activePanel.focus()
+      }
+    }
+  }, [activeTab])
+
+  useEffect(() => {
     if (!isNavCollapsed && isNavOpen) {
       setIsNavOpen(false)
     }
@@ -1718,8 +1756,9 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
         <section
           id={TAB_PANEL_IDS.goals}
           role="tabpanel"
-          aria-hidden={activeTab !== 'goals'}
           className="tab-panel"
+          ref={goalsPanelRef}
+          tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
           <GoalsPage />
@@ -1728,8 +1767,9 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
         <section
           id={TAB_PANEL_IDS.focus}
           role="tabpanel"
-          aria-hidden={activeTab !== 'focus'}
           className="tab-panel"
+          ref={focusPanelRef}
+          tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
           <FocusPage viewportWidth={viewportWidth} />
@@ -1738,8 +1778,9 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
         <section
           id={TAB_PANEL_IDS.reflection}
           role="tabpanel"
-          aria-hidden={activeTab !== 'reflection'}
           className="tab-panel"
+          ref={reflectionPanelRef}
+          tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
           <ReflectionPage />

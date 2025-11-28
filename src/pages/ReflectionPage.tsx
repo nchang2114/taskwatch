@@ -1207,6 +1207,21 @@ type DragPreview = {
   endedAt: number
 }
 
+type CalendarEventDragState = {
+  pointerId: number
+  entryId: string
+  startX: number
+  startY: number
+  initialStart: number
+  initialEnd: number
+  initialTimeOfDayMs: number
+  durationMs: number
+  kind: DragKind
+  columns: Array<{ rect: DOMRect; dayStart: number }>
+  moved?: boolean
+  activated?: boolean
+}
+
 type TimelineSegment = {
   id: string
   entry: HistoryEntry
@@ -3049,6 +3064,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const dragStateRef = useRef<DragState | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
   const dragPreviewRef = useRef<DragPreview | null>(null)
+  const calendarEventDragRef = useRef<CalendarEventDragState | null>(null)
   const dragPreventClickRef = useRef(false)
   const selectedHistoryIdRef = useRef<string | null>(selectedHistoryId)
   // Long-press to move on touch
@@ -3229,6 +3245,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     setDragPreview(null)
     dragStateRef.current = null
     dragPreviewRef.current = null
+    calendarEventDragRef.current = null
   }, [historyDayOffset])
 
   useEffect(() => {
@@ -8423,24 +8440,6 @@ useEffect(() => {
         return t.getTime()
       })()
 
-      // Drag state for calendar events (move only, vertical + cross-day)
-      const calendarEventDragRef = {
-        current: null as null | {
-          pointerId: number
-          entryId: string
-          startX: number
-          startY: number
-          initialStart: number
-          initialEnd: number
-          initialTimeOfDayMs: number
-          durationMs: number
-          kind: DragKind
-          columns: Array<{ rect: DOMRect; dayStart: number }>
-          moved?: boolean
-          activated?: boolean
-        },
-      }
-
       const handleCalendarEventPointerDown = (
         entry: HistoryEntry,
         entryDayStart: number,
@@ -9004,7 +9003,7 @@ useEffect(() => {
                   const startCreate = () => {
                     if (startedCreate) return
                     startedCreate = true
-                    const state = {
+                    const state: CalendarEventDragState = {
                       pointerId,
                       entryId: 'new-entry',
                       startX,
@@ -9013,10 +9012,10 @@ useEffect(() => {
                       initialEnd: initialStart + MIN_SESSION_DURATION_DRAG_MS,
                       initialTimeOfDayMs: timeOfDayMs0,
                       durationMs: MIN_SESSION_DURATION_DRAG_MS,
-                      kind: 'resize-end' as DragKind,
+                      kind: 'resize-end',
                       columns,
                     }
-                    calendarEventDragRef.current = state as any
+                    calendarEventDragRef.current = state
                     dragPreviewRef.current = { entryId: 'new-entry', startedAt: state.initialStart, endedAt: state.initialEnd }
                     setDragPreview(dragPreviewRef.current)
                     // Lock page scroll while dragging to create (touch only)
@@ -9104,7 +9103,7 @@ useEffect(() => {
                     if (startedCreate) {
                       // Prevent page/area scrolling while dragging to create
                       try { e.preventDefault() } catch {}
-                      const s = calendarEventDragRef.current as any
+                      const s = calendarEventDragRef.current
                       if (!s || e.pointerId !== s.pointerId) return
                       const baseIdx = s.columns.findIndex((c: any) => e.clientX >= c.rect.left && e.clientX <= c.rect.right)
                       const nearestIdx = baseIdx >= 0 ? baseIdx : (e.clientX < s.columns[0].rect.left ? 0 : s.columns.length - 1)
