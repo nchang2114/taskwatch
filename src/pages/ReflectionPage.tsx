@@ -4419,6 +4419,14 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     setHistoryDraft((draft) => ({ ...draft, notes: value }))
   }, [])
 
+  const handleHistoryNotesKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      event.preventDefault()
+      event.currentTarget.blur()
+    }
+  }, [])
+
   // Handle special Task dropdown action to add the current session name as a task to the linked bucket
   const handleTaskDropdownChange = useCallback(
     (nextValue: string) => {
@@ -4937,11 +4945,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
                           handleAddHistorySubtask({ focus: true })
                         }
                         if (event.key === 'Escape') {
-                          const value = event.currentTarget.value
-                          if (value.trim().length === 0) {
-                            event.preventDefault()
-                            event.currentTarget.blur()
-                          }
+                          event.preventDefault()
+                          event.stopPropagation()
+                          setRevealedHistoryDeleteKey(null)
+                          event.currentTarget.blur()
                         }
                       }}
                       onFocus={(event) => {
@@ -10484,6 +10491,14 @@ useEffect(() => {
     if (!calendarEditorEntryId) return
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') {
+        const target = (e.target as HTMLElement | null) || (typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null)
+        const isEditingField =
+          target?.closest('.goal-task-details__subtask-input') !== null ||
+          target?.closest('.calendar-inspector__notes') !== null ||
+          target?.closest('.history-timeline__field-input') !== null
+        if (isEditingField) {
+          return
+        }
         e.preventDefault()
         // Cancel editing, reset draft
         handleCancelHistoryEdit()
@@ -10668,12 +10683,13 @@ useEffect(() => {
                 {renderHistorySubtasksEditor()}
                 <label className="history-timeline__field">
                   <span className="history-timeline__field-text">Notes</span>
-                  <textarea
-                    className="calendar-inspector__notes"
-                    value={historyDraft.notes}
-                    placeholder="Capture context, outcomes, or follow-ups"
-                    onChange={handleHistoryNotesChange}
-                  />
+                      <textarea
+                        className="calendar-inspector__notes"
+                        value={historyDraft.notes}
+                        placeholder="Capture context, outcomes, or follow-ups"
+                        onChange={handleHistoryNotesChange}
+                        onKeyDown={handleHistoryNotesKeyDown}
+                      />
                 </label>
               </div>
             </div>
@@ -11396,12 +11412,13 @@ useEffect(() => {
                       {renderHistorySubtasksEditor()}
                       <label className="history-timeline__field">
                         <span className="history-timeline__field-text">Notes</span>
-                        <textarea
-                          className="calendar-inspector__notes"
-                          value={historyDraft.notes}
-                          placeholder="Capture context, outcomes, or follow-ups"
-                          onChange={handleHistoryNotesChange}
-                        />
+                          <textarea
+                            className="calendar-inspector__notes"
+                            value={historyDraft.notes}
+                            placeholder="Capture context, outcomes, or follow-ups"
+                            onChange={handleHistoryNotesChange}
+                            onKeyDown={handleHistoryNotesKeyDown}
+                          />
                       </label>
                     </div>
                   </div>
@@ -11555,12 +11572,13 @@ useEffect(() => {
                   {renderHistorySubtasksEditor()}
                   <label className="history-timeline__field">
                     <span className="history-timeline__field-text">Notes</span>
-                    <textarea
-                      className="calendar-inspector__notes"
-                      value={historyDraft.notes}
-                      placeholder="Capture context, outcomes, or follow-ups"
-                      onChange={handleHistoryNotesChange}
-                    />
+                          <textarea
+                            className="calendar-inspector__notes"
+                            value={historyDraft.notes}
+                            placeholder="Capture context, outcomes, or follow-ups"
+                            onChange={handleHistoryNotesChange}
+                            onKeyDown={handleHistoryNotesKeyDown}
+                          />
                   </label>
                 </div>
               </div>
