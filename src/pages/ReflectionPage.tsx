@@ -2526,6 +2526,10 @@ const computeRangeOverview = (
   history.forEach((entry) => {
     const start = Math.min(entry.startedAt, entry.endedAt)
     const end = Math.max(entry.startedAt, entry.endedAt)
+    // All-day blocks distort the time-of-day breakdown; omit them from the overview pie
+    if (isAllDayRangeTs(start, end)) {
+      return
+    }
     if (end <= windowStart || start >= now) {
       return
     }
