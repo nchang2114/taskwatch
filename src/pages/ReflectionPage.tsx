@@ -21,6 +21,8 @@ import {
 } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import './ReflectionPage.css'
+import './FocusPage.css'
+import './GoalsPage.css'
 import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, type GoalSnapshot } from '../lib/goalsSync'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
 import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket } from '../lib/goalsApi'
@@ -146,6 +148,26 @@ type EditableSelectionSnapshot = {
   offset: number
 }
 
+const classNames = (...values: Array<string | false | null | undefined>): string =>
+  values.filter(Boolean).join(' ')
+
+const sanitizeDomIdSegment = (value: string): string => value.replace(/[^a-z0-9]/gi, '-')
+
+const makeHistorySubtaskInputId = (entryId: string, subtaskId: string): string =>
+  `history-subtask-${sanitizeDomIdSegment(entryId)}-${sanitizeDomIdSegment(subtaskId)}`
+
+// Auto-size a textarea to fit its content without requiring focus
+const autosizeHistorySubtaskTextArea = (el: HTMLTextAreaElement | null) => {
+  if (!el) return
+  try {
+    el.style.height = 'auto'
+    const next = `${el.scrollHeight}px`
+    el.style.height = next
+  } catch {}
+}
+
+const HISTORY_SUBTASK_SORT_STEP = 1024
+
 const buildSelectionSnapshotFromRange = (root: HTMLElement, range: Range | null): EditableSelectionSnapshot | null => {
   if (!range) return null
   const container = range.endContainer
@@ -244,16 +266,6 @@ const areHistoryDraftsEqual = (a: HistoryDraftState | null, b: HistoryDraftState
     a.notes === b.notes &&
     areHistorySubtasksEqual(a.subtasks, b.subtasks)
   )
-}
-
-const HISTORY_SUBTASK_SORT_STEP = 1024
-
-const getNextHistorySubtaskSortIndex = (subtasks: HistorySubtask[]): number => {
-  if (subtasks.length === 0) {
-    return HISTORY_SUBTASK_SORT_STEP
-  }
-  const maxSort = subtasks.reduce((max, subtask) => Math.max(max, subtask.sortIndex), subtasks[0]?.sortIndex ?? 0)
-  return maxSort + HISTORY_SUBTASK_SORT_STEP
 }
 
 const monthDayKey = (ms: number): string => {
@@ -2963,6 +2975,10 @@ export default function ReflectionPage() {
   const [hoveredHistoryId, setHoveredHistoryId] = useState<string | null>(null)
   const [historyDraft, setHistoryDraft] = useState<HistoryDraftState>(() => createEmptyHistoryDraft())
   const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null)
+  const pendingHistorySubtaskFocusRef = useRef<{ entryId: string; subtaskId: string } | null>(null)
+  const [revealedHistoryDeleteKey, setRevealedHistoryDeleteKey] = useState<string | null>(null)
+  const previousHistorySubtaskIdsRef = useRef<Set<string>>(new Set())
+  const historySubtaskIdsInitializedRef = useRef(false)
   const [subtasksCache, setSubtasksCache] = useState<Map<string, HistorySubtask[]>>(() => new Map())
   const subtasksCacheRef = useRef<Map<string, HistorySubtask[]>>(subtasksCache)
   const subtaskFetchesInFlightRef = useRef<Set<string>>(new Set())
@@ -4445,21 +4461,78 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     [getSubtaskParent],
   )
 
-  const handleAddHistorySubtask = useCallback(() => {
-    const parent = getSubtaskParent()
-    if (!parent) return
-    setHistoryDraft((draft) => {
-      const sortIndex = getNextHistorySubtaskSortIndex(draft.subtasks)
-      const newSubtask: HistorySubtask = {
-        id: makeHistoryId(),
-        text: '',
-        completed: false,
-        sortIndex,
-      }
-      scheduleSubtaskPersist(newSubtask)
-      return { ...draft, subtasks: [...draft.subtasks, newSubtask] }
-    })
-  }, [getSubtaskParent, scheduleSubtaskPersist])
+  const handleAddHistorySubtask = useCallback(
+    (options?: { focus?: boolean; afterId?: string }) => {
+      const parent = getSubtaskParent()
+      if (!parent) return
+      const entryId = selectedHistoryEntryRef.current?.id ?? selectedHistoryId ?? 'history'
+      setHistoryDraft((draft) => {
+        const sorted = draft.subtasks.slice().sort((a, b) => a.sortIndex - b.sortIndex)
+        const afterId = options?.afterId
+        let insertIndex = 0
+        if (afterId) {
+          const idx = sorted.findIndex((s) => s.id === afterId)
+          insertIndex = idx >= 0 ? idx + 1 : 0
+        }
+        const prev = sorted[insertIndex - 1] || null
+        const next = sorted[insertIndex] || null
+        let sortIndex: number
+        if (prev && next) {
+          const a = prev.sortIndex
+          const b = next.sortIndex
+          sortIndex = a < b ? Math.floor(a + (b - a) / 2) : a + HISTORY_SUBTASK_SORT_STEP
+        } else if (prev && !next) {
+          sortIndex = prev.sortIndex + HISTORY_SUBTASK_SORT_STEP
+        } else if (!prev && next) {
+          sortIndex = next.sortIndex - HISTORY_SUBTASK_SORT_STEP
+        } else {
+          sortIndex = HISTORY_SUBTASK_SORT_STEP
+        }
+        const newSubtask: HistorySubtask = {
+          id: makeHistoryId(),
+          text: '',
+          completed: false,
+          sortIndex,
+        }
+        const copy = [...sorted]
+        copy.splice(insertIndex, 0, newSubtask)
+        if (options?.focus !== false) {
+          pendingHistorySubtaskFocusRef.current = { entryId, subtaskId: newSubtask.id }
+          const inputId = makeHistorySubtaskInputId(entryId, newSubtask.id)
+          const tryFocusNow = () => {
+            const el = document.getElementById(inputId) as HTMLTextAreaElement | null
+            if (el) {
+              try {
+                el.focus({ preventScroll: true })
+                const end = el.value.length
+                el.setSelectionRange?.(end, end)
+              } catch {}
+            }
+          }
+          if (typeof queueMicrotask === 'function') {
+            queueMicrotask(() => {
+              if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(tryFocusNow)
+              } else {
+                setTimeout(tryFocusNow, 0)
+              }
+            })
+          } else {
+            setTimeout(() => {
+              if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(tryFocusNow)
+              } else {
+                tryFocusNow()
+              }
+            }, 0)
+          }
+        }
+        setRevealedHistoryDeleteKey(null)
+        return { ...draft, subtasks: copy }
+      })
+    },
+    [getSubtaskParent, selectedHistoryId],
+  )
 
   const handleUpdateHistorySubtaskText = useCallback((id: string, value: string) => {
     setHistoryDraft((draft) => {
@@ -4485,6 +4558,32 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     })
   }, [scheduleSubtaskPersist])
 
+  const handleHistorySubtaskBlur = useCallback(
+    (id: string) => {
+      const parent = getSubtaskParent()
+      setHistoryDraft((draft) => {
+        const target = draft.subtasks.find((s) => s.id === id)
+        if (!target) return draft
+        if (target.text.trim().length === 0) {
+          const nextSubtasks = draft.subtasks.filter((s) => s.id !== id)
+          if (parent) {
+            void deleteSubtaskForParent(parent, id)
+            const timers = subtaskSaveTimersRef.current
+            const existing = timers.get(id)
+            if (typeof existing === 'number' && typeof window !== 'undefined') {
+              window.clearTimeout(existing)
+              timers.delete(id)
+            }
+          }
+          return { ...draft, subtasks: nextSubtasks }
+        }
+        scheduleSubtaskPersist(target)
+        return draft
+      })
+    },
+    [getSubtaskParent, scheduleSubtaskPersist],
+  )
+
   const handleDeleteHistorySubtask = useCallback((id: string) => {
     const parent = getSubtaskParent()
     setHistoryDraft((draft) => ({
@@ -4505,6 +4604,154 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   const sortedSubtasks = useMemo(
     () => historyDraft.subtasks.slice().sort((a, b) => a.sortIndex - b.sortIndex),
     [historyDraft.subtasks],
+  )
+
+  useEffect(() => {
+    const entryId = selectedHistoryEntryRef.current?.id ?? selectedHistoryId ?? ''
+    const previousIds = previousHistorySubtaskIdsRef.current
+    const nextIds = new Set(sortedSubtasks.map((subtask) => subtask.id))
+    let pending = pendingHistorySubtaskFocusRef.current
+    if (!historySubtaskIdsInitializedRef.current) {
+      historySubtaskIdsInitializedRef.current = true
+      const newestBlankSubtask = [...sortedSubtasks]
+        .sort((a, b) => b.sortIndex - a.sortIndex)
+        .find((subtask) => !previousIds.has(subtask.id) && subtask.text.trim().length === 0)
+      if (newestBlankSubtask) {
+        pending = { entryId, subtaskId: newestBlankSubtask.id }
+        pendingHistorySubtaskFocusRef.current = pending
+      }
+    }
+    previousHistorySubtaskIdsRef.current = nextIds
+    if (!pending || !pending.subtaskId || pending.entryId !== entryId) {
+      return
+    }
+    const focusTarget = pending
+    const inputId = makeHistorySubtaskInputId(entryId, focusTarget.subtaskId)
+    const tryFocus = () => {
+      const el = document.getElementById(inputId) as HTMLTextAreaElement | null
+      if (!el) {
+        return
+      }
+      try {
+        el.focus({ preventScroll: true })
+        const end = el.value.length
+        el.setSelectionRange?.(end, end)
+      } catch {}
+      pendingHistorySubtaskFocusRef.current = null
+    }
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(tryFocus)
+    } else {
+      setTimeout(tryFocus, 0)
+    }
+  }, [sortedSubtasks, selectedHistoryId])
+
+  const historySubtaskKey = selectedHistoryEntryRef.current?.id ?? selectedHistoryId ?? 'history'
+  const renderHistorySubtasksEditor = () => (
+    <div className="calendar-inspector__subtasks">
+      <div className="taskwatch-notes__subtasks-row">
+        <div className="calendar-inspector__subtasks-header">
+          <span className="history-timeline__field-text">Subtasks</span>
+        </div>
+        <button type="button" className="taskwatch-notes__add" onClick={() => handleAddHistorySubtask()}>
+          + Subtask
+        </button>
+      </div>
+      {sortedSubtasks.length === 0 ? (
+        <p className="goal-task-details__empty-text">No subtasks yet</p>
+      ) : (
+        <ul className="goal-task-details__subtask-list">
+          {sortedSubtasks.map((subtask) => {
+            const subDeleteKey = `${historySubtaskKey}__subtask__${subtask.id}`
+            const isSubDeleteRevealed = revealedHistoryDeleteKey === subDeleteKey
+            const inputId = makeHistorySubtaskInputId(historySubtaskKey, subtask.id)
+            return (
+              <li
+                key={subtask.id}
+                data-delete-key={subDeleteKey}
+                className={classNames(
+                  'goal-task-details__subtask',
+                  subtask.completed && 'goal-task-details__subtask--completed',
+                  isSubDeleteRevealed && 'goal-task-details__subtask--delete-revealed',
+                )}
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setRevealedHistoryDeleteKey(isSubDeleteRevealed ? null : subDeleteKey)
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  setRevealedHistoryDeleteKey(null)
+                }}
+              >
+                <label className="goal-task-details__subtask-item">
+                  <div className="goal-subtask-field">
+                    <input
+                      type="checkbox"
+                      className="goal-task-details__checkbox"
+                      checked={subtask.completed}
+                      onChange={() => handleToggleHistorySubtaskCompletion(subtask.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      aria-label={
+                        subtask.text.trim().length > 0 ? `Mark "${subtask.text}" complete` : 'Toggle subtask'
+                      }
+                    />
+                    <textarea
+                      id={inputId}
+                      className="goal-task-details__subtask-input"
+                      rows={1}
+                      ref={(el) => autosizeHistorySubtaskTextArea(el)}
+                      value={subtask.text}
+                      onChange={(event) => {
+                        const el = event.currentTarget
+                        el.style.height = 'auto'
+                        el.style.height = `${el.scrollHeight}px`
+                        handleUpdateHistorySubtaskText(subtask.id, event.target.value)
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault()
+                          handleAddHistorySubtask({ focus: true })
+                        }
+                        if (event.key === 'Escape') {
+                          const value = event.currentTarget.value
+                          if (value.trim().length === 0) {
+                            event.preventDefault()
+                            event.currentTarget.blur()
+                          }
+                        }
+                      }}
+                      onFocus={(event) => {
+                        const el = event.currentTarget
+                        el.style.height = 'auto'
+                        el.style.height = `${el.scrollHeight}px`
+                      }}
+                      onBlur={() => handleHistorySubtaskBlur(subtask.id)}
+                      placeholder="Describe subtask"
+                    />
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  className="goal-task-details__remove"
+                  onClick={() => {
+                    setRevealedHistoryDeleteKey(null)
+                    handleDeleteHistorySubtask(subtask.id)
+                  }}
+                  aria-label="Remove subtask"
+                >
+                  ×
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 
   const commitHistoryDraft = useCallback(() => {
@@ -5088,6 +5335,12 @@ useEffect(() => {
       setHistoryDraft(createEmptyHistoryDraft())
     }
   }, [effectiveHistory, selectedHistoryId])
+
+  useEffect(() => {
+    previousHistorySubtaskIdsRef.current = new Set()
+    historySubtaskIdsInitializedRef.current = false
+    setRevealedHistoryDeleteKey(null)
+  }, [selectedHistoryId])
 
   useEffect(() => {
     if (!selectedHistoryId) return
@@ -10148,49 +10401,7 @@ useEffect(() => {
                 id="history-details-extras-editor"
                 className={`history-timeline__extras-panel${showEditorExtras ? ' is-open' : ''}`}
               >
-                <div className="calendar-inspector__subtasks">
-                  <div className="calendar-inspector__subtasks-header">
-                    <span className="history-timeline__field-text">Subtasks</span>
-                    <button type="button" className="calendar-inspector__subtasks-add" onClick={handleAddHistorySubtask}>
-                      Add subtask
-                    </button>
-                  </div>
-                  {sortedSubtasks.length > 0 ? (
-                    <ul className="calendar-inspector__subtask-list">
-                      {sortedSubtasks.map((subtask) => (
-                        <li key={subtask.id} className="calendar-inspector__subtask">
-                          <label className="calendar-inspector__subtask-toggle">
-                            <input
-                              type="checkbox"
-                              checked={subtask.completed}
-                              onChange={() => handleToggleHistorySubtaskCompletion(subtask.id)}
-                              aria-label={`Mark ${subtask.text.trim().length > 0 ? subtask.text : 'subtask'} ${
-                                subtask.completed ? 'incomplete' : 'complete'
-                              }`}
-                            />
-                          </label>
-                          <input
-                            className="calendar-inspector__subtask-input"
-                            type="text"
-                            value={subtask.text}
-                            placeholder="Add details"
-                            onChange={(event) => handleUpdateHistorySubtaskText(subtask.id, event.target.value)}
-                          />
-                          <button
-                            type="button"
-                            className="calendar-inspector__subtask-delete"
-                            aria-label="Delete subtask"
-                            onClick={() => handleDeleteHistorySubtask(subtask.id)}
-                          >
-                            ×
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="calendar-inspector__subtasks-empty">No subtasks yet.</p>
-                  )}
-                </div>
+                {renderHistorySubtasksEditor()}
                 <label className="history-timeline__field">
                   <span className="history-timeline__field-text">Notes</span>
                   <textarea
@@ -10918,53 +11129,7 @@ useEffect(() => {
                       id="history-details-extras-inspector"
                       className={`history-timeline__extras-panel${showInspectorExtras ? ' is-open' : ''}`}
                     >
-                      <div className="calendar-inspector__subtasks">
-                        <div className="calendar-inspector__subtasks-header">
-                          <span className="history-timeline__field-text">Subtasks</span>
-                          <button
-                            type="button"
-                            className="calendar-inspector__subtasks-add"
-                            onClick={handleAddHistorySubtask}
-                          >
-                            Add subtask
-                          </button>
-                        </div>
-                        {sortedSubtasks.length > 0 ? (
-                          <ul className="calendar-inspector__subtask-list">
-                            {sortedSubtasks.map((subtask) => (
-                              <li key={subtask.id} className="calendar-inspector__subtask">
-                                <label className="calendar-inspector__subtask-toggle">
-                                  <input
-                                    type="checkbox"
-                                    checked={subtask.completed}
-                                    onChange={() => handleToggleHistorySubtaskCompletion(subtask.id)}
-                                    aria-label={`Mark ${subtask.text.trim().length > 0 ? subtask.text : 'subtask'} ${
-                                      subtask.completed ? 'incomplete' : 'complete'
-                                    }`}
-                                  />
-                                </label>
-                                <input
-                                  className="calendar-inspector__subtask-input"
-                                  type="text"
-                                  value={subtask.text}
-                                  placeholder="Add details"
-                                  onChange={(event) => handleUpdateHistorySubtaskText(subtask.id, event.target.value)}
-                                />
-                                <button
-                                  type="button"
-                                  className="calendar-inspector__subtask-delete"
-                                  aria-label="Delete subtask"
-                                  onClick={() => handleDeleteHistorySubtask(subtask.id)}
-                                >
-                                  ×
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="calendar-inspector__subtasks-empty">No subtasks yet.</p>
-                        )}
-                      </div>
+                      {renderHistorySubtasksEditor()}
                       <label className="history-timeline__field">
                         <span className="history-timeline__field-text">Notes</span>
                         <textarea
@@ -11123,49 +11288,7 @@ useEffect(() => {
                   id="history-details-extras-legacy"
                   className={`history-timeline__extras-panel${showInspectorExtras ? ' is-open' : ''}`}
                 >
-                  <div className="calendar-inspector__subtasks">
-                    <div className="calendar-inspector__subtasks-header">
-                      <span className="history-timeline__field-text">Subtasks</span>
-                      <button type="button" className="calendar-inspector__subtasks-add" onClick={handleAddHistorySubtask}>
-                        Add subtask
-                      </button>
-                    </div>
-                    {sortedSubtasks.length > 0 ? (
-                      <ul className="calendar-inspector__subtask-list">
-                        {sortedSubtasks.map((subtask) => (
-                          <li key={subtask.id} className="calendar-inspector__subtask">
-                            <label className="calendar-inspector__subtask-toggle">
-                              <input
-                                type="checkbox"
-                                checked={subtask.completed}
-                                onChange={() => handleToggleHistorySubtaskCompletion(subtask.id)}
-                                aria-label={`Mark ${subtask.text.trim().length > 0 ? subtask.text : 'subtask'} ${
-                                  subtask.completed ? 'incomplete' : 'complete'
-                                }`}
-                              />
-                            </label>
-                            <input
-                              className="calendar-inspector__subtask-input"
-                              type="text"
-                              value={subtask.text}
-                              placeholder="Add details"
-                              onChange={(event) => handleUpdateHistorySubtaskText(subtask.id, event.target.value)}
-                            />
-                            <button
-                              type="button"
-                              className="calendar-inspector__subtask-delete"
-                              aria-label="Delete subtask"
-                              onClick={() => handleDeleteHistorySubtask(subtask.id)}
-                            >
-                              ×
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="calendar-inspector__subtasks-empty">No subtasks yet.</p>
-                    )}
-                  </div>
+                  {renderHistorySubtasksEditor()}
                   <label className="history-timeline__field">
                     <span className="history-timeline__field-text">Notes</span>
                     <textarea
@@ -12118,53 +12241,7 @@ useEffect(() => {
                                 id="history-details-extras-inline"
                                 className={`history-timeline__extras-panel${showInlineExtras ? ' is-open' : ''}`}
                               >
-                                <div className="calendar-inspector__subtasks">
-                                  <div className="calendar-inspector__subtasks-header">
-                                    <span className="history-timeline__field-text">Subtasks</span>
-                                    <button
-                                      type="button"
-                                      className="calendar-inspector__subtasks-add"
-                                      onClick={handleAddHistorySubtask}
-                                    >
-                                      Add subtask
-                                    </button>
-                                  </div>
-                                  {sortedSubtasks.length > 0 ? (
-                                    <ul className="calendar-inspector__subtask-list">
-                                      {sortedSubtasks.map((subtask) => (
-                                        <li key={subtask.id} className="calendar-inspector__subtask">
-                                          <label className="calendar-inspector__subtask-toggle">
-                                            <input
-                                              type="checkbox"
-                                              checked={subtask.completed}
-                                              onChange={() => handleToggleHistorySubtaskCompletion(subtask.id)}
-                                              aria-label={`Mark ${subtask.text.trim().length > 0 ? subtask.text : 'subtask'} ${
-                                                subtask.completed ? 'incomplete' : 'complete'
-                                              }`}
-                                            />
-                                          </label>
-                                          <input
-                                            className="calendar-inspector__subtask-input"
-                                            type="text"
-                                            value={subtask.text}
-                                            placeholder="Add details"
-                                            onChange={(event) => handleUpdateHistorySubtaskText(subtask.id, event.target.value)}
-                                          />
-                                          <button
-                                            type="button"
-                                            className="calendar-inspector__subtask-delete"
-                                            aria-label="Delete subtask"
-                                            onClick={() => handleDeleteHistorySubtask(subtask.id)}
-                                          >
-                                            ×
-                                          </button>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <p className="calendar-inspector__subtasks-empty">No subtasks yet.</p>
-                                  )}
-                                </div>
+                                {renderHistorySubtasksEditor()}
                                 <label className="history-timeline__field">
                                   <span className="history-timeline__field-text">Notes</span>
                                   <textarea
