@@ -55,6 +55,7 @@ import {
   type HistorySubtask,
   areHistorySubtasksEqual,
 } from '../lib/sessionHistory'
+import { fetchSubtasksForEntry, upsertSubtaskForParent, deleteSubtaskForParent } from '../lib/subtasks'
 import {
   fetchRepeatingSessionRules,
   createRepeatingRuleForEntry,
@@ -3917,8 +3918,10 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     const match = history.find((entry) => entry.id === selectedHistoryId)
     return match ?? null
   }, [history, selectedHistoryId])
+  const selectedHistoryEntryRef = useRef<HistoryEntry | null>(null)
 
   useEffect(() => {
+    selectedHistoryEntryRef.current = selectedHistoryEntry
     if (!selectedHistoryEntry) {
       if (typeof window !== 'undefined' && autoCommitFrameRef.current !== null) {
         window.cancelAnimationFrame(autoCommitFrameRef.current)
@@ -3937,6 +3940,29 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     setEditingHistoryId((current) => (current === selectedHistoryEntry.id ? current : null))
     taskNameAutofilledRef.current = false
   }, [selectedHistoryEntry])
+
+  useEffect(() => {
+    let cancelled = false
+    const entry = selectedHistoryEntryRef.current
+    if (!entry) return
+    ;(async () => {
+      try {
+        const subtasks = await fetchSubtasksForEntry(entry)
+        if (cancelled) return
+        setHistoryDraft((draftState) => {
+          const nextDraft = { ...draftState, subtasks }
+          lastCommittedHistoryDraftRef.current = {
+            ...nextDraft,
+            subtasks: cloneHistorySubtasks(subtasks),
+          }
+          return nextDraft
+        })
+      } catch {}
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedHistoryEntry?.id])
 
   useEffect(() => {
     if (!editingHistoryId) {
@@ -4316,6 +4342,12 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   )
 
   const handleAddHistorySubtask = useCallback(() => {
+    const parent = selectedHistoryEntryRef.current?.taskId
+      ? { taskId: selectedHistoryEntryRef.current.taskId }
+      : selectedHistoryEntryRef.current?.id
+        ? { sessionId: selectedHistoryEntryRef.current.id }
+        : null
+    if (!parent) return
     setHistoryDraft((draft) => {
       const sortIndex = getNextHistorySubtaskSortIndex(draft.subtasks)
       const newSubtask: HistorySubtask = {
@@ -4324,31 +4356,58 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         completed: false,
         sortIndex,
       }
+      void upsertSubtaskForParent(parent, newSubtask)
       return { ...draft, subtasks: [...draft.subtasks, newSubtask] }
     })
   }, [])
 
   const handleUpdateHistorySubtaskText = useCallback((id: string, value: string) => {
-    setHistoryDraft((draft) => ({
-      ...draft,
-      subtasks: draft.subtasks.map((subtask) => (subtask.id === id ? { ...subtask, text: value } : subtask)),
-    }))
+    const parent = selectedHistoryEntryRef.current?.taskId
+      ? { taskId: selectedHistoryEntryRef.current.taskId }
+      : selectedHistoryEntryRef.current?.id
+        ? { sessionId: selectedHistoryEntryRef.current.id }
+        : null
+    setHistoryDraft((draft) => {
+      const next = draft.subtasks.map((subtask) => (subtask.id === id ? { ...subtask, text: value } : subtask))
+      const updated = next.find((s) => s.id === id)
+      if (parent && updated) {
+        void upsertSubtaskForParent(parent, updated)
+      }
+      return { ...draft, subtasks: next }
+    })
   }, [])
 
   const handleToggleHistorySubtaskCompletion = useCallback((id: string) => {
-    setHistoryDraft((draft) => ({
-      ...draft,
-      subtasks: draft.subtasks.map((subtask) =>
+    const parent = selectedHistoryEntryRef.current?.taskId
+      ? { taskId: selectedHistoryEntryRef.current.taskId }
+      : selectedHistoryEntryRef.current?.id
+        ? { sessionId: selectedHistoryEntryRef.current.id }
+        : null
+    setHistoryDraft((draft) => {
+      const next = draft.subtasks.map((subtask) =>
         subtask.id === id ? { ...subtask, completed: !subtask.completed } : subtask,
-      ),
-    }))
+      )
+      const updated = next.find((s) => s.id === id)
+      if (parent && updated) {
+        void upsertSubtaskForParent(parent, updated)
+      }
+      return { ...draft, subtasks: next }
+    })
   }, [])
 
   const handleDeleteHistorySubtask = useCallback((id: string) => {
+    const parent = selectedHistoryEntryRef.current?.taskId
+      ? { taskId: selectedHistoryEntryRef.current.taskId }
+      : selectedHistoryEntryRef.current?.id
+        ? { sessionId: selectedHistoryEntryRef.current.id }
+        : null
     setHistoryDraft((draft) => ({
       ...draft,
       subtasks: draft.subtasks.filter((subtask) => subtask.id !== id),
     }))
+    if (parent) {
+      void deleteSubtaskForParent(parent, id)
+    }
   }, [])
 
   const sortedSubtasks = useMemo(
