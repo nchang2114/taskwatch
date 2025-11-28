@@ -2963,6 +2963,9 @@ export default function ReflectionPage() {
   const [hoveredHistoryId, setHoveredHistoryId] = useState<string | null>(null)
   const [historyDraft, setHistoryDraft] = useState<HistoryDraftState>(() => createEmptyHistoryDraft())
   const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null)
+  const [subtasksCache, setSubtasksCache] = useState<Map<string, HistorySubtask[]>>(() => new Map())
+  const subtasksCacheRef = useRef<Map<string, HistorySubtask[]>>(subtasksCache)
+  const subtaskFetchesInFlightRef = useRef<Set<string>>(new Set())
   // When set, shows a modal editor for a calendar entry
   const [calendarEditorEntryId, setCalendarEditorEntryId] = useState<string | null>(null)
   const [hoveredDuringDragId, setHoveredDuringDragId] = useState<string | null>(null)
@@ -3374,6 +3377,62 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     })
   }, [])
 
+  const cacheSubtasksForEntry = useCallback((entryId: string, subtasks: HistorySubtask[]) => {
+    setSubtasksCache((prev) => {
+      const existing = prev.get(entryId)
+      if (existing && areHistorySubtasksEqual(existing, subtasks)) {
+        return prev
+      }
+      const next = new Map(prev)
+      next.set(entryId, cloneHistorySubtasks(subtasks))
+      subtasksCacheRef.current = next
+      return next
+    })
+  }, [])
+
+  const ensureSubtasksFetched = useCallback(
+    async (entry: HistoryEntry | null | undefined, options?: { hydrateDraft?: boolean; force?: boolean }) => {
+      if (!entry) return
+      const cached = subtasksCacheRef.current.get(entry.id)
+      const shouldUseCache = cached && !options?.force
+      if (shouldUseCache && options?.hydrateDraft && selectedHistoryEntryRef.current?.id === entry.id) {
+        setHistoryDraft((draftState) => {
+          const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(cached) }
+          lastCommittedHistoryDraftRef.current = {
+            ...nextDraft,
+            subtasks: cloneHistorySubtasks(cached),
+          }
+          return nextDraft
+        })
+      }
+      if (shouldUseCache) {
+        return
+      }
+      if (subtaskFetchesInFlightRef.current.has(entry.id)) {
+        return
+      }
+      subtaskFetchesInFlightRef.current.add(entry.id)
+      try {
+        const subtasks = await fetchSubtasksForEntry(entry)
+        cacheSubtasksForEntry(entry.id, subtasks)
+        if (options?.hydrateDraft && selectedHistoryEntryRef.current?.id === entry.id) {
+          setHistoryDraft((draftState) => {
+            const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(subtasks) }
+            lastCommittedHistoryDraftRef.current = {
+              ...nextDraft,
+              subtasks: cloneHistorySubtasks(subtasks),
+            }
+            return nextDraft
+          })
+        }
+      } catch {
+      } finally {
+        subtaskFetchesInFlightRef.current.delete(entry.id)
+      }
+    },
+    [cacheSubtasksForEntry],
+  )
+
   const computeEntryScheduledStart = useCallback((entry: HistoryEntry): number => {
     const start = new Date(entry.startedAt)
     const minutes = start.getHours() * 60 + start.getMinutes()
@@ -3385,6 +3444,10 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   useEffect(() => {
     latestHistoryRef.current = history
   }, [history])
+
+  useEffect(() => {
+    subtasksCacheRef.current = subtasksCache
+  }, [subtasksCache])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3955,27 +4018,27 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   }, [selectedHistoryEntry?.id])
 
   useEffect(() => {
-    let cancelled = false
     const entry = selectedHistoryEntryRef.current
     if (!entry) return
+    const cached = subtasksCacheRef.current.get(entry.id)
+    const initialSubtasks =
+      cached ?? (Array.isArray(entry.subtasks) && entry.subtasks.length > 0 ? entry.subtasks : null)
+    if (initialSubtasks) {
+      setHistoryDraft((draftState) => {
+        const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(initialSubtasks) }
+        lastCommittedHistoryDraftRef.current = {
+          ...nextDraft,
+          subtasks: cloneHistorySubtasks(initialSubtasks),
+        }
+        return nextDraft
+      })
+    }
     ;(async () => {
       try {
-        const subtasks = await fetchSubtasksForEntry(entry)
-        if (cancelled) return
-        setHistoryDraft((draftState) => {
-          const nextDraft = { ...draftState, subtasks }
-          lastCommittedHistoryDraftRef.current = {
-            ...nextDraft,
-            subtasks: cloneHistorySubtasks(subtasks),
-          }
-          return nextDraft
-        })
+        await ensureSubtasksFetched(entry, { hydrateDraft: true, force: true })
       } catch {}
     })()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedHistoryEntry?.id])
+  }, [selectedHistoryEntry?.id, ensureSubtasksFetched])
 
   useEffect(() => {
     if (!editingHistoryId) {
@@ -4162,11 +4225,11 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   }, [historyDayOffset, setCalendarEditorEntryId, setCalendarInspectorEntryId, setInspectorFallbackMessage, updateHistory])
 
   const handleSelectHistorySegment = useCallback(
-    (entry: HistoryEntry) => {
+    (entry: HistoryEntry, options?: { preserveSelection?: boolean }) => {
       startTransition(() => {
         if (selectedHistoryId === entry.id) {
           const editorIsOpen = ENABLE_HISTORY_INSPECTOR_PANEL ? calendarInspectorEntryId : calendarEditorEntryId
-          if (editorIsOpen) {
+          if (editorIsOpen || options?.preserveSelection) {
             return
           }
           setSelectedHistoryId(null)
@@ -4999,6 +5062,23 @@ useEffect(() => {
   }, [history, activeSession, nowTick])
 
   useEffect(() => {
+    const PREFETCH_LIMIT = 20
+    let fetched = 0
+    for (const entry of effectiveHistory) {
+      if (fetched >= PREFETCH_LIMIT) break
+      if (subtasksCacheRef.current.has(entry.id)) {
+        continue
+      }
+      if (entry.subtasks && entry.subtasks.length > 0) {
+        cacheSubtasksForEntry(entry.id, entry.subtasks)
+        continue
+      }
+      fetched += 1
+      void ensureSubtasksFetched(entry)
+    }
+  }, [effectiveHistory, ensureSubtasksFetched, cacheSubtasksForEntry])
+
+  useEffect(() => {
     if (!selectedHistoryId) {
       return
     }
@@ -5008,6 +5088,11 @@ useEffect(() => {
       setHistoryDraft(createEmptyHistoryDraft())
     }
   }, [effectiveHistory, selectedHistoryId])
+
+  useEffect(() => {
+    if (!selectedHistoryId) return
+    cacheSubtasksForEntry(selectedHistoryId, historyDraft.subtasks)
+  }, [selectedHistoryId, historyDraft.subtasks, cacheSubtasksForEntry])
 
   const { segments, windowMs, loggedMs } = useMemo(
     () =>
@@ -5900,7 +5985,8 @@ useEffect(() => {
   const handleOpenCalendarPreview = useCallback(
     (entry: HistoryEntry, targetEl: HTMLElement) => {
       // Select entry for consistency with other flows.
-      handleSelectHistorySegment(entry)
+      handleSelectHistorySegment(entry, { preserveSelection: true })
+      void ensureSubtasksFetched(entry)
       if (calendarInspectorEntryId) {
         openCalendarInspector(entry)
         setCalendarPreview(null)
@@ -5961,7 +6047,7 @@ useEffect(() => {
       // Position on next frame to refine based on actual size
       requestAnimationFrame(() => positionCalendarPreview(targetEl))
     },
-    [calendarInspectorEntryId, handleSelectHistorySegment, openCalendarInspector, positionCalendarPreview],
+    [calendarInspectorEntryId, handleSelectHistorySegment, openCalendarInspector, positionCalendarPreview, ensureSubtasksFetched],
   )
 
   const handleCloseCalendarPreview = useCallback(() => setCalendarPreview(null), [])
@@ -9440,8 +9526,11 @@ useEffect(() => {
     }
     const goal = entry.goalName || 'No goal'
     const bucket = entry.bucketName || 'No bucket'
-    const subtaskCount = entry.subtasks.length
-    const completedSubtasks = entry.subtasks.reduce((count, subtask) => (subtask.completed ? count + 1 : count), 0)
+    const cachedSubtasks = subtasksCache.get(entry.id)
+    const summarySubtasks =
+      entry.id === selectedHistoryId ? historyDraft.subtasks : cachedSubtasks ?? entry.subtasks
+    const subtaskCount = summarySubtasks.length
+    const completedSubtasks = summarySubtasks.reduce((count, subtask) => (subtask.completed ? count + 1 : count), 0)
     const hasNotes = entry.notes.trim().length > 0
     const subtasksSummary = subtaskCount > 0 ? `${completedSubtasks}/${subtaskCount} subtasks` : 'No subtasks'
     const notesSummary = hasNotes ? 'Notes added' : 'No notes'
@@ -9859,7 +9948,19 @@ useEffect(() => {
       </div>,
       document.body,
     )
-  }, [calendarPreview, calendarPopoverEditing, effectiveHistory, handleCloseCalendarPreview, handleDeleteHistoryEntry, handleStartEditingHistoryEntry, updateHistory, repeatingRules])
+  }, [
+    calendarPreview,
+    calendarPopoverEditing,
+    effectiveHistory,
+    handleCloseCalendarPreview,
+    handleDeleteHistoryEntry,
+    handleStartEditingHistoryEntry,
+    subtasksCache,
+    historyDraft.subtasks,
+    selectedHistoryId,
+    updateHistory,
+    repeatingRules,
+  ])
 
   // Calendar editor modal
   useEffect(() => {
