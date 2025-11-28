@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useId } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useId, type RefObject } from 'react'
 import type { ReactNode, FormEvent } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
@@ -1091,7 +1091,7 @@ function MainApp() {
     if (typeof document === 'undefined') {
       return
     }
-    const panels: Array<[TabKey, React.RefObject<HTMLElement>]> = [
+    const panels: Array<[TabKey, RefObject<HTMLElement | null>]> = [
       ['goals', goalsPanelRef],
       ['focus', focusPanelRef],
       ['reflection', reflectionPanelRef],
@@ -1757,7 +1757,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           id={TAB_PANEL_IDS.goals}
           role="tabpanel"
           className="tab-panel"
-          ref={goalsPanelRef}
+          ref={goalsPanelRef as RefObject<HTMLElement>}
           tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
@@ -1768,7 +1768,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           id={TAB_PANEL_IDS.focus}
           role="tabpanel"
           className="tab-panel"
-          ref={focusPanelRef}
+          ref={focusPanelRef as RefObject<HTMLElement>}
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
@@ -1779,7 +1779,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           id={TAB_PANEL_IDS.reflection}
           role="tabpanel"
           className="tab-panel"
-          ref={reflectionPanelRef}
+          ref={reflectionPanelRef as RefObject<HTMLElement>}
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
