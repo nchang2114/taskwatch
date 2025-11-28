@@ -4440,6 +4440,96 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     return entry.id ? { sessionId: entry.id } : null
   }, [])
 
+  // Keep task-linked subtasks in the goals snapshot so other tabs (Goals/Focus) reflect edits immediately.
+  const mirrorSubtaskToGoalsSnapshot = useCallback(
+    (parent: { taskId?: string | null; sessionId?: string | null } | null, subtask: HistorySubtask) => {
+      const taskId = parent?.taskId
+      if (!taskId) return
+      setGoalsSnapshot((current) => {
+        let mutated = false
+        const updated = current.map((goal) => {
+          let goalMutated = false
+          const buckets = goal.buckets.map((bucket) => {
+            const taskIdx = bucket.tasks.findIndex((task) => task.id === taskId)
+            if (taskIdx === -1) return bucket
+            const task = bucket.tasks[taskIdx]
+            const nextSubtasks = Array.isArray(task.subtasks) ? [...task.subtasks] : []
+            const candidate = {
+              id: subtask.id,
+              text: subtask.text,
+              completed: subtask.completed,
+              sortIndex: subtask.sortIndex,
+            }
+            const existingIdx = nextSubtasks.findIndex((s) => s.id === subtask.id)
+            let changed = false
+            if (existingIdx >= 0) {
+              const existing = nextSubtasks[existingIdx]
+              if (
+                existing.text !== candidate.text ||
+                existing.completed !== candidate.completed ||
+                existing.sortIndex !== candidate.sortIndex
+              ) {
+                nextSubtasks[existingIdx] = candidate
+                changed = true
+              }
+            } else {
+              nextSubtasks.push(candidate)
+              changed = true
+            }
+            if (!changed) return bucket
+            nextSubtasks.sort((a, b) => a.sortIndex - b.sortIndex)
+            const nextTasks = bucket.tasks.slice()
+            nextTasks[taskIdx] = { ...task, subtasks: nextSubtasks }
+            goalMutated = true
+            mutated = true
+            return { ...bucket, tasks: nextTasks }
+          })
+          return goalMutated ? { ...goal, buckets } : goal
+        })
+        if (mutated) {
+          publishGoalsSnapshot(updated)
+          return updated
+        }
+        return current
+      })
+    },
+    [],
+  )
+
+  const mirrorSubtaskDeletionToGoalsSnapshot = useCallback(
+    (parent: { taskId?: string | null; sessionId?: string | null } | null, subtaskId: string) => {
+      const taskId = parent?.taskId
+      if (!taskId || !subtaskId) return
+      setGoalsSnapshot((current) => {
+        let mutated = false
+        const updated = current.map((goal) => {
+          let goalMutated = false
+          const buckets = goal.buckets.map((bucket) => {
+            const taskIdx = bucket.tasks.findIndex((task) => task.id === taskId)
+            if (taskIdx === -1) return bucket
+            const task = bucket.tasks[taskIdx]
+            const nextSubtasks = (task.subtasks ?? []).filter((s) => s.id !== subtaskId)
+            if (nextSubtasks.length === (task.subtasks ?? []).length) {
+              return bucket
+            }
+            const nextTasks = bucket.tasks.slice()
+            nextTasks[taskIdx] = { ...task, subtasks: nextSubtasks }
+            goalMutated = true
+            mutated = true
+            return { ...bucket, tasks: nextTasks }
+          })
+          return goalMutated ? { ...goal, buckets } : goal
+        })
+        if (mutated) {
+          publishGoalsSnapshot(updated)
+          return updated
+        }
+        return current
+      })
+    },
+    [],
+  )
+
   const scheduleSubtaskPersist = useCallback(
     (subtask: HistorySubtask) => {
       const parent = getSubtaskParent()
@@ -4454,11 +4544,12 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
           ? window.setTimeout(() => {
               timers.delete(subtask.id)
               void upsertSubtaskForParent(parent, subtask)
+              mirrorSubtaskToGoalsSnapshot(parent, subtask)
             }, 150)
           : (undefined as any)
       timers.set(subtask.id, timerId as number)
     },
-    [getSubtaskParent],
+    [getSubtaskParent, mirrorSubtaskToGoalsSnapshot],
   )
 
   const handleAddHistorySubtask = useCallback(
@@ -4568,6 +4659,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
           const nextSubtasks = draft.subtasks.filter((s) => s.id !== id)
           if (parent) {
             void deleteSubtaskForParent(parent, id)
+            mirrorSubtaskDeletionToGoalsSnapshot(parent, id)
             const timers = subtaskSaveTimersRef.current
             const existing = timers.get(id)
             if (typeof existing === 'number' && typeof window !== 'undefined') {
@@ -4581,7 +4673,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         return draft
       })
     },
-    [getSubtaskParent, scheduleSubtaskPersist],
+    [getSubtaskParent, mirrorSubtaskDeletionToGoalsSnapshot, scheduleSubtaskPersist],
   )
 
   const handleDeleteHistorySubtask = useCallback((id: string) => {
@@ -4592,6 +4684,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     }))
     if (parent) {
       void deleteSubtaskForParent(parent, id)
+      mirrorSubtaskDeletionToGoalsSnapshot(parent, id)
       const timers = subtaskSaveTimersRef.current
       const existing = timers.get(id)
       if (typeof existing === 'number' && typeof window !== 'undefined') {
@@ -4599,7 +4692,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         timers.delete(id)
       }
     }
-  }, [getSubtaskParent])
+  }, [getSubtaskParent, mirrorSubtaskDeletionToGoalsSnapshot])
 
   const sortedSubtasks = useMemo(
     () => historyDraft.subtasks.slice().sort((a, b) => a.sortIndex - b.sortIndex),
