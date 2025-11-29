@@ -4446,6 +4446,14 @@ useEffect(() => {
     lastLoggedSessionKeyRef.current = null
   }, [])
 
+  const resetStopwatchDisplay = useCallback(() => {
+    if (!timeDisplayRef.current) return
+    const text = formatTime(0)
+    timeDisplayRef.current.textContent = text
+    const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
+    timeDisplayRef.current.className = `time-value ${hiddenClass}`
+  }, [isTimeHidden])
+
   const handleCompleteFocus = async (
     event?: ReactPointerEvent<HTMLButtonElement> | ReactMouseEvent<HTMLButtonElement>,
   ) => {
@@ -4505,6 +4513,7 @@ useEffect(() => {
     lastLoggedSessionKeyRef.current = null
     lastCommittedElapsedRef.current = 0
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
+    resetStopwatchDisplay()
 
     if (isQuickListFocusTarget) {
       const updated = quickListItems.map((item) =>
@@ -4704,12 +4713,7 @@ useEffect(() => {
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
-    if (timeDisplayRef.current) {
-      const text = formatTime(0)
-      timeDisplayRef.current.textContent = text
-      const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
-      timeDisplayRef.current.className = `time-value ${hiddenClass}`
-    }
+    resetStopwatchDisplay()
   }
 
   const handleToggleTimeVisibility = useCallback(() => {
