@@ -679,6 +679,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const frameRef = useRef<number | null>(null)
   const lastTickRef = useRef<number | null>(null)
   const timeDisplayRef = useRef<HTMLSpanElement | null>(null)
+  const activeTimeModeRef = useRef<TimeMode>('focus')
   const selectorButtonRef = useRef<HTMLButtonElement | null>(null)
   const selectorPopoverRef = useRef<HTMLDivElement | null>(null)
   const focusTaskContainerRef = useRef<HTMLDivElement | null>(null)
@@ -709,6 +710,28 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
     repeatingOccurrenceDate: null,
     repeatingOriginalTime: null,
   })
+  // Keep the DOM stopwatch display in sync without waiting for React re-renders
+  const updateTimeDisplay = useCallback(
+    (elapsedMs: number) => {
+      if (!timeDisplayRef.current) return
+      const text = formatTime(elapsedMs)
+      const isLong = elapsedMs >= 3_600_000
+      const charCount = text.length
+      let lenClass = ''
+      if (charCount >= 15) lenClass = 'time-length-xxs'
+      else if (charCount >= 13) lenClass = 'time-length-xs'
+      else if (charCount >= 11) lenClass = 'time-length-sm'
+      const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
+      const longClass = isLong ? 'time-value--long' : ''
+      timeDisplayRef.current.textContent = text
+      timeDisplayRef.current.className = `time-value ${longClass} ${lenClass} ${hiddenClass}`
+    },
+    [isTimeHidden],
+  )
+
+  const resetStopwatchDisplay = useCallback(() => {
+    updateTimeDisplay(0)
+  }, [updateTimeDisplay])
   const currentSessionKeyRef = useRef<string | null>(null)
   const lastLoggedSessionKeyRef = useRef<string | null>(null)
   const lastCommittedElapsedRef = useRef(0)
@@ -1233,6 +1256,10 @@ useEffect(() => {
   }, [focusSource])
 
   useEffect(() => {
+    activeTimeModeRef.current = timeMode
+  }, [timeMode])
+
+  useEffect(() => {
     if (!isRunning) {
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current)
@@ -1243,26 +1270,13 @@ useEffect(() => {
     }
 
     const update = () => {
+      if (activeTimeModeRef.current !== timeMode) {
+        return
+      }
       if (sessionStart === null) return
       const now = Date.now()
       const currentElapsed = now - sessionStart
-      
-      if (timeDisplayRef.current) {
-        const text = formatTime(currentElapsed)
-        timeDisplayRef.current.textContent = text
-        
-        const isLong = currentElapsed >= 3600000
-        const charCount = text.length
-        let lenClass = ''
-        if (charCount >= 15) lenClass = 'time-length-xxs'
-        else if (charCount >= 13) lenClass = 'time-length-xs'
-        else if (charCount >= 11) lenClass = 'time-length-sm'
-        
-        const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
-        const longClass = isLong ? 'time-value--long' : ''
-        timeDisplayRef.current.className = `time-value ${longClass} ${lenClass} ${hiddenClass}`
-      }
-      
+      updateTimeDisplay(currentElapsed)
       frameRef.current = requestAnimationFrame(update)
     }
 
@@ -1274,7 +1288,14 @@ useEffect(() => {
         frameRef.current = null
       }
     }
-  }, [isRunning, sessionStart, isTimeHidden])
+  }, [isRunning, sessionStart, timeMode, updateTimeDisplay])
+
+  // Keep the displayed time in sync when idle or when switching modes to prevent stale flashes
+  useEffect(() => {
+    if (!isRunning) {
+      updateTimeDisplay(elapsed)
+    }
+  }, [elapsed, isRunning, updateTimeDisplay])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !import.meta.env.DEV) return
@@ -4446,14 +4467,6 @@ useEffect(() => {
     lastLoggedSessionKeyRef.current = null
   }, [])
 
-  const resetStopwatchDisplay = useCallback(() => {
-    if (!timeDisplayRef.current) return
-    const text = formatTime(0)
-    timeDisplayRef.current.textContent = text
-    const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
-    timeDisplayRef.current.className = `time-value ${hiddenClass}`
-  }, [isTimeHidden])
-
   const handleCompleteFocus = async (
     event?: ReactPointerEvent<HTMLButtonElement> | ReactMouseEvent<HTMLButtonElement>,
   ) => {
@@ -5086,20 +5099,24 @@ useEffect(() => {
     [computeCurrentElapsed, currentTaskName, customTaskDraft, focusSource, isRunning, sessionStart],
   )
 
-  const restoreModeSnapshot = useCallback((mode: TimeMode) => {
-    const snapshot = modeStateRef.current[mode]
-    setCurrentTaskName(snapshot.taskName)
-    setCustomTaskDraft(snapshot.customTaskDraft)
-    setFocusSource(snapshot.source)
-    setElapsed(snapshot.elapsed)
-    setSessionStart(snapshot.sessionStart)
-    setIsRunning(Boolean(snapshot.isRunning && snapshot.sessionStart !== null))
-    sessionMetadataRef.current = { ...snapshot.sessionMeta }
-    currentSessionKeyRef.current = snapshot.currentSessionKey
-    lastLoggedSessionKeyRef.current = snapshot.lastLoggedSessionKey
-    lastTickRef.current = snapshot.lastTick
-    lastCommittedElapsedRef.current = snapshot.lastCommittedElapsed
-  }, [])
+  const restoreModeSnapshot = useCallback(
+    (mode: TimeMode) => {
+      const snapshot = modeStateRef.current[mode]
+      setCurrentTaskName(snapshot.taskName)
+      setCustomTaskDraft(snapshot.customTaskDraft)
+      setFocusSource(snapshot.source)
+      setElapsed(snapshot.elapsed)
+      setSessionStart(snapshot.sessionStart)
+      setIsRunning(Boolean(snapshot.isRunning && snapshot.sessionStart !== null))
+      sessionMetadataRef.current = { ...snapshot.sessionMeta }
+      currentSessionKeyRef.current = snapshot.currentSessionKey
+      lastLoggedSessionKeyRef.current = snapshot.lastLoggedSessionKey
+      lastTickRef.current = snapshot.lastTick
+      lastCommittedElapsedRef.current = snapshot.lastCommittedElapsed
+      updateTimeDisplay(snapshot.elapsed)
+    },
+    [updateTimeDisplay],
+  )
 
   const handleSwitchTimeMode = useCallback(
     (mode: TimeMode) => {
