@@ -76,7 +76,6 @@ import {
   type RepeatingException,
 } from '../lib/repeatingExceptions'
 import { evaluateAndMaybeRetireRule, setRepeatToNoneAfterTimestamp, deleteRepeatingRuleById } from '../lib/repeatingSessions'
-import { broadcastFocusTask } from '../lib/focusChannel'
 import {
   fetchSnapbackOverviewRows as apiFetchSnapbackRows,
   upsertSnapbackOverviewByBaseKey as apiUpsertSnapbackByKey,
