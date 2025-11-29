@@ -7243,9 +7243,9 @@ export default function GoalsPage(): ReactElement {
                 if (pendingNotes !== undefined) {
                   mergedNotes = pendingNotes
                 } else if (typeof task.notes === 'string') {
-                  mergedNotes = task.notes
+                  mergedNotes = typeof task.notes === 'string' ? task.notes : undefined
                 } else {
-                  mergedNotes = existingTask?.notes
+                  mergedNotes = typeof existingTask?.notes === 'string' ? existingTask.notes : undefined
                 }
                 const remoteSubtasks = Array.isArray(task.subtasks) ? task.subtasks : []
                 const mergedSubtasks = mergeSubtasksWithSources(task.id, remoteSubtasks, [
@@ -7281,9 +7281,9 @@ export default function GoalsPage(): ReactElement {
             } else if (recentlyEdited) {
               notes = existing?.notes
             } else if (typeof task.notes === 'string') {
-              notes = task.notes
+              notes = typeof task.notes === 'string' ? task.notes : undefined
             } else {
-              notes = existing?.notes
+              notes = typeof existing?.notes === 'string' ? existing.notes : undefined
             }
             const remoteSubtasks = Array.isArray(task.subtasks) ? task.subtasks : []
             const mergedSubtasks = mergeSubtasksWithSources(task.id, remoteSubtasks, [
