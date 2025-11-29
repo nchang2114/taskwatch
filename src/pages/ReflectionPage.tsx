@@ -7599,6 +7599,7 @@ useEffect(() => {
     if (event.button !== 0) return
     const isTouch = (event as any).pointerType === 'touch'
     let scrollLocked = false
+    let prevTouchAction: string | null = null
     const target = event.target as HTMLElement | null
     if (target && (target.closest('.calendar-event') || target.closest('.calendar-allday-event') || target.closest('button'))) {
       return
@@ -7661,6 +7662,10 @@ useEffect(() => {
         try { e.preventDefault() } catch {}
         try { area.setPointerCapture?.(e.pointerId) } catch {}
         state.mode = 'hdrag'
+        if (prevTouchAction === null) {
+          prevTouchAction = area.style.touchAction
+          area.style.touchAction = 'none'
+        }
         if (isTouch && !scrollLocked) {
           setPageScrollLock(true)
           scrollLocked = true
@@ -7738,6 +7743,9 @@ useEffect(() => {
       if (scrollLocked) {
         setPageScrollLock(false)
         scrollLocked = false
+      }
+      if (prevTouchAction !== null) {
+        area.style.touchAction = prevTouchAction
       }
     }
     window.addEventListener('pointermove', handleMove)
