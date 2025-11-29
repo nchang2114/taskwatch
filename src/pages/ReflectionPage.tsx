@@ -164,7 +164,7 @@ const detectPanIntent = (
   if (absY >= absX * verticalDominance) {
     return 'vertical'
   }
-  return null
+  return null 
 }
 
 type EditableSelectionSnapshot = {
