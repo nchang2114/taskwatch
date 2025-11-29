@@ -890,12 +890,8 @@ function reconcileGoalsWithSnapshot(snapshot: GoalSnapshot[], current: Goal[]): 
                 })
               : []
             const incomingNotes = typeof task.notes === 'string' ? task.notes : undefined
-            const resolvedNotes =
-              incomingNotes !== undefined
-                ? incomingNotes.trim().length === 0
-                  ? existingTask?.notes
-                  : incomingNotes
-                : existingTask?.notes
+            // Treat blank/whitespace notes from other surfaces as intentional clears instead of "unknown"
+            const resolvedNotes = incomingNotes !== undefined ? incomingNotes : existingTask?.notes
             return {
               id: task.id,
               text: task.text,
