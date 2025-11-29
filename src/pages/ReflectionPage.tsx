@@ -85,9 +85,10 @@ import {
   updateSnapbackTriggerNameById as apiUpdateSnapbackNameById,
   type DbSnapbackOverview,
 } from '../lib/snapbackApi'
+import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
 
-type ReflectionRangeKey = '24h' | '48h' | '7d'
+type ReflectionRangeKey = '24h' | '48h' | '7d' | 'all'
 
 type RangeDefinition = {
   label: string
@@ -99,9 +100,10 @@ const RANGE_DEFS: Record<ReflectionRangeKey, RangeDefinition> = {
   '24h': { label: 'Last 24 Hours', shortLabel: '24h', durationMs: 24 * 60 * 60 * 1000 },
   '48h': { label: 'Last 48 Hours', shortLabel: '48h', durationMs: 48 * 60 * 60 * 1000 },
   '7d': { label: 'Last 7 Days', shortLabel: '7d', durationMs: 7 * 24 * 60 * 60 * 1000 },
+  all: { label: 'All Time', shortLabel: 'All Time', durationMs: Number.POSITIVE_INFINITY },
 }
 
-const RANGE_KEYS: ReflectionRangeKey[] = ['24h', '48h', '7d']
+const RANGE_KEYS: ReflectionRangeKey[] = ['24h', '48h', '7d', 'all']
 
 // Snapback ranges include an "All Time" option and are managed separately
 type SnapRangeKey = ReflectionRangeKey | 'all'
@@ -2526,10 +2528,17 @@ const computeRangeOverview = (
   taskLookup: GoalLookup,
   goalColorLookup: Map<string, GoalColorInfo | undefined>,
   lifeRoutineSurfaceLookup: Map<string, SurfaceStyle>,
+  options?: { windowStartMs?: number; nowMs?: number },
 ): { segments: PieSegment[]; windowMs: number; loggedMs: number } => {
-  const { durationMs: windowMs } = RANGE_DEFS[range]
-  const now = Date.now()
-  const windowStart = now - windowMs
+  const now = Number.isFinite(options?.nowMs as number) ? Number(options?.nowMs) : Date.now()
+  const defaultWindowMs = RANGE_DEFS[range]?.durationMs ?? 0
+  const customStart = Number.isFinite(options?.windowStartMs as number)
+  if (!customStart && !Number.isFinite(defaultWindowMs)) {
+    return { segments: [], windowMs: 0, loggedMs: 0 }
+  }
+  const windowStart = customStart ? (options?.windowStartMs as number) : Math.max(0, now - defaultWindowMs)
+  const windowMs = customStart ? Math.max(0, now - windowStart) : defaultWindowMs
+  const safeWindowMs = windowMs > 0 && Number.isFinite(windowMs) ? windowMs : 1
   const totals = new Map<
     string,
     {
@@ -2593,7 +2602,7 @@ const computeRangeOverview = (
       id,
       label: segment.label,
       durationMs: segment.durationMs,
-      fraction: Math.min(Math.max(segment.durationMs / windowMs, 0), 1),
+      fraction: Math.min(Math.max(segment.durationMs / safeWindowMs, 0), 1),
       swatch,
       baseColor,
       gradient,
@@ -2665,6 +2674,9 @@ export default function ReflectionPage() {
   // Repeating sessions (rules fetched from backend)
   const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
+  const historyOwnerId = useMemo(() => readHistoryOwnerId(), [historyOwnerSignal])
+  const [accountCreatedAtMs, setAccountCreatedAtMs] = useState<number | null>(null)
+  const [accountCreatedAtStatus, setAccountCreatedAtStatus] = useState<'idle' | 'loading' | 'ready' | 'error' | 'guest'>('idle')
   const [customRecurrenceOpen, setCustomRecurrenceOpen] = useState(false)
   const [customRecurrenceBaseMs, setCustomRecurrenceBaseMs] = useState<number | null>(null)
   const [customRecurrenceEntry, setCustomRecurrenceEntry] = useState<HistoryEntry | null>(null)
@@ -3533,7 +3545,52 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     }
   }, [])
 
-  
+  useEffect(() => {
+    if (!historyOwnerId || historyOwnerId === HISTORY_GUEST_USER_ID) {
+      setAccountCreatedAtStatus('guest')
+      setAccountCreatedAtMs(null)
+      return
+    }
+    let cancelled = false
+    setAccountCreatedAtStatus('loading')
+    setAccountCreatedAtMs(null)
+    const fetchCreatedAt = async () => {
+      if (!supabase) {
+        if (!cancelled) setAccountCreatedAtStatus('error')
+        return
+      }
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('created_at')
+          .eq('id', historyOwnerId)
+          .maybeSingle()
+        if (cancelled) {
+          return
+        }
+        const createdAtValue = typeof data?.created_at === 'string' ? data.created_at : null
+        if (error || !createdAtValue) {
+          setAccountCreatedAtStatus('error')
+          return
+        }
+        const parsed = Date.parse(createdAtValue)
+        if (!Number.isFinite(parsed)) {
+          setAccountCreatedAtStatus('error')
+          return
+        }
+        setAccountCreatedAtMs(parsed)
+        setAccountCreatedAtStatus('ready')
+      } catch {
+        if (!cancelled) {
+          setAccountCreatedAtStatus('error')
+        }
+      }
+    }
+    void fetchCreatedAt()
+    return () => {
+      cancelled = true
+    }
+  }, [historyOwnerId])
 
   // Subscribe to repeating exceptions updates
   useEffect(() => {
@@ -5663,18 +5720,49 @@ useEffect(() => {
     cacheSubtasksForEntry(selectedHistoryId, cloned)
   }, [selectedHistoryId, historyDraft.subtasks, cacheSubtasksForEntry])
 
-  const { segments, windowMs, loggedMs } = useMemo(
-    () =>
-      computeRangeOverview(
-        effectiveHistory,
-        activeRange,
-        enhancedGoalLookup,
-        goalColorLookup,
-        lifeRoutineSurfaceLookup,
-      ),
-    [effectiveHistory, activeRange, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup],
+  const allTimeWindowStart = useMemo(
+    () => (accountCreatedAtStatus === 'ready' && accountCreatedAtMs !== null ? accountCreatedAtMs : null),
+    [accountCreatedAtStatus, accountCreatedAtMs],
   )
+  const { segments, windowMs, loggedMs } = useMemo(() => {
+    if (activeRange === 'all' && !allTimeWindowStart) {
+      return { segments: [], windowMs: 0, loggedMs: 0 }
+    }
+    return computeRangeOverview(
+      effectiveHistory,
+      activeRange,
+      enhancedGoalLookup,
+      goalColorLookup,
+      lifeRoutineSurfaceLookup,
+      activeRange === 'all' && allTimeWindowStart ? { windowStartMs: allTimeWindowStart } : undefined,
+    )
+  }, [
+    effectiveHistory,
+    activeRange,
+    enhancedGoalLookup,
+    goalColorLookup,
+    lifeRoutineSurfaceLookup,
+    allTimeWindowStart,
+  ])
   const activeRangeConfig = RANGE_DEFS[activeRange]
+  const isAllTimeRange = activeRange === 'all'
+  const overviewBlockedMessage = useMemo(() => {
+    if (!isAllTimeRange) {
+      return null
+    }
+    switch (accountCreatedAtStatus) {
+      case 'guest':
+        return 'Guest accounts do not have access to the all-time overview.'
+      case 'loading':
+        return 'Loading your all-time overview…'
+      case 'error':
+        return 'Unable to load your account start date right now.'
+      case 'idle':
+        return 'Preparing your all-time overview…'
+      default:
+        return null
+    }
+  }, [accountCreatedAtStatus, isAllTimeRange])
   const loggedSegments = useMemo(() => segments.filter((segment) => !segment.isUnlogged), [segments])
   const unloggedFraction = useMemo(
     () => Math.max(0, 1 - loggedSegments.reduce((sum, segment) => sum + segment.fraction, 0)),
@@ -12802,6 +12890,7 @@ useEffect(() => {
           {RANGE_KEYS.map((key) => {
             const config = RANGE_DEFS[key]
             const isActive = key === activeRange
+            const tabShortLabel = key === 'all' ? config.shortLabel : `Last ${config.shortLabel}`
             return (
               <button
                 key={key}
@@ -12815,7 +12904,7 @@ useEffect(() => {
                 onClick={() => setActiveRange(key)}
               >
                 <span className="reflection-tab__label reflection-tab__label--full">{config.label}</span>
-                <span className="reflection-tab__label reflection-tab__label--short">{`Last ${config.shortLabel}`}</span>
+                <span className="reflection-tab__label reflection-tab__label--short">{tabShortLabel}</span>
               </button>
             )
           })}
@@ -12828,116 +12917,126 @@ useEffect(() => {
           aria-live="polite"
           aria-label={`${activeRangeConfig.label} chart`}
         >
-          <div className="reflection-pie">
-            {supportsConicGradient ? (
-              <canvas
-                ref={pieCanvasRef}
-                className="reflection-pie__canvas"
-                width={PIE_VIEWBOX_SIZE}
-                height={PIE_VIEWBOX_SIZE}
-                aria-hidden="true"
-              />
-            ) : (
-              <svg
-                className="reflection-pie__chart"
-                viewBox={`0 0 ${PIE_VIEWBOX_SIZE} ${PIE_VIEWBOX_SIZE}`}
-                aria-hidden="true"
-                focusable="false"
-              >
-                {pieArcs.length === 0 ? (
-                  <path
-                    className="reflection-pie__slice reflection-pie__slice--unlogged"
-                    d={FULL_DONUT_PATH}
-                    fill="var(--reflection-chart-unlogged-soft)"
-                    stroke="var(--reflection-chart-unlogged-stroke)"
-                    strokeWidth="1.1"
-                    strokeLinejoin="round"
-                    fillRule="evenodd"
-                    clipRule="evenodd"
+          {overviewBlockedMessage ? (
+            <div className="reflection-overview__empty" role="status" aria-live="polite">
+              {overviewBlockedMessage}
+            </div>
+          ) : (
+            <>
+              <div className="reflection-pie">
+                {supportsConicGradient ? (
+                  <canvas
+                    ref={pieCanvasRef}
+                    className="reflection-pie__canvas"
+                    width={PIE_VIEWBOX_SIZE}
+                    height={PIE_VIEWBOX_SIZE}
+                    aria-hidden="true"
                   />
                 ) : (
-                  pieArcs.map((arc) => {
-                    if (arc.isUnlogged) {
-                      return (
-                        <path
-                          key={arc.id}
-                          className="reflection-pie__slice reflection-pie__slice--unlogged"
-                          d={arc.path}
-                          fill={arc.fill}
-                          fillRule="evenodd"
-                          clipRule="evenodd"
-                        />
-                      )
-                    }
-                    const slices = buildArcLoopSlices(arc)
-                    if (slices.length <= 1) {
-                      const slice = slices[0]
-                      return (
-                        <path
-                          key={arc.id}
-                          className="reflection-pie__slice"
-                          d={arc.path}
-                          fill={slice?.color ?? arc.fill}
-                          fillRule="evenodd"
-                          clipRule="evenodd"
-                        />
-                      )
-                    }
-                    return (
-                      <g key={arc.id}>
-                        {slices.map((slice) => (
-                          <path
-                            key={slice.key}
-                            className="reflection-pie__slice"
-                            d={slice.path}
-                            fill={slice.color}
-                            fillRule="evenodd"
-                            clipRule="evenodd"
-                          />
-                        ))}
-                      </g>
-                    )
-                  })
+                  <svg
+                    className="reflection-pie__chart"
+                    viewBox={`0 0 ${PIE_VIEWBOX_SIZE} ${PIE_VIEWBOX_SIZE}`}
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    {pieArcs.length === 0 ? (
+                      <path
+                        className="reflection-pie__slice reflection-pie__slice--unlogged"
+                        d={FULL_DONUT_PATH}
+                        fill="var(--reflection-chart-unlogged-soft)"
+                        stroke="var(--reflection-chart-unlogged-stroke)"
+                        strokeWidth="1.1"
+                        strokeLinejoin="round"
+                        fillRule="evenodd"
+                        clipRule="evenodd"
+                      />
+                    ) : (
+                      pieArcs.map((arc) => {
+                        if (arc.isUnlogged) {
+                          return (
+                            <path
+                              key={arc.id}
+                              className="reflection-pie__slice reflection-pie__slice--unlogged"
+                              d={arc.path}
+                              fill={arc.fill}
+                              fillRule="evenodd"
+                              clipRule="evenodd"
+                            />
+                          )
+                        }
+                        const slices = buildArcLoopSlices(arc)
+                        if (slices.length <= 1) {
+                          const slice = slices[0]
+                          return (
+                            <path
+                              key={arc.id}
+                              className="reflection-pie__slice"
+                              d={arc.path}
+                              fill={slice?.color ?? arc.fill}
+                              fillRule="evenodd"
+                              clipRule="evenodd"
+                            />
+                          )
+                        }
+                        return (
+                          <g key={arc.id}>
+                            {slices.map((slice) => (
+                              <path
+                                key={slice.key}
+                                className="reflection-pie__slice"
+                                d={slice.path}
+                                fill={slice.color}
+                                fillRule="evenodd"
+                                clipRule="evenodd"
+                              />
+                            ))}
+                          </g>
+                        )
+                      })
+                    )}
+                  </svg>
                 )}
-              </svg>
-            )}
-            <div className="reflection-pie__center">
-              <span className="reflection-pie__range">{activeRangeConfig.shortLabel}</span>
-              <span className="reflection-pie__value">{formatDuration(loggedMs)}</span>
-              <span className="reflection-pie__caption">logged</span>
-            </div>
-          </div>
-
-          <div className="reflection-legend" aria-label={`${activeRangeConfig.label} breakdown`}>
-            {legendSegments.map((segment) => (
-              <div
-                key={segment.id}
-                className={`reflection-legend__item${segment.isUnlogged ? ' reflection-legend__item--unlogged' : ''}`}
-              >
-                <span className="reflection-legend__swatch" style={{ background: segment.swatch }} aria-hidden="true" />
-                <div className="reflection-legend__meta">
-                  <span className="reflection-legend__label">{segment.label}</span>
-                  <span className="reflection-legend__value">{formatDuration(segment.durationMs)}</span>
+                <div className="reflection-pie__center">
+                  <span className="reflection-pie__range">{activeRangeConfig.shortLabel}</span>
+                  <span className="reflection-pie__value">{formatDuration(loggedMs)}</span>
+                  <span className="reflection-pie__caption">logged</span>
                 </div>
               </div>
-            ))}
-          </div>
+
+              <div className="reflection-legend" aria-label={`${activeRangeConfig.label} breakdown`}>
+                {legendSegments.map((segment) => (
+                  <div
+                    key={segment.id}
+                    className={`reflection-legend__item${segment.isUnlogged ? ' reflection-legend__item--unlogged' : ''}`}
+                  >
+                    <span className="reflection-legend__swatch" style={{ background: segment.swatch }} aria-hidden="true" />
+                    <div className="reflection-legend__meta">
+                      <span className="reflection-legend__label">{segment.label}</span>
+                      <span className="reflection-legend__value">{formatDuration(segment.durationMs)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="reflection-stats">
-          <div className="reflection-stats__item">
-            <span className="reflection-stats__label">Logged</span>
-            <span className="reflection-stats__value">{formatDuration(loggedMs)}</span>
+        {overviewBlockedMessage ? null : (
+          <div className="reflection-stats">
+            <div className="reflection-stats__item">
+              <span className="reflection-stats__label">Logged</span>
+              <span className="reflection-stats__value">{formatDuration(loggedMs)}</span>
+            </div>
+            <div className="reflection-stats__item">
+              <span className="reflection-stats__label">Unlogged</span>
+              <span className="reflection-stats__value">{formatDuration(unloggedMs)}</span>
+            </div>
+            <div className="reflection-stats__item">
+              <span className="reflection-stats__label">Window</span>
+              <span className="reflection-stats__value">{formatDuration(windowMs)}</span>
+            </div>
           </div>
-          <div className="reflection-stats__item">
-            <span className="reflection-stats__label">Unlogged</span>
-            <span className="reflection-stats__value">{formatDuration(unloggedMs)}</span>
-          </div>
-          <div className="reflection-stats__item">
-            <span className="reflection-stats__label">Window</span>
-            <span className="reflection-stats__value">{formatDuration(windowMs)}</span>
-          </div>
-        </div>
+        )}
       </section>
 
       {/* Snap Back Overview */}

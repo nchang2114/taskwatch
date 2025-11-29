@@ -1544,6 +1544,22 @@ html[data-theme='light'] .snap-tab--active { color: #fff; background: rgba(104, 
   justify-items: center;
 }
 
+.reflection-overview__empty {
+  grid-column: 1 / -1;
+  width: 100%;
+  border: 1px dashed rgba(132, 148, 228, 0.35);
+  background: rgba(18, 24, 56, 0.35);
+  color: var(--text-secondary);
+  padding: 0.9rem 1rem;
+  border-radius: 0.8rem;
+  text-align: center;
+}
+
+html[data-theme='light'] .reflection-overview__empty {
+  border-color: rgba(160, 172, 236, 0.45);
+  background: rgba(244, 247, 255, 0.9);
+}
+
 .reflection-pie {
   position: relative;
   width: clamp(220px, 36vw, 280px);
