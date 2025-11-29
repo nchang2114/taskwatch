@@ -10648,43 +10648,6 @@ useEffect(() => {
                 >
                   Confirm
                 </button>
-                <button
-                  type="button"
-                  className="history-timeline__action-button"
-                  onClick={() => {
-                    // Start now: convert to a real session and launch focus immediately.
-                    updateHistory((current) => {
-                      const idx = current.findIndex((e) => e.id === entry.id)
-                      if (idx === -1) return current
-                      const next = [...current]
-                      next[idx] = { ...next[idx], futureSession: false }
-                      return next
-                    })
-                    const taskLabel = deriveEntryTaskName(entry)
-                    const broadcastSubtasks = (entry.subtasks || []).map((s) => ({
-                      id: s.id,
-                      text: s.text,
-                      completed: s.completed,
-                      sortIndex: (s as any).sortIndex ?? undefined,
-                    }))
-                    broadcastFocusTask({
-                      goalId: entry.goalId ?? '',
-                      goalName: entry.goalName ?? '',
-                      bucketId: entry.bucketId ?? '',
-                      bucketName: entry.bucketName ?? '',
-                      taskId: entry.taskId ?? '',
-                      taskName: taskLabel,
-                      goalSurface: entry.goalSurface ?? undefined,
-                      bucketSurface: entry.bucketSurface ?? undefined,
-                      autoStart: true,
-                      notes: entry.notes ?? '',
-                      subtasks: broadcastSubtasks,
-                    })
-                    handleCloseCalendarPreview()
-                  }}
-                >
-                  Start now
-                </button>
               </div>
             ) : null}
         </div>
