@@ -3904,7 +3904,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       map.set(key, arr)
     })
     // Map Snapback triggers to Snapback pseudo-goal
-    snapbackTriggerOptions.forEach((title) => {
+    snapbackTriggerOptions.forEach((title) => { 
       const trimmed = title.trim()
       if (!trimmed) return
       const key = trimmed.toLowerCase()
