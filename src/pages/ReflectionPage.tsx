@@ -1299,13 +1299,14 @@ const formatDuration = (ms: number) => {
 
 const computePieValueFontSize = (label: string): string => {
   const length = typeof label === 'string' ? label.length : 0
-  const max = 1.35
-  const min = 0.8
-  const startShrinkAt = 4
-  const dropPerChar = 0.12
+  const maxBase = 1.8
+  const min = 0.78
+  const startShrinkAt = 6
+  const dropPerChar = 0.09
   const drop = Math.max(0, length - startShrinkAt) * dropPerChar
-  const size = Math.max(min, max - drop)
-  return `${size}rem`
+  const maxAfterLength = Math.max(min + 0.1, maxBase - drop)
+  const vwScale = 4
+  return `clamp(${min}rem, ${vwScale}vw, ${maxAfterLength}rem)`
 }
 
 const formatTimeOfDay = (timestamp: number) => {
