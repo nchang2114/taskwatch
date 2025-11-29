@@ -7239,11 +7239,19 @@ export default function GoalsPage(): ReactElement {
               tasks: bucket.tasks.map((task) => {
                 const existingTask = existingBucket?.tasks.find((item) => item.id === task.id)
                 const pendingNotes = taskNotesLatestRef.current.get(task.id)
+                const incomingNotes = typeof task.notes === 'string' ? task.notes : undefined
+                const editedAt = taskNotesEditedAtRef.current.get(task.id) ?? 0
+                const recentlyEdited = typeof editedAt === 'number' && editedAt > 0 && Date.now() - editedAt < 4000
                 let mergedNotes: string | undefined
                 if (pendingNotes !== undefined) {
-                  mergedNotes = pendingNotes
-                } else if (typeof task.notes === 'string') {
-                  mergedNotes = typeof task.notes === 'string' ? task.notes : undefined
+                  if (incomingNotes !== undefined && incomingNotes !== pendingNotes && !recentlyEdited) {
+                    mergedNotes = incomingNotes
+                    taskNotesLatestRef.current.delete(task.id)
+                  } else {
+                    mergedNotes = pendingNotes
+                  }
+                } else if (incomingNotes !== undefined) {
+                  mergedNotes = incomingNotes
                 } else {
                   mergedNotes = typeof existingTask?.notes === 'string' ? existingTask.notes : undefined
                 }
@@ -7273,15 +7281,21 @@ export default function GoalsPage(): ReactElement {
           bucket.tasks.forEach((task) => {
             const existing = currentDetails[task.id]
             const pendingNotes = taskNotesLatestRef.current.get(task.id)
+            const incomingNotes = typeof task.notes === 'string' ? task.notes : undefined
             const editedAt = taskNotesEditedAtRef.current.get(task.id) ?? 0
             const recentlyEdited = typeof editedAt === 'number' && editedAt > 0 && Date.now() - editedAt < 4000
             let notes: string | undefined
             if (pendingNotes !== undefined) {
-              notes = pendingNotes
+              if (incomingNotes !== undefined && incomingNotes !== pendingNotes && !recentlyEdited) {
+                notes = incomingNotes
+                taskNotesLatestRef.current.delete(task.id)
+              } else {
+                notes = pendingNotes
+              }
             } else if (recentlyEdited) {
               notes = existing?.notes
-            } else if (typeof task.notes === 'string') {
-              notes = typeof task.notes === 'string' ? task.notes : undefined
+            } else if (incomingNotes !== undefined) {
+              notes = incomingNotes
             } else {
               notes = typeof existing?.notes === 'string' ? existing.notes : undefined
             }
