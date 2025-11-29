@@ -89,6 +89,7 @@ import {
   readStoredHistory as readPersistedHistory,
   syncHistoryWithSupabase,
   type HistoryEntry,
+  areHistorySubtasksEqual,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
 
@@ -435,6 +436,8 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
       left.goalId !== right.goalId ||
       left.bucketId !== right.bucketId ||
       left.taskId !== right.taskId ||
+      left.notes !== right.notes ||
+      !areHistorySubtasksEqual(left.subtasks, right.subtasks) ||
       (left.repeatingSessionId ?? null) !== (right.repeatingSessionId ?? null) ||
       (left.originalTime ?? null) !== (right.originalTime ?? null)
     ) {

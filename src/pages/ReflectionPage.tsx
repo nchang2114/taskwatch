@@ -4660,8 +4660,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     return entry.id ? { sessionId: entry.id } : null
   }, [])
 
-  const publishLocalGoalsSnapshot = useCallback((snapshot: GoalSnapshot[]) => {
-    if (editorOpenRef.current) {
+  const publishLocalGoalsSnapshot = useCallback((snapshot: GoalSnapshot[], options?: { allowWhileEditing?: boolean }) => {
+    if (editorOpenRef.current && !options?.allowWhileEditing) {
       return
     }
     const signature = JSON.stringify(snapshot)
@@ -4694,7 +4694,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishLocalGoalsSnapshot(updated)
+          publishLocalGoalsSnapshot(updated, { allowWhileEditing: true })
           return updated
         }
         return current
@@ -4750,7 +4750,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishLocalGoalsSnapshot(updated)
+          publishLocalGoalsSnapshot(updated, { allowWhileEditing: true })
           return updated
         }
         return current
@@ -4784,7 +4784,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishLocalGoalsSnapshot(updated)
+          publishLocalGoalsSnapshot(updated, { allowWhileEditing: true })
           return updated
         }
         return current
