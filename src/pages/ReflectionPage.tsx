@@ -8568,7 +8568,6 @@ useEffect(() => {
           })
         }
 
-        const nowMs = Date.now()
         return combined.map((info, index) => {
           const metadata = resolveGoalMetadata(info.entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
           const gradientCss = metadata.colorInfo?.gradient?.css
