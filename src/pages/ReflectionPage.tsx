@@ -145,6 +145,28 @@ const clampPanDelta = (dx: number, dayWidth: number, spanDays: number): number =
   return dx
 }
 
+const detectPanIntent = (
+  dx: number,
+  dy: number,
+  options?: { threshold?: number; horizontalDominance?: number; verticalDominance?: number },
+): 'horizontal' | 'vertical' | null => {
+  const threshold = options?.threshold ?? 10
+  const horizontalDominance = options?.horizontalDominance ?? 0.7
+  const verticalDominance = options?.verticalDominance ?? 1.15
+  const absX = Math.abs(dx)
+  const absY = Math.abs(dy)
+  if (absX < threshold && absY < threshold) {
+    return null
+  }
+  if (absX >= absY * horizontalDominance) {
+    return 'horizontal'
+  }
+  if (absY >= absX * verticalDominance) {
+    return 'vertical'
+  }
+  return null
+}
+
 type EditableSelectionSnapshot = {
   path: number[]
   offset: number
@@ -7623,10 +7645,8 @@ useEffect(() => {
       const dx = e.clientX - state.startX
       // Intent detection
       if (state.mode === 'pending') {
-        const absX = Math.abs(dx)
-        const absY = Math.abs(dy)
-        const threshold = 8
-        if (absY > threshold && absY > absX) {
+        const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
+        if (intent === 'vertical') {
           // Vertical scroll intent: abort calendar drag and let page scroll
           window.removeEventListener('pointermove', handleMove)
           window.removeEventListener('pointerup', handleUp)
@@ -7634,16 +7654,16 @@ useEffect(() => {
           calendarDragRef.current = null
           return
         }
-        if (absX > threshold && absX > absY) {
-          // Horizontal drag confirmed: capture and prevent default
-          try { area.setPointerCapture?.(e.pointerId) } catch {}
-          state.mode = 'hdrag'
-          if (isTouch && !scrollLocked) {
-            setPageScrollLock(true)
-            scrollLocked = true
-          }
-        } else {
+        if (intent !== 'horizontal') {
           return
+        }
+        // Horizontal drag confirmed: capture and prevent default
+        try { e.preventDefault() } catch {}
+        try { area.setPointerCapture?.(e.pointerId) } catch {}
+        state.mode = 'hdrag'
+        if (isTouch && !scrollLocked) {
+          setPageScrollLock(true)
+          scrollLocked = true
         }
       }
       // From here, horizontal drag is active
@@ -8690,10 +8710,9 @@ useEffect(() => {
                   try { window.clearTimeout(touchHoldTimer) } catch {}
                   touchHoldTimer = null
                 }
-                // If horizontal movement dominates, treat this as a calendar pan even though we started on an event
-                const absX = Math.abs(dx)
-                const absY = Math.abs(dy)
-                if (absX > absY && area) {
+                // If horizontal intent, treat this as a calendar pan even though we started on an event
+                const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
+                if (intent === 'horizontal' && area) {
                   if (!panningFromEvent) {
                     const rect = area.getBoundingClientRect()
                     if (rect.width > 0) {
@@ -8725,6 +8744,9 @@ useEffect(() => {
                         lastAppliedDx: 0,
                       }
                       try { area.setPointerCapture?.(s.pointerId) } catch {}
+                      if (isTouch) {
+                        setPageScrollLock(true)
+                      }
                       panningFromEvent = true
                     }
                   }
@@ -8851,6 +8873,9 @@ useEffect(() => {
                 if (hdrEl) hdrEl.style.transform = `translateX(${base}px)`
                 if (allDayEl) allDayEl.style.transform = `translateX(${base}px)`
               }
+            }
+            if (isTouch) {
+              setPageScrollLock(false)
             }
             calendarDragRef.current = null
             // Suppress click opening preview after a pan
@@ -9185,29 +9210,31 @@ useEffect(() => {
                       lastAppliedDx: 0,
                     }
                     try { area.setPointerCapture?.(pointerId) } catch {}
+                    if (isTouch) {
+                      setPageScrollLock(true)
+                    }
                   }
 
                   const onMove = (e: PointerEvent) => {
                     if (e.pointerId !== pointerId) return
                     const dx = e.clientX - startX
                     const dy = e.clientY - startY
-                    const absX = Math.abs(dx)
-                    const absY = Math.abs(dy)
-                    const threshold = 8
+                    const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                     if (!startedCreate && !startedPan) {
                       if (isTouch) {
                         // On touch, require a hold before creating; allow horizontal pan if user slides before hold
-                        if (absX > threshold && absX > absY) {
+                        if (intent === 'horizontal') {
                           if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
                           startPan()
+                          try { e.preventDefault() } catch {}
                           return
                         }
                         // Vertical movement before hold — do nothing (avoid accidental create)
                         return
                       } else {
-                        if (absX > threshold && absX > absY) {
+                        if (intent === 'horizontal') {
                           startPan()
-                        } else if (absY > threshold && absY > absX) {
+                        } else if (intent === 'vertical') {
                           startCreate()
                         } else {
                           return
@@ -9300,6 +9327,9 @@ useEffect(() => {
                         }
                       }
                       calendarDragRef.current = null
+                      if (isTouch) {
+                        setPageScrollLock(false)
+                      }
                       return
                     }
 
