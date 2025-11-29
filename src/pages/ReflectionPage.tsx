@@ -1287,6 +1287,8 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
       left.taskId !== right.taskId ||
       left.goalSurface !== right.goalSurface ||
       left.bucketSurface !== right.bucketSurface ||
+      left.notes !== right.notes ||
+      !areHistorySubtasksEqual(left.subtasks, right.subtasks) ||
       (left.repeatingSessionId ?? null) !== (right.repeatingSessionId ?? null) ||
       (left.originalTime ?? null) !== (right.originalTime ?? null) ||
       Boolean((left as any).futureSession) !== Boolean((right as any).futureSession)
@@ -5177,9 +5179,16 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     })()
     const prevTaskId = selectedHistoryEntry.taskId
     const prevTaskNotes = prevTaskId ? taskNotesById.get(prevTaskId) ?? '' : ''
+    const normalizedTaskName = nextTaskName.toLowerCase()
+    const taskLookupKey = `${goalKey}::${bucketKey}::${normalizedTaskName}`
+    const matchesExistingTask =
+      prevTaskId &&
+      (selectedHistoryEntry.goalName ?? '').trim().toLowerCase() === goalKey &&
+      (selectedHistoryEntry.bucketName ?? '').trim().toLowerCase() === bucketKey &&
+      selectedHistoryEntry.taskName.trim().toLowerCase() === normalizedTaskName
     const resolvedTaskId =
       hasGoalName && hasBucketName && nextTaskName.length > 0
-        ? taskIdLookup.get(`${goalKey}::${bucketKey}::${nextTaskName.toLowerCase()}`) ?? null
+        ? taskIdLookup.get(taskLookupKey) ?? (matchesExistingTask ? prevTaskId : null)
         : null
     const justUnlinked = Boolean(prevTaskId) && !resolvedTaskId
     if (justUnlinked && nextNotes.trim().length === 0 && prevTaskNotes.trim().length > 0) {
