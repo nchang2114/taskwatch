@@ -6894,6 +6894,10 @@ useEffect(() => {
       if (!editableEl) {
         return
       }
+      // Abort if the node was removed before the frame executes to avoid Range errors.
+      if (!editableEl.isConnected || !editableEl.parentNode) {
+        return
+      }
       try {
         editableEl.focus({ preventScroll: true })
       } catch {
@@ -6907,6 +6911,10 @@ useEffect(() => {
         const selection = window.getSelection()
         if (selection) {
           const range = (editableEl.ownerDocument || document).createRange()
+          // Guard against detached nodes to avoid InvalidNodeTypeError from selectNodeContents.
+          if (!editableEl.parentNode) {
+            return
+          }
           range.selectNodeContents(editableEl)
           range.collapse(false)
           selection.removeAllRanges()
