@@ -2181,43 +2181,6 @@ const PRESET_GOAL_GRADIENTS: Record<string, string> = {
   'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
 }
 
-        const step = (endPos - startPos) / gap
-        for (let offset = 1; offset < gap; offset += 1) {
-          const target = working[lastDefinedIndex + offset]
-          target.position = clamp01(startPos + step * offset)
-        }
-      }
-      stop.position = endPos
-      lastDefinedIndex = index
-    }
-  }
-  for (let index = 0; index < working.length; index += 1) {
-    if (working[index].position !== undefined) {
-      continue
-    }
-    const prevIndex = Math.max(0, index - 1)
-    let nextIndex = index + 1
-    while (nextIndex < working.length && working[nextIndex].position === undefined) {
-      nextIndex += 1
-    }
-    const prevPos = clamp01(working[prevIndex].position ?? 0)
-    const nextPos = nextIndex < working.length ? clamp01(working[nextIndex].position ?? prevPos) : prevPos
-    const span = nextIndex - prevIndex
-    if (span <= 0) {
-      working[index].position = prevPos
-    } else {
-      const relativeIndex = index - prevIndex
-      working[index].position = clamp01(prevPos + ((nextPos - prevPos) * relativeIndex) / span)
-    }
-  }
-  return working
-    .map<GradientStop>((stop) => ({
-      color: stop.color,
-      position: clamp01(stop.position ?? 0),
-    }))
-    .sort((a, b) => a.position - b.position)
-}
-
 const cssColorRegex = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\\([^)]+\\)|hsla?\\([^)]+\\))/gi
 
 const parseCssColor = (value: string): { r: number; g: number; b: number } | null => {
