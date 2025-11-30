@@ -225,11 +225,11 @@ type LifeRoutineDbRow = {
   sort_index?: number | null
 }
 
-const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[]): LifeRoutineConfig[] => {
+const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string | null): LifeRoutineConfig[] => {
   const clones = routines.map(cloneRoutine)
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.setItem(LIFE_ROUTINE_STORAGE_KEY, JSON.stringify(clones))
+      window.localStorage.setItem(storageKeyForUser(userId ?? readStoredLifeRoutineUserId()), JSON.stringify(clones))
       window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: clones }))
     } catch {
       // ignore storage errors
@@ -270,13 +270,16 @@ const normalizeLifeRoutineUserId = (userId: string | null | undefined): string =
 const isGuestLifeRoutineUser = (userId: string | null): boolean =>
   !userId || userId === LIFE_ROUTINE_GUEST_USER_ID
 
+const storageKeyForUser = (userId: string | null | undefined): string =>
+  `${LIFE_ROUTINE_STORAGE_KEY}::${normalizeLifeRoutineUserId(userId)}`
+
 export const readLifeRoutineOwnerId = (): string | null => readStoredLifeRoutineUserId()
 
 // Read raw local value without default seeding; returns null when key is absent
-const readRawLifeRoutinesLocal = (): unknown | null => {
+const readRawLifeRoutinesLocal = (userId?: string | null): unknown | null => {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(LIFE_ROUTINE_STORAGE_KEY)
+    const raw = window.localStorage.getItem(storageKeyForUser(userId ?? readStoredLifeRoutineUserId()))
     if (!raw) return null
     return JSON.parse(raw)
   } catch {
@@ -380,13 +383,13 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
     return []
   }
   try {
-    const raw = window.localStorage.getItem(LIFE_ROUTINE_STORAGE_KEY)
     const currentUser = readStoredLifeRoutineUserId()
     const guestContext = isGuestLifeRoutineUser(currentUser)
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUser))
     if (!raw) {
       if (guestContext) {
         const defaults = getDefaultLifeRoutines()
-        storeLifeRoutinesLocal(defaults)
+        storeLifeRoutinesLocal(defaults, currentUser)
         if (!currentUser) {
           setStoredLifeRoutineUserId(LIFE_ROUTINE_GUEST_USER_ID)
         }
@@ -404,7 +407,7 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
     }
     if (guestContext) {
       const defaults = getDefaultLifeRoutines()
-      storeLifeRoutinesLocal(defaults)
+      storeLifeRoutinesLocal(defaults, currentUser)
       return defaults
     }
     return []
@@ -419,7 +422,8 @@ export const writeStoredLifeRoutines = (
 ): LifeRoutineConfig[] => {
   const { sync = true } = options ?? {}
   const sanitized = sanitizeLifeRoutineList(routines)
-  const stored = storeLifeRoutinesLocal(sanitized)
+  const owner = readStoredLifeRoutineUserId()
+  const stored = storeLifeRoutinesLocal(sanitized, owner)
   if (sync) {
     void pushLifeRoutinesToSupabase(stored)
   }
@@ -436,14 +440,14 @@ export const ensureLifeRoutineUser = (
   if (current === normalized) {
     return
   }
-  const migratingFromGuest = current === LIFE_ROUTINE_GUEST_USER_ID && normalized !== LIFE_ROUTINE_GUEST_USER_ID
   setStoredLifeRoutineUserId(normalized)
   if (normalized === LIFE_ROUTINE_GUEST_USER_ID) {
     if (current !== LIFE_ROUTINE_GUEST_USER_ID && !options?.suppressGuestDefaults) {
-      storeLifeRoutinesLocal(getDefaultLifeRoutines())
+      const existingGuest = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
+      if (!Array.isArray(existingGuest)) {
+        storeLifeRoutinesLocal(getDefaultLifeRoutines(), LIFE_ROUTINE_GUEST_USER_ID)
+      }
     }
-  } else if (!migratingFromGuest) {
-    storeLifeRoutinesLocal([])
   }
 }
 
@@ -473,14 +477,14 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   }
 
   const remoteRows = data ?? []
-  const localRaw = readRawLifeRoutinesLocal()
+  const localRaw = readRawLifeRoutinesLocal(session.user.id)
   const localSanitized = sanitizeLifeRoutineList(Array.isArray(localRaw) ? localRaw : [])
 
   // Prefer local if the user already has any routines configured locally.
   // This avoids surprising "random" routines appearing from a stale server snapshot
   // (e.g., defaults or data from another device) overriding local choices.
   if (!PREFER_REMOTE && localSanitized.length > 0) {
-    const stored = storeLifeRoutinesLocal(localSanitized)
+    const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
     // Best-effort push so other devices converge to local
     void pushLifeRoutinesToSupabase(stored)
     return stored
@@ -492,13 +496,15 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
       .map((row) => mapDbRowToRoutine(row as LifeRoutineDbRow))
       .filter((routine): routine is LifeRoutineConfig => Boolean(routine))
     const sanitized = sanitizeLifeRoutineList(mapped)
-    return storeLifeRoutinesLocal(sanitized)
+    return storeLifeRoutinesLocal(sanitized, session.user.id)
   }
 
   if (localSanitized.length > 0) {
-    return storeLifeRoutinesLocal(localSanitized)
+    const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
+    void pushLifeRoutinesToSupabase(stored)
+    return stored
   }
 
   // Both empty: persist empty locally
-  return storeLifeRoutinesLocal([])
+  return storeLifeRoutinesLocal([], session.user.id)
 }
