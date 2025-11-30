@@ -2174,11 +2174,11 @@ const applyAlphaToHex = (hex: string, alpha: number) => {
 }
 
 const PRESET_GOAL_GRADIENTS: Record<string, string> = {
-  purple: 'linear-gradient(135deg, #f471b5 0%, #a855f7 50%, #6b21a8 100%)',
+  purple: 'linear-gradient(135deg, #5A00B8 0%, #C66BFF 100%)',
   green: 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
   magenta: 'linear-gradient(-225deg, #A445B2 0%, #D41872 52%, #FF0066 100%)',
   blue: 'linear-gradient(135deg, #005bea 0%, #00c6fb 100%)',
-  orange: 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
+  orange: 'linear-gradient(135deg, #ff5b14 0%, #ffc64d 100%)',
 }
 
 const cssColorRegex = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\([^)]+\)|hsla?\([^)]+\))/gi
