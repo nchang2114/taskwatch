@@ -2294,57 +2294,101 @@ const normalizeGradientStops = (stops: PartialGradientStop[]): GradientStop[] =>
     .sort((a, b) => a.position - b.position)
 }
 
+const cssColorRegex = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\\([^)]+\\)|hsla?\\([^)]+\\))/gi
+
+const parseCssColor = (value: string): { r: number; g: number; b: number } | null => {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('#')) {
+    const normalized = normalizeHexColor(trimmed)
+    return normalized ? hexToRgb(normalized) : null
+  }
+  const rgbMatch = trimmed.match(/^rgba?\\(\\s*([^\\)]+)\\s*\\)$/i)
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const [r, g, b] = parts.slice(0, 3).map((p) => Number(p))
+      if ([r, g, b].every((n) => Number.isFinite(n))) {
+        return { r, g, b }
+      }
+    }
+  }
+  const hslMatch = trimmed.match(/^hsla?\\(\\s*([^\\)]+)\\s*\\)$/i)
+  if (hslMatch) {
+    const parts = hslMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const h = Number(parts[0])
+      const s = Number(parts[1].replace('%', '')) / 100
+      const l = Number(parts[2].replace('%', '')) / 100
+      if ([h, s, l].every((n) => Number.isFinite(n))) {
+        const c = (1 - Math.abs(2 * l - 1)) * s
+        const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+        const m = l - c / 2
+        let r1 = 0
+        let g1 = 0
+        let b1 = 0
+        if (h >= 0 && h < 60) {
+          r1 = c
+          g1 = x
+        } else if (h >= 60 && h < 120) {
+          r1 = x
+          g1 = c
+        } else if (h >= 120 && h < 180) {
+          g1 = c
+          b1 = x
+        } else if (h >= 180 && h < 240) {
+          g1 = x
+          b1 = c
+        } else if (h >= 240 && h < 300) {
+          r1 = x
+          b1 = c
+        } else if (h >= 300 && h < 360) {
+          r1 = c
+          b1 = x
+        }
+        return {
+          r: (r1 + m) * 255,
+          g: (g1 + m) * 255,
+          b: (b1 + m) * 255,
+        }
+      }
+    }
+  }
+  return null
+}
+
 const parseGoalGradient = (gradient: string): GoalGradientInfo | null => {
   const trimmed = gradient.trim()
-  if (!trimmed.toLowerCase().startsWith('linear-gradient')) {
+  if (!trimmed.includes('gradient(')) {
     return null
   }
-  const openIndex = trimmed.indexOf('(')
-  const closeIndex = trimmed.lastIndexOf(')')
-  if (openIndex === -1 || closeIndex === -1 || closeIndex <= openIndex + 1) {
+  const firstLayer = trimmed.split(',').shift() ?? trimmed
+  const colorMatches = Array.from(firstLayer.matchAll(cssColorRegex)).map((m) => m[0])
+  const pctMatches = Array.from(firstLayer.matchAll(/(\\d+(?:\\.\\d+)?)%/g)).map((m) => Number(m[1]))
+  if (colorMatches.length === 0) {
     return null
   }
-  const inner = trimmed.slice(openIndex + 1, closeIndex)
-  const args = splitGradientArgs(inner)
-  if (args.length < 2) {
-    return null
+  const stops: GradientStop[] = []
+  for (let i = 0; i < colorMatches.length; i += 1) {
+    const rgb = parseCssColor(colorMatches[i])
+    if (!rgb) continue
+    const pct =
+      pctMatches.length === colorMatches.length
+        ? pctMatches[i] / 100
+        : i / Math.max(1, colorMatches.length - 1)
+    stops.push({ color: rgbToHex(rgb), position: clamp01(pct) })
   }
-  let angle: number | undefined
-  let stopStartIndex = 0
-  const angleMatch = args[0].match(/^(-?\d+(?:\.\d+)?)deg$/i)
-  if (angleMatch) {
-    angle = Number.parseFloat(angleMatch[1])
-    stopStartIndex = 1
-  }
-  const stopTokens = args.slice(stopStartIndex)
-  const partialStops = stopTokens
-    .map((token) => parseGradientStopToken(token))
-    .filter((stop): stop is PartialGradientStop => Boolean(stop))
-  const stops = normalizeGradientStops(partialStops)
   if (stops.length < 2) {
     return null
   }
+  stops.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  const angleMatch = firstLayer.match(/(-?\\d+(?:\\.\\d+)?)deg/)
   return {
     css: gradient,
     start: stops[0].color,
     end: stops[stops.length - 1].color,
-    angle,
-    stops,
-  }
-}
-
-const extractGradientColors = (gradient: string): { start: string; end: string; angle?: number } | null => {
-  const matches = gradient.match(/#(?:[0-9a-fA-F]{3}){1,2}/g)
-  if (!matches || matches.length === 0) {
-    return null
-  }
-  const start = normalizeHexColor(matches[0]) ?? matches[0]
-  const end = normalizeHexColor(matches[matches.length - 1]) ?? matches[matches.length - 1]
-  const angleMatch = gradient.match(/(-?\d+(?:\.\d+)?)deg/)
-  return {
-    start,
-    end,
     angle: angleMatch ? Number.parseFloat(angleMatch[1]) : undefined,
+    stops,
   }
 }
 
@@ -2379,23 +2423,8 @@ const resolveGoalColorInfo = (value: string | undefined): GoalColorInfo | undefi
     }
   }
 
-  const fallback = extractGradientColors(gradientString)
-  if (!fallback) {
-    return undefined
-  }
-
-  return {
-    gradient: {
-      css: gradientString,
-      start: fallback.start,
-      end: fallback.end,
-      angle: fallback.angle,
-      stops: [
-        { color: fallback.start, position: 0 },
-        { color: fallback.end, position: 1 },
-      ],
-    },
-  }
+  // If we can't parse colors, return undefined so surfaces can fall back gracefully.
+  return undefined
 }
 
 const describeFullDonut = () => {

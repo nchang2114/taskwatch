@@ -179,7 +179,7 @@ const FOCUS_COMPLETION_RESET_DELAY_MS = 800
 const PRIORITY_HOLD_MS = 300
 const STOPWATCH_STORAGE_KEY = 'nc-taskwatch-stopwatch-v1'
 const STOPWATCH_SAVE_INTERVAL_MS = 15_000
-const DEBUG_STOPWATCH = true
+const DEBUG_STOPWATCH = false
 
 const SNAPBACK_REASONS = [
   { id: 'insta' as const, label: 'Scrolling Insta' },
