@@ -3780,27 +3780,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                         const openIds = activeBuckets.filter((bx) => bucketExpanded[bx.id]).map((bx) => bx.id)
                         ;(window as any).__dragBucketInfo = { goalId: goal.id, index, bucketId: b.id, wasOpen: isBucketOpen, openIds }
                         // Defer state changes (collapse buckets + source) until next frames so the browser captures drag image
-                        const scheduleCollapse = () => {
-                          // Close original if it was open
-                          if (isBucketOpen) {
-                            onToggleBucketExpanded(b.id)
-                          }
-                          // Close all other open buckets during drag for consistent view
-                          for (const id of openIds) {
-                            if (id !== b.id) {
-                              onToggleBucketExpanded(id)
-                            }
-                          }
-                          // Collapse original item so it visually leaves the list
-                          container?.classList.add('goal-bucket-item--collapsed')
-                        }
-                        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-                          window.requestAnimationFrame(() => {
-                            window.requestAnimationFrame(scheduleCollapse)
-                          })
-                        } else {
-                          setTimeout(scheduleCollapse, 0)
-                        }
                         try {
                           e.dataTransfer.effectAllowed = 'move'
                         } catch {}
@@ -4094,31 +4073,29 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                         return
                                       }
                                       onRevealDeleteTask(null)
-                                      onCollapseTaskDetailsForDrag(task.id)
-                                      e.dataTransfer.setData('text/plain', task.id)
-                                      e.dataTransfer.effectAllowed = 'move'
-                                      const row = e.currentTarget as HTMLElement
-                                      row.classList.add('dragging')
-                                      const clone = createTaskDragClone(row, dragCloneRef)
-                                      try {
-                                        e.dataTransfer.setDragImage(clone, 16, 0)
-                                      } catch {}
-                                      collapseTaskRowAfterClone(row)
-                                      ;(window as any).__taskDragInfo = { goalId: goal.id, bucketId: b.id, section: 'active', index }
-                                    }}
-                                    onDragEnd={(e) => {
-                                      e.currentTarget.classList.remove('dragging')
-                                      ;(window as any).__taskDragInfo = null
-                                      setDragHover(null)
-                                      setDragLine(null)
-                                      onRestoreTaskDetailsAfterDrag(task.id)
-                                      const row = e.currentTarget as HTMLElement
-                                      row.classList.remove('goal-task-row--collapsed')
-                                      const ghost = dragCloneRef.current
-                                      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
-                                      dragCloneRef.current = null
-                                    }}
-                                    onDragOver={(e) => {
+                                    onCollapseTaskDetailsForDrag(task.id)
+                                    e.dataTransfer.setData('text/plain', task.id)
+                                    e.dataTransfer.effectAllowed = 'move'
+                                    const row = e.currentTarget as HTMLElement
+                                    row.classList.add('dragging')
+                                    const clone = createTaskDragClone(row, dragCloneRef)
+                                    try {
+                                      e.dataTransfer.setDragImage(clone, 16, 0)
+                                    } catch {}
+                                    ;(window as any).__taskDragInfo = { goalId: goal.id, bucketId: b.id, section: 'active', index }
+                                  }}
+                                  onDragEnd={(e) => {
+                                    e.currentTarget.classList.remove('dragging')
+                                    ;(window as any).__taskDragInfo = null
+                                    setDragHover(null)
+                                    setDragLine(null)
+                                    onRestoreTaskDetailsAfterDrag(task.id)
+                                    const row = e.currentTarget as HTMLElement
+                                    const ghost = dragCloneRef.current
+                                    if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
+                                    dragCloneRef.current = null
+                                  }}
+                                  onDragOver={(e) => {
                                       // Row-level allow move cursor but do not compute index here to avoid jitter
                                       const info = (window as any).__taskDragInfo as
                                         | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
@@ -4851,7 +4828,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           try {
                                             e.dataTransfer.setDragImage(clone, 16, 0)
                                           } catch {}
-                                          collapseTaskRowAfterClone(row)
                                           ;(window as any).__taskDragInfo = { goalId: goal.id, bucketId: b.id, section: 'completed', index: cIndex }
                                         }}
                                         onDragEnd={(e) => {
@@ -4861,7 +4837,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           setDragLine(null)
                                           onRestoreTaskDetailsAfterDrag(task.id)
                                           const row = e.currentTarget as HTMLElement
-                                          row.classList.remove('goal-task-row--collapsed')
                                           const ghost = dragCloneRef.current
                                           if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
                                           dragCloneRef.current = null
@@ -9147,12 +9122,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       } catch {}
                                       const clone = createTaskDragClone(row, quickDragCloneRef)
                                       try { e.dataTransfer.setDragImage(clone, 16, 0) } catch {}
-                                      collapseTaskRowAfterClone(row)
                                     }}
                                     onDragEnd={(e) => {
                                       const row = e.currentTarget as HTMLElement
                                       row.classList.remove('dragging')
-                                      row.classList.remove('goal-task-row--collapsed')
                                       ;(window as any).__taskDragInfo = null
                                       if (quickDragCloneRef.current) {
                                         try { quickDragCloneRef.current.parentNode?.removeChild(quickDragCloneRef.current) } catch {}
@@ -9637,19 +9610,17 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           const row = e.currentTarget as HTMLElement
                                           row.classList.add('dragging')
                                           setRevealedDeleteTaskKey(null)
-                                          ;(window as any).__taskDragInfo = { goalId: 'quick-list', bucketId: 'quick-list', section: 'completed', index }
+                                          ;(window as any).__taskDragInfo = { goalId: 'quick-list', bucketId: 'quick-list', section: 'completed', index: cIndex }
                                           try {
                                             e.dataTransfer.setData('text/plain', item.id)
                                             e.dataTransfer.effectAllowed = 'move'
                                           } catch {}
                                           const clone = createTaskDragClone(row, quickDragCloneRef)
                                           try { e.dataTransfer.setDragImage(clone, 16, 0) } catch {}
-                                          collapseTaskRowAfterClone(row)
                                         }}
                                         onDragEnd={(e) => {
                                           const row = e.currentTarget as HTMLElement
                                           row.classList.remove('dragging')
-                                          row.classList.remove('goal-task-row--collapsed')
                                           ;(window as any).__taskDragInfo = null
                                           if (quickDragCloneRef.current) {
                                             try { quickDragCloneRef.current.parentNode?.removeChild(quickDragCloneRef.current) } catch {}
