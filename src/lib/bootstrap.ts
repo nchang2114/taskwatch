@@ -19,6 +19,41 @@ import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
+const BOOTSTRAP_LOCK_TTL_MS = 2 * 60 * 1000
+const makeBootstrapLockKey = (userId: string) => `nc-taskwatch-bootstrap-lock::${userId}`
+
+const acquireBootstrapLock = (userId: string): boolean => {
+  if (typeof window === 'undefined') {
+    return true
+  }
+  try {
+    const key = makeBootstrapLockKey(userId)
+    const raw = window.localStorage.getItem(key)
+    const now = Date.now()
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { expiresAt?: number }
+        if (parsed?.expiresAt && parsed.expiresAt > now) {
+          return false
+        }
+      } catch {}
+    }
+    const expiresAt = now + BOOTSTRAP_LOCK_TTL_MS
+    window.localStorage.setItem(key, JSON.stringify({ expiresAt }))
+    return true
+  } catch {
+    return true
+  }
+}
+
+const releaseBootstrapLock = (userId: string): void => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.removeItem(makeBootstrapLockKey(userId))
+  } catch {}
+}
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const isUuid = (value: string | undefined | null): value is string => !!value && UUID_REGEX.test(value)
 const ensureUuid = (value: string | undefined): string => (isUuid(value) ? value! : generateUuid())
@@ -328,14 +363,19 @@ export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefin
     if (data?.bootstrap_completed) {
       return false
     }
+    if (!acquireBootstrapLock(userId)) {
+      return false
+    }
     await migrateGuestData()
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ bootstrap_completed: true })
       .eq('id', userId)
     if (updateError) {
+      releaseBootstrapLock(userId)
       throw updateError
     }
+    releaseBootstrapLock(userId)
     return true
   })()
   bootstrapPromises.set(userId, task)
@@ -343,5 +383,6 @@ export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefin
     return await task
   } finally {
     bootstrapPromises.delete(userId)
+    releaseBootstrapLock(userId)
   }
 }
