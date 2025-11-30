@@ -828,6 +828,11 @@ function MainApp() {
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
       const previousUserId = lastAlignedUserIdRef.current
       const userChanged = previousUserId !== userId
+      // Do not attempt to bootstrap/sync without a valid Supabase session
+      const session = await ensureSingleUserSession()
+      if (!session && userId) {
+        return
+      }
       let migrated = false
       try {
         migrated = await bootstrapGuestDataIfNeeded(userId)

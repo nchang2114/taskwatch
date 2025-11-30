@@ -273,6 +273,38 @@ const isGuestLifeRoutineUser = (userId: string | null): boolean =>
 const storageKeyForUser = (userId: string | null | undefined): string =>
   `${LIFE_ROUTINE_STORAGE_KEY}::${normalizeLifeRoutineUserId(userId)}`
 
+const LIFE_ROUTINE_SYNC_LOCK_TTL_MS = 2 * 60 * 1000
+const makeLifeRoutineSyncLockKey = (userId: string) => `${LIFE_ROUTINE_STORAGE_KEY}:sync-lock::${userId}`
+
+const acquireLifeRoutineSyncLock = (userId: string): boolean => {
+  if (typeof window === 'undefined') return true
+  try {
+    const key = makeLifeRoutineSyncLockKey(userId)
+    const raw = window.localStorage.getItem(key)
+    const now = Date.now()
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { expiresAt?: number }
+        if (parsed?.expiresAt && parsed.expiresAt > now) {
+          return false
+        }
+      } catch {}
+    }
+    const expiresAt = now + LIFE_ROUTINE_SYNC_LOCK_TTL_MS
+    window.localStorage.setItem(key, JSON.stringify({ expiresAt }))
+    return true
+  } catch {
+    return true
+  }
+}
+
+const releaseLifeRoutineSyncLock = (userId: string): void => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(makeLifeRoutineSyncLockKey(userId))
+  } catch {}
+}
+
 export const readLifeRoutineOwnerId = (): string | null => readStoredLifeRoutineUserId()
 
 // Read raw local value without default seeding; returns null when key is absent
@@ -500,9 +532,15 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   }
 
   if (localSanitized.length > 0) {
-    const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
-    void pushLifeRoutinesToSupabase(stored)
-    return stored
+    // Only one tab should push local → remote when remote is empty
+    const acquired = acquireLifeRoutineSyncLock(session.user.id)
+    if (acquired) {
+      const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
+      void pushLifeRoutinesToSupabase(stored).finally(() => releaseLifeRoutineSyncLock(session.user.id))
+      return stored
+    }
+    // Another tab is handling the initial push; keep local for now
+    return storeLifeRoutinesLocal(localSanitized, session.user.id)
   }
 
   // Both empty: persist empty locally
