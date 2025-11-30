@@ -609,8 +609,24 @@ function MainApp() {
           exists = await checkAuthEmailExists(trimmed)
         }
         if (exists === true) {
-          const started = await handleGoogleSignIn(trimmed)
-          redirecting = started
+          if (!supabase) {
+            setAuthEmailError('Unable to sign in right now. Please try again later.')
+            return
+          }
+          const { error } = await supabase.auth.signInWithOtp({
+            email: trimmed,
+            options: {
+              emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+            },
+          })
+          if (error) {
+            setAuthEmailError(error.message || 'We could not send a sign-in link. Please try again.')
+            return
+          }
+          setAuthEmailValue(trimmed)
+          setAuthEmailStage('verify')
+          setAuthVerifyError(null)
+          setAuthVerifyStatus('Check your email for a sign-in link to continue.')
           return
         }
         if (exists === false) {
