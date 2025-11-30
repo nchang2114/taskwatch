@@ -2249,9 +2249,8 @@ const parseGoalGradient = (gradient: string): GoalGradientInfo | null => {
   if (!trimmed.includes('gradient(')) {
     return null
   }
-  const firstLayer = trimmed.split(',').shift() ?? trimmed
-  const colorMatches = Array.from(firstLayer.matchAll(cssColorRegex)).map((m) => m[0])
-  const pctMatches = Array.from(firstLayer.matchAll(/(\\d+(?:\\.\\d+)?)%/g)).map((m) => Number(m[1]))
+  const colorMatches = Array.from(trimmed.matchAll(cssColorRegex)).map((m) => m[0])
+  const pctMatches = Array.from(trimmed.matchAll(/(\d+(?:\.\d+)?)%/g)).map((m) => Number(m[1]))
   if (colorMatches.length === 0) {
     return null
   }
@@ -2269,7 +2268,7 @@ const parseGoalGradient = (gradient: string): GoalGradientInfo | null => {
     return null
   }
   stops.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-  const angleMatch = firstLayer.match(/(-?\\d+(?:\\.\\d+)?)deg/)
+  const angleMatch = trimmed.match(/(-?\d+(?:\.\d+)?)deg/)
   return {
     css: gradient,
     start: stops[0].color,
