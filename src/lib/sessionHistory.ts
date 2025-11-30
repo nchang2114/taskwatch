@@ -892,7 +892,9 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
       }
 
       // Do not re-derive color from bucket styles; rely on stored entryColour or fall back to goal surface/default.
-      if (!entryColor || !entryColor.toLowerCase().includes('linear-gradient(')) {
+      const lowerColor = (entryColor ?? '').toLowerCase()
+      const looksLikeGradient = lowerColor.includes('gradient(')
+      if (!entryColor || !looksLikeGradient) {
         const surfaceForGradient = goalSurface ?? DEFAULT_SURFACE_STYLE
         entryColor = gradientFromSurface(surfaceForGradient)
       }

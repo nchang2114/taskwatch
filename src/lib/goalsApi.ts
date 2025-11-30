@@ -19,16 +19,26 @@ export const normalizeGoalColour = (
   if (typeof value === 'string') {
     const trimmed = value.trim()
     if (trimmed) {
-      if (trimmed.toLowerCase().startsWith('linear-gradient(')) {
-        return trimmed
-      }
       const preset = GOAL_COLOUR_PRESETS[trimmed]
       if (preset) return preset
+      if (trimmed.toLowerCase().includes('gradient(')) {
+        return trimmed
+      }
+      const cssFunctionLike =
+        trimmed.startsWith('var(') ||
+        trimmed.startsWith('rgb(') ||
+        trimmed.startsWith('rgba(') ||
+        trimmed.startsWith('hsl(') ||
+        trimmed.startsWith('hsla(')
+      if (cssFunctionLike) {
+        return trimmed
+      }
       const hexMatch = trimmed.match(/^#?[0-9a-fA-F]{6}$/)
       if (hexMatch) {
         const hex = trimmed.startsWith('#') ? trimmed : `#${trimmed}`
         return `linear-gradient(135deg, ${hex} 0%, ${hex} 100%)`
       }
+      return trimmed
     }
   }
   return fallback

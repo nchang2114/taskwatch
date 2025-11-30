@@ -1071,8 +1071,11 @@ const getBucketStyleLabel = (style: BucketSurfaceStyle): string =>
 
 // Components
 const ThinProgress: React.FC<{ value: number; gradient: string; className?: string }> = ({ value, gradient, className }) => {
+  const trimmed = (gradient ?? '').trim()
+  const preset = trimmed ? BASE_GRADIENT_PREVIEW[trimmed] : undefined
   const resolvedGradient =
-    (gradient.toLowerCase().startsWith('linear-gradient(') ? gradient : BASE_GRADIENT_PREVIEW[gradient]) ||
+    preset ||
+    (trimmed.length > 0 ? trimmed : null) ||
     'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)'
   return (
     <div className={classNames('h-2 w-full rounded-full bg-white/10 overflow-hidden', className)}>
