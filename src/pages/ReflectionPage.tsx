@@ -2181,7 +2181,7 @@ const PRESET_GOAL_GRADIENTS: Record<string, string> = {
   'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
 }
 
-const cssColorRegex = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\\([^)]+\\)|hsla?\\([^)]+\\))/gi
+const cssColorRegex = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\([^)]+\)|hsla?\([^)]+\))/gi
 
 const parseCssColor = (value: string): { r: number; g: number; b: number } | null => {
   const trimmed = value.trim()
@@ -2190,7 +2190,7 @@ const parseCssColor = (value: string): { r: number; g: number; b: number } | nul
     const normalized = normalizeHexColor(trimmed)
     return normalized ? hexToRgb(normalized) : null
   }
-  const rgbMatch = trimmed.match(/^rgba?\\(\\s*([^\\)]+)\\s*\\)$/i)
+  const rgbMatch = trimmed.match(/^rgba?\(\s*([^)]+)\s*\)$/i)
   if (rgbMatch) {
     const parts = rgbMatch[1].split(',').map((p) => p.trim())
     if (parts.length >= 3) {
@@ -2200,7 +2200,7 @@ const parseCssColor = (value: string): { r: number; g: number; b: number } | nul
       }
     }
   }
-  const hslMatch = trimmed.match(/^hsla?\\(\\s*([^\\)]+)\\s*\\)$/i)
+  const hslMatch = trimmed.match(/^hsla?\(\s*([^)]+)\s*\)$/i)
   if (hslMatch) {
     const parts = hslMatch[1].split(',').map((p) => p.trim())
     if (parts.length >= 3) {
