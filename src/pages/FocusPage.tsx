@@ -177,6 +177,9 @@ const NOTEBOOK_STORAGE_KEY = 'nc-taskwatch-notebook'
 const MAX_TASK_STORAGE_LENGTH = 256
 const FOCUS_COMPLETION_RESET_DELAY_MS = 800
 const PRIORITY_HOLD_MS = 300
+const STOPWATCH_STORAGE_KEY = 'nc-taskwatch-stopwatch-v1'
+const STOPWATCH_SAVE_INTERVAL_MS = 15_000
+const DEBUG_STOPWATCH = true
 
 const SNAPBACK_REASONS = [
   { id: 'insta' as const, label: 'Scrolling Insta' },
@@ -243,6 +246,24 @@ const sanitizeDomIdSegment = (value: string): string => value.replace(/[^a-z0-9]
 
 const makeNotebookSubtaskInputId = (entryKey: string, subtaskId: string): string =>
   `taskwatch-subtask-${sanitizeDomIdSegment(entryKey)}-${sanitizeDomIdSegment(subtaskId)}`
+
+const shouldDebugStopwatch = (): boolean => {
+  if (DEBUG_STOPWATCH) return true
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem('nc-debug-stopwatch') === '1'
+  } catch {
+    return false
+  }
+}
+
+const debugStopwatch = (...args: unknown[]) => {
+  if (!shouldDebugStopwatch()) return
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[Stopwatch]', ...args)
+  } catch {}
+}
 
 // Auto-size a textarea to fit its content without requiring focus
 const autosizeTextArea = (el: HTMLTextAreaElement | null) => {
@@ -536,6 +557,154 @@ const readStoredFocusSource = (): FocusSource | null => {
   }
 }
 
+const sanitizeStoredFocusSourceValue = (value: unknown): FocusSource | null => {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+  const candidate = value as Record<string, unknown>
+  const goalId = typeof candidate.goalId === 'string' ? candidate.goalId : null
+  const bucketId = typeof candidate.bucketId === 'string' ? candidate.bucketId : null
+  const goalName =
+    typeof candidate.goalName === 'string' && candidate.goalName.trim().length > 0
+      ? candidate.goalName.trim().slice(0, MAX_TASK_STORAGE_LENGTH)
+      : ''
+  const bucketName =
+    typeof candidate.bucketName === 'string' && candidate.bucketName.trim().length > 0
+      ? candidate.bucketName.trim().slice(0, MAX_TASK_STORAGE_LENGTH)
+      : ''
+  if (!goalName || !bucketName) {
+    return null
+  }
+  const taskId = typeof candidate.taskId === 'string' ? candidate.taskId : null
+  const rawDifficulty = typeof candidate.taskDifficulty === 'string' ? candidate.taskDifficulty : null
+  const taskDifficulty =
+    rawDifficulty === 'green' || rawDifficulty === 'yellow' || rawDifficulty === 'red' || rawDifficulty === 'none'
+      ? rawDifficulty
+      : null
+  const priority =
+    typeof candidate.priority === 'boolean'
+      ? candidate.priority
+      : typeof candidate.priority === 'string'
+        ? candidate.priority === 'true'
+        : null
+  const notes = typeof candidate.notes === 'string' ? candidate.notes : ''
+  const subtasks = sanitizeNotebookSubtasks(candidate.subtasks)
+  const repeatingRuleId =
+    typeof candidate.repeatingRuleId === 'string' && candidate.repeatingRuleId.trim().length > 0
+      ? candidate.repeatingRuleId.trim()
+      : null
+  const repeatingOccurrenceDate =
+    typeof candidate.repeatingOccurrenceDate === 'string' && candidate.repeatingOccurrenceDate.trim().length > 0
+      ? candidate.repeatingOccurrenceDate.trim()
+      : null
+  const repeatingOriginalTimeRaw = Number(candidate.repeatingOriginalTime)
+  const repeatingOriginalTime =
+    Number.isFinite(repeatingOriginalTimeRaw) && repeatingOriginalTimeRaw > 0 ? repeatingOriginalTimeRaw : null
+
+  return {
+    goalId,
+    bucketId,
+    goalName,
+    bucketName,
+    taskId,
+    taskDifficulty,
+    priority,
+    notes,
+    subtasks,
+    repeatingRuleId: repeatingRuleId ?? null,
+    repeatingOccurrenceDate: repeatingOccurrenceDate ?? null,
+    repeatingOriginalTime,
+  }
+}
+
+const clampElapsed = (value: unknown): number => {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return 0
+  }
+  return numeric
+}
+
+const sanitizeStoredSessionMeta = (value: unknown, fallbackTaskLabel: string): SessionMetadata => {
+  if (typeof value !== 'object' || value === null) {
+    return createEmptySessionMetadata(fallbackTaskLabel)
+  }
+  const candidate = value as Record<string, unknown>
+  const goalId = typeof candidate.goalId === 'string' ? candidate.goalId : null
+  const bucketId = typeof candidate.bucketId === 'string' ? candidate.bucketId : null
+  const taskId = typeof candidate.taskId === 'string' ? candidate.taskId : null
+  const goalName = typeof candidate.goalName === 'string' ? candidate.goalName : null
+  const bucketName = typeof candidate.bucketName === 'string' ? candidate.bucketName : null
+  const sessionKey = typeof candidate.sessionKey === 'string' ? candidate.sessionKey : null
+  const repeatingRuleId = typeof candidate.repeatingRuleId === 'string' ? candidate.repeatingRuleId : null
+  const repeatingOccurrenceDate =
+    typeof candidate.repeatingOccurrenceDate === 'string' ? candidate.repeatingOccurrenceDate : null
+  const repeatingOriginalTimeRaw = Number(candidate.repeatingOriginalTime)
+  const repeatingOriginalTime =
+    Number.isFinite(repeatingOriginalTimeRaw) && repeatingOriginalTimeRaw > 0 ? repeatingOriginalTimeRaw : null
+  const taskLabel =
+    typeof candidate.taskLabel === 'string' && candidate.taskLabel.trim().length > 0
+      ? candidate.taskLabel.trim().slice(0, MAX_TASK_STORAGE_LENGTH)
+      : fallbackTaskLabel
+
+  return {
+    goalId,
+    bucketId,
+    taskId,
+    goalName,
+    bucketName,
+    sessionKey,
+    taskLabel,
+    repeatingRuleId,
+    repeatingOccurrenceDate,
+    repeatingOriginalTime,
+  }
+}
+
+const sanitizeStoredModeSnapshot = (
+  value: unknown,
+  fallbackTaskName: string,
+  fallbackTaskLabel: string,
+): ModeSnapshot | null => {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+  const candidate = value as Record<string, unknown>
+  const taskName =
+    typeof candidate.taskName === 'string' && candidate.taskName.trim().length > 0
+      ? candidate.taskName.trim().slice(0, MAX_TASK_STORAGE_LENGTH)
+      : fallbackTaskName
+  const customTaskDraft =
+    typeof candidate.customTaskDraft === 'string' && candidate.customTaskDraft.trim().length > 0
+      ? candidate.customTaskDraft.trim().slice(0, MAX_TASK_STORAGE_LENGTH)
+      : taskName
+  const elapsed = clampElapsed(candidate.elapsed)
+  const sessionStartRaw = Number(candidate.sessionStart)
+  const sessionStart = Number.isFinite(sessionStartRaw) && sessionStartRaw > 0 ? sessionStartRaw : null
+  const isRunning = Boolean(candidate.isRunning) && sessionStart !== null
+  const sessionMeta = sanitizeStoredSessionMeta(candidate.sessionMeta, fallbackTaskLabel || taskName)
+  const currentSessionKey = typeof candidate.currentSessionKey === 'string' ? candidate.currentSessionKey : null
+  const lastLoggedSessionKey = typeof candidate.lastLoggedSessionKey === 'string' ? candidate.lastLoggedSessionKey : null
+  const lastTickRaw = Number(candidate.lastTick)
+  const lastTick = Number.isFinite(lastTickRaw) && lastTickRaw > 0 ? lastTickRaw : null
+  const lastCommittedElapsed = clampElapsed(candidate.lastCommittedElapsed)
+  const source = sanitizeStoredFocusSourceValue(candidate.source)
+
+  return {
+    taskName,
+    customTaskDraft,
+    source,
+    elapsed,
+    sessionStart,
+    isRunning,
+    sessionMeta,
+    currentSessionKey,
+    lastLoggedSessionKey,
+    lastTick,
+    lastCommittedElapsed,
+  }
+}
+
 const formatTime = (milliseconds: number) => {
   const totalMs = Math.max(0, Math.floor(milliseconds))
   const days = Math.floor(totalMs / 86_400_000)
@@ -763,6 +932,8 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       lastCommittedElapsed: 0,
     },
   })
+  const hasHydratedStopwatchRef = useRef(false)
+  const skipNextPersistRef = useRef(false)
   const [isSelectorOpen, setIsSelectorOpen] = useState(false)
   const goalsSnapshotSignatureRef = useRef<string | null>(null)
   const [goalsSnapshot, setGoalsSnapshot] = useState<GoalSnapshot[]>(() => {
@@ -1411,6 +1582,203 @@ useEffect(() => {
     () => (isRunning && sessionStart !== null ? (Date.now() - sessionStart) : elapsed),
     [elapsed, isRunning, sessionStart],
   )
+
+  const buildModeSnapshotForPersistence = useCallback(
+    (mode: TimeMode): ModeSnapshot => {
+      if (mode === timeMode) {
+        const totalElapsed = computeCurrentElapsed()
+        return {
+          ...modeStateRef.current[mode],
+          taskName: currentTaskName,
+          customTaskDraft,
+          source: focusSource,
+          elapsed: totalElapsed,
+          sessionStart,
+          isRunning: isRunning && sessionStart !== null,
+          sessionMeta: { ...sessionMetadataRef.current },
+          currentSessionKey: currentSessionKeyRef.current,
+          lastLoggedSessionKey: lastLoggedSessionKeyRef.current,
+          lastTick: lastTickRef.current,
+          lastCommittedElapsed: lastCommittedElapsedRef.current,
+        }
+      }
+      const snapshot = modeStateRef.current[mode]
+      return {
+        ...snapshot,
+        isRunning: Boolean(snapshot.isRunning && snapshot.sessionStart !== null),
+      }
+    },
+    [
+      computeCurrentElapsed,
+      currentTaskName,
+      customTaskDraft,
+      focusSource,
+      isRunning,
+      sessionStart,
+      timeMode,
+    ],
+  )
+
+  const persistStopwatchState = useCallback(() => {
+    if (!hasHydratedStopwatchRef.current || typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      const normalizeSnapshot = (snapshot: ModeSnapshot, fallbackTaskName: string) =>
+        sanitizeStoredModeSnapshot(
+          snapshot,
+          fallbackTaskName,
+          snapshot.sessionMeta?.taskLabel ?? fallbackTaskName,
+        ) ?? snapshot
+
+      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || 'New Task')
+      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), 'Break')
+
+      modeStateRef.current = {
+        focus: focusSnapshot,
+        break: breakSnapshot,
+      }
+
+      const payload = {
+        activeMode: timeMode,
+        modes: {
+          focus: focusSnapshot,
+          break: breakSnapshot,
+        },
+        updatedAt: Date.now(),
+      }
+
+      window.localStorage.setItem(STOPWATCH_STORAGE_KEY, JSON.stringify(payload))
+      debugStopwatch('persist', payload)
+    } catch (error) {
+      logWarn('Failed to persist stopwatch state', error)
+      debugStopwatch('persist: failed', error)
+    }
+  }, [buildModeSnapshotForPersistence, currentTaskName, timeMode])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    try {
+      const raw = window.localStorage.getItem(STOPWATCH_STORAGE_KEY)
+      if (!raw) {
+        debugStopwatch('hydrate: no stored stopwatch state')
+        hasHydratedStopwatchRef.current = true
+        return
+      }
+      debugStopwatch('hydrate: raw payload', raw)
+      const parsed = JSON.parse(raw)
+      const fallbackFocus = initialTaskName || 'New Task'
+      const focusSnapshot =
+        sanitizeStoredModeSnapshot(parsed?.modes?.focus, fallbackFocus, fallbackFocus) ??
+        modeStateRef.current.focus
+      const breakSnapshot =
+        sanitizeStoredModeSnapshot(parsed?.modes?.break, 'Break', 'Break') ?? modeStateRef.current.break
+      modeStateRef.current = {
+        focus: focusSnapshot,
+        break: breakSnapshot,
+      }
+      const activeMode: TimeMode = parsed?.activeMode === 'break' ? 'break' : 'focus'
+      const activeSnapshot = activeMode === 'break' ? breakSnapshot : focusSnapshot
+      const now = Date.now()
+      const effectiveElapsed =
+        activeSnapshot.isRunning && activeSnapshot.sessionStart !== null
+          ? Math.max(0, now - activeSnapshot.sessionStart)
+          : activeSnapshot.elapsed
+
+      debugStopwatch('hydrate: restored', {
+        activeMode,
+        effectiveElapsed,
+        sessionStart: activeSnapshot.sessionStart,
+        isRunning: activeSnapshot.isRunning,
+        focusElapsed: focusSnapshot.elapsed,
+        breakElapsed: breakSnapshot.elapsed,
+      })
+
+      setTimeMode(activeMode)
+      setCurrentTaskName(activeSnapshot.taskName)
+      setCustomTaskDraft(activeSnapshot.customTaskDraft)
+      setFocusSource(activeSnapshot.source)
+      setElapsed(effectiveElapsed)
+      if (activeSnapshot.isRunning && activeSnapshot.sessionStart !== null) {
+        setSessionStart(activeSnapshot.sessionStart)
+        setIsRunning(true)
+      } else {
+        setSessionStart(null)
+        setIsRunning(false)
+      }
+      sessionMetadataRef.current = { ...activeSnapshot.sessionMeta }
+      currentSessionKeyRef.current = activeSnapshot.currentSessionKey
+      lastLoggedSessionKeyRef.current = activeSnapshot.lastLoggedSessionKey
+      lastCommittedElapsedRef.current = activeSnapshot.lastCommittedElapsed
+      lastTickRef.current = activeSnapshot.lastTick
+      updateTimeDisplay(effectiveElapsed)
+      skipNextPersistRef.current = true
+    } catch (error) {
+      logWarn('Failed to hydrate stopwatch state', error)
+      debugStopwatch('hydrate: failed', error)
+    } finally {
+      hasHydratedStopwatchRef.current = true
+    }
+  }, [initialTaskName, updateTimeDisplay])
+
+  useEffect(() => {
+    if (!hasHydratedStopwatchRef.current) {
+      return
+    }
+    if (skipNextPersistRef.current) {
+      debugStopwatch('persist effect: skip post-hydrate')
+      skipNextPersistRef.current = false
+      return
+    }
+    persistStopwatchState()
+    debugStopwatch('persist effect: change', {
+      isRunning,
+      elapsed,
+      timeMode,
+      sessionStart,
+    })
+  }, [
+    currentTaskName,
+    customTaskDraft,
+    elapsed,
+    focusSource,
+    isRunning,
+    persistStopwatchState,
+    sessionStart,
+    timeMode,
+  ])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isRunning) {
+      return
+    }
+    const handle = window.setInterval(() => {
+      persistStopwatchState()
+      debugStopwatch('persist interval tick', { isRunning: true })
+    }, STOPWATCH_SAVE_INTERVAL_MS)
+    return () => {
+      window.clearInterval(handle)
+    }
+  }, [isRunning, persistStopwatchState])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const handle = () => {
+      persistStopwatchState()
+      debugStopwatch('persist on visibility/pagehide')
+    }
+    window.addEventListener('visibilitychange', handle)
+    window.addEventListener('pagehide', handle)
+    return () => {
+      window.removeEventListener('visibilitychange', handle)
+      window.removeEventListener('pagehide', handle)
+    }
+  }, [persistStopwatchState])
 
   useEffect(() => {
     if (!isRunning) {
