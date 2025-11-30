@@ -1452,6 +1452,15 @@ const InspectorDateInput = ({ value, onChange, ariaLabel }: InspectorDateInputPr
       if (!target) return
       if (triggerRef.current?.contains(target)) return
       if (popoverRef.current?.contains(target)) return
+      // Swallow the outside click so underlying pickers/buttons don't auto-open
+      try { event.preventDefault() } catch {}
+      try { event.stopPropagation() } catch {}
+      // Prevent adjacent date pickers from opening on the same click after closing time picker
+      try {
+        SUPPRESS_DATE_OPEN_UNTIL = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 300
+      } catch {
+        SUPPRESS_DATE_OPEN_UNTIL = Date.now() + 300
+      }
       setOpen(false)
     }
     const handleKey = (event: globalThis.KeyboardEvent) => {
@@ -1637,6 +1646,16 @@ type InspectorTimeInputProps = {
   value: number
   onChange: (timestamp: number) => void
   ariaLabel: string
+  // Optional: snap the selected option (highlight/scroll) to the nearest interval (in minutes)
+  snapMinutes?: number
+  // Optional: align the dropdown so the first option is this time-of-day (in minutes)
+  alignFromMinutes?: number
+  // Optional: anchor timestamp for aligned lists (used to compute day rollovers)
+  alignAnchorTimestamp?: number
+  // Optional: maximum span (in minutes) to list beyond the aligned start (default 24h)
+  maxSpanMinutes?: number
+  // Optional: append a relative duration label compared to this time-of-day (in minutes, modulo 24h)
+  relativeToMinutes?: number
 }
 
 const buildTimeOptions = () => {
@@ -1657,7 +1676,16 @@ const TIME_OPTIONS = buildTimeOptions()
 // Short-term suppression window to avoid accidental date-picker opens immediately after selecting a time
 let SUPPRESS_DATE_OPEN_UNTIL = 0
 
-const InspectorTimeInput = ({ value, onChange, ariaLabel }: InspectorTimeInputProps) => {
+const InspectorTimeInput = ({
+  value,
+  onChange,
+  ariaLabel,
+  snapMinutes,
+  alignFromMinutes,
+  alignAnchorTimestamp,
+  maxSpanMinutes = 24 * 60,
+  relativeToMinutes,
+}: InspectorTimeInputProps) => {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popoverRef = useRef<HTMLDivElement | null>(null)
@@ -1670,6 +1698,14 @@ const InspectorTimeInput = ({ value, onChange, ariaLabel }: InspectorTimeInputPr
       if (!target) return
       if (triggerRef.current?.contains(target)) return
       if (popoverRef.current?.contains(target)) return
+      // Swallow the outside click so underlying pickers/buttons don't auto-open
+      try { event.preventDefault() } catch {}
+      try { event.stopPropagation() } catch {}
+      try {
+        SUPPRESS_DATE_OPEN_UNTIL = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 300
+      } catch {
+        SUPPRESS_DATE_OPEN_UNTIL = Date.now() + 300
+      }
       setOpen(false)
     }
     const handleKey = (event: globalThis.KeyboardEvent) => {
@@ -1692,6 +1728,7 @@ const InspectorTimeInput = ({ value, onChange, ariaLabel }: InspectorTimeInputPr
     }
   }, [open])
 
+  const snapInterval = typeof snapMinutes === 'number' && Number.isFinite(snapMinutes) ? Math.max(1, Math.round(snapMinutes)) : null
   const date = new Date(value)
   const hours = date.getHours()
   const minutes = date.getMinutes()
@@ -1699,12 +1736,73 @@ const InspectorTimeInput = ({ value, onChange, ariaLabel }: InspectorTimeInputPr
   const currentMinutes = hours * 60 + minutes
   const highlightedMinutes = Math.min(23 * 60 + 45, Math.max(0, Math.round(currentMinutes / 15) * 15))
 
-  const handleSelect = (totalMinutes: number) => {
-    const next = new Date(value)
-    const hoursPart = Math.floor(totalMinutes / 60)
-    const minutesPart = totalMinutes % 60
-    next.setHours(hoursPart, minutesPart, 0, 0)
-    onChange(next.getTime())
+  const baseAnchorTimestamp = typeof alignAnchorTimestamp === 'number' && Number.isFinite(alignAnchorTimestamp)
+    ? alignAnchorTimestamp
+    : value
+  const rawAlignMinutes = typeof alignFromMinutes === 'number' && Number.isFinite(alignFromMinutes)
+    ? Math.max(0, Math.min(1439, Math.round(alignFromMinutes)))
+    : null
+  const alignMinutes = rawAlignMinutes === null
+    ? null
+    : (() => {
+        if (!snapInterval) return rawAlignMinutes
+        const snapped = Math.round(rawAlignMinutes / snapInterval) * snapInterval
+        // Normalize to 0-1439 to avoid 1440 edge
+        return ((snapped % 1440) + 1440) % 1440
+      })()
+  const relMinutes = typeof relativeToMinutes === 'number' && Number.isFinite(relativeToMinutes)
+    ? Math.max(0, Math.min(1439, Math.round(relativeToMinutes)))
+    : null
+
+  const alignedAnchorTimestamp = (() => {
+    if (alignMinutes === null) return baseAnchorTimestamp
+    const d = new Date(baseAnchorTimestamp)
+    d.setHours(Math.floor(alignMinutes / 60), alignMinutes % 60, 0, 0)
+    return d.getTime()
+  })()
+
+  const orderedOptions = (() => {
+    if (alignMinutes === null) {
+      return TIME_OPTIONS.map((opt) => ({ ...opt, offsetMinutes: opt.minutes, dayOffset: 0 }))
+    }
+    const span = Math.max(0, Math.min(24 * 60, Math.round(maxSpanMinutes / 15) * 15))
+    const steps = Math.round(span / 15)
+    const result: Array<{ label: string; minutes: number; offsetMinutes: number; dayOffset: number }> = []
+    for (let step = 0; step <= steps; step += 1) {
+      const offsetMinutes = step * 15
+      const totalMinutes = alignMinutes + offsetMinutes
+      const minutesOfDay = ((totalMinutes % 1440) + 1440) % 1440
+      const dayOffset = Math.floor(totalMinutes / 1440)
+      const sample = new Date(2020, 0, 1, 0, 0)
+      sample.setMinutes(minutesOfDay)
+      const label = formatTimeOfDay(sample.getTime())
+      result.push({ label, minutes: minutesOfDay, offsetMinutes, dayOffset })
+    }
+    return result
+  })()
+
+  const selectedOffsetMinutes = (() => {
+    if (alignMinutes === null) return null
+    const delta = Math.round((value - alignedAnchorTimestamp) / 60000)
+    const clamped = Math.max(0, Math.min(maxSpanMinutes, delta))
+    if (snapInterval === null) return clamped
+    const snapped = Math.round(clamped / snapInterval) * snapInterval
+    return Math.max(0, Math.min(maxSpanMinutes, snapped))
+  })()
+
+  const handleSelect = (option: { minutes: number; offsetMinutes: number }) => {
+    const { minutes, offsetMinutes } = option
+    // For aligned lists, respect day rollover by using the anchor timestamp plus offset minutes
+    if (alignMinutes !== null) {
+      const nextTs = alignedAnchorTimestamp + offsetMinutes * 60000
+      onChange(nextTs)
+    } else {
+      const next = new Date(value)
+      const hoursPart = Math.floor(minutes / 60)
+      const minutesPart = minutes % 60
+      next.setHours(hoursPart, minutesPart, 0, 0)
+      onChange(next.getTime())
+    }
     setOpen(false)
     // Suppress the date picker opening for a brief moment after time selection
     try {
@@ -1738,16 +1836,44 @@ const InspectorTimeInput = ({ value, onChange, ariaLabel }: InspectorTimeInputPr
       {open ? (
         <div className="inspector-picker__popover inspector-picker__popover--time" ref={popoverRef} role="listbox">
           <ul className="inspector-time-picker">
-            {TIME_OPTIONS.map((option) => {
-              const selected = option.minutes === highlightedMinutes
+            {orderedOptions.map((option) => {
+              const selected =
+                alignMinutes === null
+                  ? option.minutes === highlightedMinutes
+                  : selectedOffsetMinutes !== null && option.offsetMinutes === selectedOffsetMinutes
               const itemClass = [
                 'inspector-time-picker__option',
                 selected ? 'inspector-time-picker__option--selected' : '',
               ]
                 .filter(Boolean)
                 .join(' ')
+              const deltaForLabel = (() => {
+                if (alignMinutes !== null) {
+                  return option.offsetMinutes
+                }
+                if (relMinutes !== null) {
+                  const diff = option.minutes - relMinutes
+                  return diff < 0 ? diff + 1440 : diff
+                }
+                return null
+              })()
+              const relativeLabel =
+                deltaForLabel === null
+                  ? null
+                  : (() => {
+                      const delta = deltaForLabel
+                      if (delta === 0) return '0 mins'
+                      if (delta === 1440) return '24 hrs'
+                      const hours = Math.floor(delta / 60)
+                      const minutesRemain = delta % 60
+                      if (minutesRemain === 0) {
+                        return `${hours} hr${hours === 1 ? '' : 's'}`
+                      }
+                      if (hours === 0) return `${minutesRemain} mins`
+                      return `${hours} hr${hours === 1 ? '' : 's'} ${minutesRemain} min${minutesRemain === 1 ? '' : 's'}`
+                    })()
               return (
-                <li key={option.minutes}>
+                <li key={`${option.minutes}-${option.dayOffset}`}>
                   <button
                     type="button"
                     className={itemClass}
@@ -1758,18 +1884,18 @@ const InspectorTimeInput = ({ value, onChange, ariaLabel }: InspectorTimeInputPr
                       // Handle selection on mousedown and prevent the subsequent click from hitting underlying controls
                       try { e.preventDefault() } catch {}
                       try { e.stopPropagation() } catch {}
-                      handleSelect(option.minutes)
+                      handleSelect(option)
                       try { triggerRef.current?.focus() } catch {}
                     }}
                     onClick={(e) => {
                       // Keyboard or fallback click
                       try { e.preventDefault() } catch {}
                       try { e.stopPropagation() } catch {}
-                      handleSelect(option.minutes)
+                      handleSelect(option)
                       try { triggerRef.current?.focus() } catch {}
                     }}
                   >
-                    {option.label}
+                    {relativeLabel ? `${option.label} (${relativeLabel})` : option.label}
                   </button>
                 </li>
               )
@@ -3105,6 +3231,39 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   )
   // Ref to the session name input inside the calendar editor modal (for autofocus on new entries)
   const calendarEditorNameInputRef = useRef<HTMLInputElement | null>(null)
+
+  const isInspectorInteractiveTarget = useCallback((target: HTMLElement | null) => {
+    if (!target) return false
+    return Boolean(
+      target.closest(
+        'button, input, select, textarea, [role="option"], [role="listbox"], [role="menu"], .inspector-picker__button, .inspector-picker__popover, .history-dropdown__button, .history-dropdown__menu, .history-timeline__field-input',
+      ),
+    )
+  }, [])
+
+  const handleInspectorSurfacePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement | null
+      if (isInspectorInteractiveTarget(target)) {
+        return
+      }
+      try { event.preventDefault() } catch {}
+      try { event.stopPropagation() } catch {}
+    },
+    [isInspectorInteractiveTarget],
+  )
+
+  const handleInspectorSurfaceClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement | null
+      if (isInspectorInteractiveTarget(target)) {
+        return
+      }
+      try { event.preventDefault() } catch {}
+      try { event.stopPropagation() } catch {}
+    },
+    [isInspectorInteractiveTarget],
+  )
 
   const [activeTooltipOffsets, setActiveTooltipOffsets] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [activeTooltipPlacement, setActiveTooltipPlacement] = useState<'above' | 'below'>('above')
@@ -10722,6 +10881,18 @@ useEffect(() => {
     const endBase = entry.endedAt
     const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
     const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
+    const shiftStartAndPreserveDuration = (nextStart: number) => {
+      setHistoryDraft((draft) => {
+        const prevStart = resolveTimestamp(draft.startedAt, startBase)
+        const prevEnd = resolveTimestamp(draft.endedAt, endBase)
+        const delta = nextStart - prevStart
+        return { ...draft, startedAt: nextStart, endedAt: prevEnd + delta }
+      })
+    }
+    const startMinutesOfDay = (() => {
+      const d = new Date(resolvedStart)
+      return d.getHours() * 60 + d.getMinutes()
+    })()
     const isDraftAllDay = isAllDayRangeTs(resolvedStart, resolvedEnd)
   // Using inspector pickers for date/time in the editor panel; input-formatted strings no longer needed here
 
@@ -10739,6 +10910,8 @@ useEffect(() => {
           className="calendar-editor"
           ref={calendarEditorRef}
           onClick={(e) => e.stopPropagation()}
+          onPointerDownCapture={handleInspectorSurfacePointerDown}
+          onClickCapture={handleInspectorSurfaceClick}
         >
           <div className="calendar-editor__header">
             <h4 className="calendar-editor__title">Edit session</h4>
@@ -10770,20 +10943,26 @@ useEffect(() => {
             {/* All-day toggle removed per request; preserve read-only all-day state via isDraftAllDay to hide time pickers */}
             <label className="history-timeline__field">
               <span className="history-timeline__field-text">Start</span>
-              <div className="calendar-inspector__schedule-inputs">
+              <div
+                className="calendar-inspector__schedule-inputs"
+                onPointerDownCapture={(event) => {
+                  // Clicking blank panel space should not toggle any picker
+                  const target = event.target as HTMLElement | null
+                  if (target && !target.closest('.inspector-picker')) {
+                    try { event.preventDefault() } catch {}
+                    try { event.stopPropagation() } catch {}
+                  }
+                }}
+              >
                 <InspectorDateInput
                   value={resolvedStart}
-                  onChange={(timestamp) => {
-                    setHistoryDraft((draft) => ({ ...draft, startedAt: timestamp }))
-                  }}
+                  onChange={shiftStartAndPreserveDuration}
                   ariaLabel="Select start date"
                 />
                 {isDraftAllDay ? null : (
                   <InspectorTimeInput
                     value={resolvedStart}
-                    onChange={(timestamp) => {
-                      setHistoryDraft((draft) => ({ ...draft, startedAt: timestamp }))
-                    }}
+                    onChange={shiftStartAndPreserveDuration}
                     ariaLabel="Select start time"
                   />
                 )}
@@ -10791,7 +10970,16 @@ useEffect(() => {
             </label>
             <label className="history-timeline__field">
               <span className="history-timeline__field-text">End</span>
-              <div className="calendar-inspector__schedule-inputs">
+              <div
+                className="calendar-inspector__schedule-inputs"
+                onPointerDownCapture={(event) => {
+                  const target = event.target as HTMLElement | null
+                  if (target && !target.closest('.inspector-picker')) {
+                    try { event.preventDefault() } catch {}
+                    try { event.stopPropagation() } catch {}
+                  }
+                }}
+              >
                 <InspectorDateInput
                   value={resolvedEnd}
                   onChange={(timestamp) => {
@@ -10806,6 +10994,11 @@ useEffect(() => {
                       setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
                     }}
                     ariaLabel="Select end time"
+                    snapMinutes={15}
+                    alignFromMinutes={startMinutesOfDay}
+                    alignAnchorTimestamp={resolvedStart}
+                    relativeToMinutes={startMinutesOfDay}
+                    maxSpanMinutes={24 * 60}
                   />
                 )}
               </div>
@@ -11348,6 +11541,18 @@ useEffect(() => {
       const endBase = inspectorEntry.endedAt
       const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
       const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
+      const shiftStartAndPreserveDuration = (nextStart: number) => {
+        setHistoryDraft((draft) => {
+          const prevStart = resolveTimestamp(draft.startedAt, startBase)
+          const prevEnd = resolveTimestamp(draft.endedAt, endBase)
+          const delta = nextStart - prevStart
+          return { ...draft, startedAt: nextStart, endedAt: prevEnd + delta }
+        })
+      }
+      const startMinutesOfDay = (() => {
+        const d = new Date(resolvedStart)
+        return d.getHours() * 60 + d.getMinutes()
+      })()
       const inspectorDateLabel = (() => {
         const startD = new Date(resolvedStart)
         const endD = new Date(resolvedEnd)
@@ -11463,7 +11668,12 @@ useEffect(() => {
       if (ENABLE_HISTORY_INSPECTOR_PANEL) {
         calendarInspectorPanel = (
           <aside className="calendar-inspector" aria-label="Session inspector">
-            <div className="calendar-inspector__inner" ref={calendarInspectorRef}>
+            <div
+              className="calendar-inspector__inner"
+              ref={calendarInspectorRef}
+              onPointerDownCapture={handleInspectorSurfacePointerDown}
+              onClickCapture={handleInspectorSurfaceClick}
+            >
               <div className="calendar-inspector__header">
                 <div className="calendar-inspector__heading">
                   <h3 className="calendar-inspector__title">
@@ -11501,31 +11711,45 @@ useEffect(() => {
                     <div className="calendar-inspector__schedule-row">
                       <label className="calendar-inspector__schedule-group">
                         <span className="calendar-inspector__schedule-heading">Start</span>
-                        <div className="calendar-inspector__schedule-inputs">
-                          <InspectorDateInput
-                            value={resolvedStart}
-                            onChange={(timestamp) => {
-                              setHistoryDraft((draft) => ({ ...draft, startedAt: timestamp }))
-                            }}
-                            ariaLabel="Select start date"
-                          />
+                  <div
+                    className="calendar-inspector__schedule-inputs"
+                    onPointerDownCapture={(event) => {
+                      const target = event.target as HTMLElement | null
+                      if (target && !target.closest('.inspector-picker')) {
+                        try { event.preventDefault() } catch {}
+                        try { event.stopPropagation() } catch {}
+                      }
+                    }}
+                  >
+                    <InspectorDateInput
+                      value={resolvedStart}
+                      onChange={shiftStartAndPreserveDuration}
+                      ariaLabel="Select start date"
+                    />
                           <InspectorTimeInput
                             value={resolvedStart}
-                            onChange={(timestamp) => {
-                              setHistoryDraft((draft) => ({ ...draft, startedAt: timestamp }))
-                            }}
+                            onChange={shiftStartAndPreserveDuration}
                             ariaLabel="Select start time"
                           />
                         </div>
                       </label>
                       <label className="calendar-inspector__schedule-group">
                         <span className="calendar-inspector__schedule-heading">End</span>
-                        <div className="calendar-inspector__schedule-inputs">
-                          <InspectorDateInput
-                            value={resolvedEnd}
-                            onChange={(timestamp) => {
-                              setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
-                            }}
+                    <div
+                      className="calendar-inspector__schedule-inputs"
+                      onPointerDownCapture={(event) => {
+                        const target = event.target as HTMLElement | null
+                        if (target && !target.closest('.inspector-picker')) {
+                          try { event.preventDefault() } catch {}
+                          try { event.stopPropagation() } catch {}
+                        }
+                      }}
+                    >
+                      <InspectorDateInput
+                        value={resolvedEnd}
+                        onChange={(timestamp) => {
+                          setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
+                        }}
                             ariaLabel="Select end date"
                           />
                           <InspectorTimeInput
@@ -11534,6 +11758,11 @@ useEffect(() => {
                               setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
                             }}
                             ariaLabel="Select end time"
+                            snapMinutes={15}
+                            alignFromMinutes={startMinutesOfDay}
+                            alignAnchorTimestamp={resolvedStart}
+                            relativeToMinutes={startMinutesOfDay}
+                            maxSpanMinutes={24 * 60}
                           />
                         </div>
                       </label>
@@ -11662,23 +11891,28 @@ useEffect(() => {
                     <div className="calendar-inspector__schedule-inputs">
                       <InspectorDateInput
                         value={resolvedStart}
-                        onChange={(timestamp) => {
-                          setHistoryDraft((draft) => ({ ...draft, startedAt: timestamp }))
-                        }}
+                        onChange={shiftStartAndPreserveDuration}
                         ariaLabel="Select start date"
                       />
                       <InspectorTimeInput
                         value={resolvedStart}
-                        onChange={(timestamp) => {
-                          setHistoryDraft((draft) => ({ ...draft, startedAt: timestamp }))
-                        }}
+                        onChange={shiftStartAndPreserveDuration}
                         ariaLabel="Select start time"
                       />
                     </div>
                   </label>
                   <label className="calendar-inspector__schedule-group">
                     <span className="calendar-inspector__schedule-heading">End</span>
-                    <div className="calendar-inspector__schedule-inputs">
+                    <div
+                      className="calendar-inspector__schedule-inputs"
+                      onPointerDownCapture={(event) => {
+                        const target = event.target as HTMLElement | null
+                        if (target && !target.closest('.inspector-picker')) {
+                          try { event.preventDefault() } catch {}
+                          try { event.stopPropagation() } catch {}
+                        }
+                      }}
+                    >
                       <InspectorDateInput
                         value={resolvedEnd}
                         onChange={(timestamp) => {
@@ -11692,6 +11926,11 @@ useEffect(() => {
                           setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
                         }}
                         ariaLabel="Select end time"
+                        snapMinutes={15}
+                        alignFromMinutes={startMinutesOfDay}
+                        alignAnchorTimestamp={resolvedStart}
+                        relativeToMinutes={startMinutesOfDay}
+                        maxSpanMinutes={24 * 60}
                       />
                     </div>
                   </label>
@@ -11776,7 +12015,12 @@ useEffect(() => {
       if (ENABLE_HISTORY_INSPECTOR_PANEL) {
         calendarInspectorPanel = (
           <aside className="calendar-inspector" aria-label="Session inspector">
-            <div className="calendar-inspector__inner" ref={calendarInspectorRef}>
+            <div
+              className="calendar-inspector__inner"
+              ref={calendarInspectorRef}
+              onPointerDownCapture={handleInspectorSurfacePointerDown}
+              onClickCapture={handleInspectorSurfaceClick}
+            >
               <div className="calendar-inspector__header">
                 <div className="calendar-inspector__heading">
                   <h3 className="calendar-inspector__title">Session details</h3>
@@ -12600,7 +12844,10 @@ useEffect(() => {
                                   onChange={(timestamp) => {
                                     setHistoryDraft((draft) => {
                                       if (!isEditing || selectedHistoryId !== segment.entry.id) return draft
-                                      return { ...draft, startedAt: timestamp }
+                                      const prevStart = resolveTimestamp(draft.startedAt, resolvedStartedAt)
+                                      const prevEnd = resolveTimestamp(draft.endedAt, resolvedEndedAt)
+                                      const delta = timestamp - prevStart
+                                      return { ...draft, startedAt: timestamp, endedAt: prevEnd + delta }
                                     })
                                   }}
                                   ariaLabel="Select start date"
@@ -12610,7 +12857,10 @@ useEffect(() => {
                                   onChange={(timestamp) => {
                                     setHistoryDraft((draft) => {
                                       if (!isEditing || selectedHistoryId !== segment.entry.id) return draft
-                                      return { ...draft, startedAt: timestamp }
+                                      const prevStart = resolveTimestamp(draft.startedAt, resolvedStartedAt)
+                                      const prevEnd = resolveTimestamp(draft.endedAt, resolvedEndedAt)
+                                      const delta = timestamp - prevStart
+                                      return { ...draft, startedAt: timestamp, endedAt: prevEnd + delta }
                                     })
                                   }}
                                   ariaLabel="Select start time"
@@ -12619,7 +12869,16 @@ useEffect(() => {
                             </label>
                             <label className="history-timeline__field">
                               <span className="history-timeline__field-text">End</span>
-                              <div className="calendar-inspector__schedule-inputs">
+                              <div
+                                className="calendar-inspector__schedule-inputs"
+                                onPointerDownCapture={(event) => {
+                                  const target = event.target as HTMLElement | null
+                                  if (target && !target.closest('.inspector-picker')) {
+                                    try { event.preventDefault() } catch {}
+                                    try { event.stopPropagation() } catch {}
+                                  }
+                                }}
+                              >
                                 <InspectorDateInput
                                   value={resolvedEndedAt}
                                   onChange={(timestamp) => {
@@ -12639,6 +12898,11 @@ useEffect(() => {
                                     })
                                   }}
                                   ariaLabel="Select end time"
+                                  snapMinutes={15}
+                                  alignFromMinutes={new Date(resolvedStartedAt).getHours() * 60 + new Date(resolvedStartedAt).getMinutes()}
+                                  alignAnchorTimestamp={resolvedStartedAt}
+                                  relativeToMinutes={new Date(resolvedStartedAt).getHours() * 60 + new Date(resolvedStartedAt).getMinutes()}
+                                  maxSpanMinutes={24 * 60}
                                 />
                               </div>
                             </label>
