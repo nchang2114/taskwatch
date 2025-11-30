@@ -4,13 +4,13 @@ import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, ensureServerBucketStyle } fr
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
 export const GOAL_COLOUR_PRESETS: Record<string, string> = {
-  'from-fuchsia-500 to-purple-500': 'linear-gradient(135deg, #f471b5 0%, #a855f7 50%, #6b21a8 100%)',
-  'from-emerald-500 to-cyan-500': 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
-  'from-lime-400 to-emerald-500': 'linear-gradient(135deg, #bef264 0%, #4ade80 45%, #22c55e 100%)',
-  'from-sky-500 to-indigo-500': 'linear-gradient(135deg, #38bdf8 0%, #60a5fa 50%, #6366f1 100%)',
-  'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
+  purple: 'linear-gradient(135deg, #f471b5 0%, #a855f7 50%, #6b21a8 100%)',
+  green: 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
+  magenta: 'linear-gradient(-225deg, #A445B2 0%, #D41872 52%, #FF0066 100%)',
+  blue: 'linear-gradient(135deg, #005bea 0%, #00c6fb 100%)',
+  orange: 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
 }
-export const FALLBACK_GOAL_COLOR = GOAL_COLOUR_PRESETS['from-fuchsia-500 to-purple-500']
+export const FALLBACK_GOAL_COLOR = GOAL_COLOUR_PRESETS['purple']
 
 export const normalizeGoalColour = (
   value: string | null | undefined,

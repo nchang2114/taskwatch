@@ -33,7 +33,7 @@ export const DEMO_GOALS: DemoGoal[] = [
   {
     id: 'g_demo',
     name: 'Ace This Semester',
-    goalColour: 'from-sky-500 to-indigo-500',
+    goalColour: 'blue',
     surfaceStyle: 'glass',
     starred: false,
     archived: false,
@@ -90,7 +90,7 @@ export const DEMO_GOALS: DemoGoal[] = [
   {
     id: 'g2',
     name: 'Level Up at Work',
-    goalColour: 'from-emerald-500 to-cyan-500',
+    goalColour: 'magenta',
     surfaceStyle: 'glass',
     starred: false,
     archived: false,
@@ -136,7 +136,7 @@ export const DEMO_GOALS: DemoGoal[] = [
   {
     id: 'g3',
     name: 'Healthy Work-Life Rhythm',
-    goalColour: 'from-lime-400 to-emerald-500',
+    goalColour: 'green',
     surfaceStyle: 'glass',
     starred: false,
     archived: false,
