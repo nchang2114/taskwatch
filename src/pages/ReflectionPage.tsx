@@ -8993,11 +8993,18 @@ useEffect(() => {
               if (idx === -1) return current
               const target = current[idx]
               const next = [...current]
+              const nowTs = Date.now()
+              const wasFutureSession = Boolean(target.futureSession)
+              const wasInPast = target.startedAt <= nowTs
+              const movedToFuture = preview.startedAt > nowTs
+              // Only auto-mark as planned if a confirmed past entry is moved into the future.
+              const isFuture = wasFutureSession || (wasInPast && movedToFuture)
               next[idx] = {
                 ...target,
                 startedAt: preview.startedAt,
                 endedAt: preview.endedAt,
                 elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                futureSession: isFuture,
               }
               return next
             })
@@ -10153,6 +10160,7 @@ useEffect(() => {
         id: makeHistoryId(),
         notes: source.notes,
         subtasks: source.subtasks.map((subtask) => ({ ...subtask })),
+        futureSession: true,
         // A duplicated entry should not stay linked to a repeating rule
         repeatingSessionId: null,
         originalTime: null,
