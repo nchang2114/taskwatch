@@ -949,9 +949,10 @@ function MainApp() {
     ensureRepeatingRulesUser(null)
     setUserProfile(null)
     if (typeof window !== 'undefined') {
+      // Preserve user data; only clear auth-related keys so other tabs don't lose local state
       const preservedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
       try {
-        window.localStorage.clear()
+        window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
       } catch {}
       if (preservedTheme) {
         try {
