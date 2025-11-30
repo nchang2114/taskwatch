@@ -955,16 +955,85 @@ const extractStopsFromGradient = (value: string): { from: string; to: string } |
 // --- Gradient sampling helpers for node ring/fill ---
 type ColorStop = { color: string; pct: number }
 
+const parseCssColor = (value: string): { r: number; g: number; b: number } | null => {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('#')) {
+    return hexToRgb(trimmed)
+  }
+  const rgbMatch = trimmed.match(/^rgba?\(\s*([^\)]+)\s*\)$/i)
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const [r, g, b] = parts.slice(0, 3).map((p) => Number(p))
+      if ([r, g, b].every((n) => Number.isFinite(n))) {
+        return { r, g, b }
+      }
+    }
+  }
+  const hslMatch = trimmed.match(/^hsla?\(\s*([^\)]+)\s*\)$/i)
+  if (hslMatch) {
+    const parts = hslMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const h = Number(parts[0])
+      const s = Number(parts[1].replace('%', '')) / 100
+      const l = Number(parts[2].replace('%', '')) / 100
+      if ([h, s, l].every((n) => Number.isFinite(n))) {
+        const c = (1 - Math.abs(2 * l - 1)) * s
+        const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+        const m = l - c / 2
+        let r1 = 0
+        let g1 = 0
+        let b1 = 0
+        if (h >= 0 && h < 60) {
+          r1 = c
+          g1 = x
+        } else if (h >= 60 && h < 120) {
+          r1 = x
+          g1 = c
+        } else if (h >= 120 && h < 180) {
+          g1 = c
+          b1 = x
+        } else if (h >= 180 && h < 240) {
+          g1 = x
+          b1 = c
+        } else if (h >= 240 && h < 300) {
+          r1 = x
+          b1 = c
+        } else if (h >= 300 && h < 360) {
+          r1 = c
+          b1 = x
+        }
+        return {
+          r: (r1 + m) * 255,
+          g: (g1 + m) * 255,
+          b: (b1 + m) * 255,
+        }
+      }
+    }
+  }
+  return null
+}
+
+const COLOR_TOKEN_REGEX = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\([^)]+\)|hsla?\([^)]+\))/gi
+
 const parseGradientStops = (gradient: string): ColorStop[] => {
-  const colorMatches = gradient.match(/#(?:[0-9a-fA-F]{3}){1,2}/g) || []
+  const colorMatches = Array.from(gradient.matchAll(COLOR_TOKEN_REGEX)).map((m) => m[0])
   const pctMatches = Array.from(gradient.matchAll(/(\d+(?:\.\d+)?)%/g)).map((m) => Number(m[1]))
   if (colorMatches.length === 0) return []
   const n = colorMatches.length
   const stops: ColorStop[] = []
-  if (pctMatches.length === n) {
-    for (let i = 0; i < n; i += 1) stops.push({ color: colorMatches[i], pct: pctMatches[i] })
-  } else {
-    for (let i = 0; i < n; i += 1) stops.push({ color: colorMatches[i], pct: (i / Math.max(1, n - 1)) * 100 })
+  for (let i = 0; i < n; i += 1) {
+    const color = colorMatches[i]
+    const rgb = parseCssColor(color)
+    if (!rgb) {
+      continue
+    }
+    const pct =
+      pctMatches.length === n
+        ? pctMatches[i]
+        : (i / Math.max(1, n - 1)) * 100
+    stops.push({ color: rgbToHex(rgb), pct })
   }
   stops.sort((a, b) => a.pct - b.pct)
   return stops
@@ -2161,6 +2230,12 @@ const MilestoneLayer: React.FC<{
             }
             if (goal.goalColour && BASE_GRADIENT_PREVIEW[goal.goalColour]) {
               return parseGradientStops(BASE_GRADIENT_PREVIEW[goal.goalColour])
+            }
+            if (goal.goalColour) {
+              const parsed = parseGradientStops(goal.goalColour)
+              if (parsed.length > 0) {
+                return parsed
+              }
             }
             return [
               { color: '#9fc2ff', pct: 0 },
