@@ -321,6 +321,17 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
   }
 }
 
+/**
+ * Guest Data Lifecycle:
+ * 
+ * 1. GUEST MODE: User works locally, data saved to nc-taskwatch-*::__guest__ keys
+ * 2. SIGN-UP: Guest data snapshotted to bootstrap-snapshot::* keys (in App.tsx)
+ * 3. BOOTSTRAP: This function migrates snapshot → DB, then clears all guest data
+ * 4. ACCOUNT: User works with DB-backed data
+ * 5. SIGN-OUT: resetLocalStoresToGuest() clears guest keys → fresh defaults appear
+ * 
+ * Multi-tab: Only the tab doing sign-up bootstraps. Other tabs skip (bootstrap_completed=true)
+ */
 const migrateGuestData = async (): Promise<void> => {
   const rules = readLocalRepeatingRules()
   const ruleIdMap =
@@ -333,12 +344,27 @@ const migrateGuestData = async (): Promise<void> => {
     await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
   }
 
-  // Read guest life routines explicitly from guest storage key
-  const guestRoutinesRaw = typeof window !== 'undefined' 
+  // Read from snapshot first (created at sign-up), fall back to guest key
+  const snapshotRoutinesRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::life-routines')
+    : null
+  const guestRoutinesRaw = !snapshotRoutinesRaw && typeof window !== 'undefined'
     ? window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
     : null
-  const guestRoutines = guestRoutinesRaw ? JSON.parse(guestRoutinesRaw) : []
+  const routinesRaw = snapshotRoutinesRaw || guestRoutinesRaw
+  const guestRoutines = routinesRaw ? JSON.parse(routinesRaw) : []
   const routines = Array.isArray(guestRoutines) && guestRoutines.length > 0 ? guestRoutines : readStoredLifeRoutines()
+  
+  // Clear snapshots after reading
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::life-routines')
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::quick-list')
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::goals')
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::history')
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::repeating')
+    } catch {}
+  }
   
   if (routines.length > 0) {
     await pushLifeRoutinesToSupabase(routines, { strict: true })
@@ -347,6 +373,18 @@ const migrateGuestData = async (): Promise<void> => {
   const quickItems = readStoredQuickList()
   if (quickItems.length > 0) {
     await uploadQuickListItems(quickItems)
+  }
+  
+  // Clear all guest data after successful migration
+  // This ensures sign-out will show fresh defaults
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+      window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
+      window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
+      window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
+      window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
+    } catch {}
   }
 }
 

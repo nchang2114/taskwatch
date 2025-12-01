@@ -10,7 +10,7 @@ import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
 import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
 import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
-import { clearCachedSupabaseSession, readCachedSessionTokens } from './lib/authStorage'
+import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
 import { ensureHistoryUser } from './lib/sessionHistory'
@@ -688,6 +688,27 @@ function MainApp() {
       setAuthCreateError(null)
       setAuthVerifyStatus(null)
       setAuthCreateSubmitting(true)
+      
+      // Snapshot guest data before sign-up so bootstrap can migrate it
+      // even if another tab signs out and clears localStorage
+      if (typeof window !== 'undefined') {
+        try {
+          const guestRoutines = window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
+          const guestQuickList = window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
+          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot::__guest__')
+          const guestHistory = window.localStorage.getItem('nc-taskwatch-session-history::__guest__')
+          const guestRepeating = window.localStorage.getItem('nc-taskwatch-repeating-rules::__guest__')
+          
+          if (guestRoutines) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::life-routines', guestRoutines)
+          if (guestQuickList) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::quick-list', guestQuickList)
+          if (guestGoals) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::goals', guestGoals)
+          if (guestHistory) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::history', guestHistory)
+          if (guestRepeating) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::repeating', guestRepeating)
+        } catch (e) {
+          console.warn('[signup] Could not snapshot guest data:', e)
+        }
+      }
+      
       try {
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
@@ -818,18 +839,22 @@ function MainApp() {
     const client = supabase
     let mounted = true
 
-    const resetLocalStoresToGuest = (options?: { suppressGoalsSnapshot?: boolean }) => {
-      ensureQuickListUser(null)
-      // Clear existing guest life routines data to force defaults on sign-out
-      if (typeof window !== 'undefined' && !options?.suppressGoalsSnapshot) {
+    const resetLocalStoresToGuest = () => {
+      // Clear all guest data for fresh defaults
+      if (typeof window !== 'undefined') {
         try {
           window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
         } catch {}
       }
-      // Don't suppress guest defaults when signing out - user should see guest data
+      // Initialize fresh guest defaults
+      ensureQuickListUser(null)
       ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
       ensureHistoryUser(null)
-      ensureGoalsUser(null, options?.suppressGoalsSnapshot ? { suppressGuestSnapshot: true } : undefined)
+      ensureGoalsUser(null)
       ensureRepeatingRulesUser(null)
     }
 
@@ -926,18 +951,24 @@ function MainApp() {
         }
 
         if (userId) {
-          if (!migrated) {
-            // Only reset and ensure if we didn't just migrate
-            // (migration already set up all data correctly)
-            resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
+          if (migrated) {
+            // Bootstrap cleared guest data, now initialize user data from DB
+            ensureQuickListUser(userId)
+            ensureLifeRoutineUser(userId)
+            ensureHistoryUser(userId)
+            ensureGoalsUser(userId)
+            ensureRepeatingRulesUser(userId)
+          } else {
+            // User already bootstrapped, just fetch from DB
+            // Don't reset - just ensure user data is loaded
             ensureQuickListUser(userId)
             ensureLifeRoutineUser(userId)
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
             ensureRepeatingRulesUser(userId)
           }
-          // If migrated=true, skip ensure calls - bootstrap already set up everything
         } else {
+          // Signing out - clear everything and show fresh guest defaults
           resetLocalStoresToGuest()
         }
         
