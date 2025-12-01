@@ -205,7 +205,8 @@ const readActivationMap = (): ActivationMap => {
 // Listen for storage events from other tabs to sync repeating rules
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event: StorageEvent) => {
-    if (event.key === REPEATING_RULES_STORAGE_KEY) {
+    // Check if the change is for a repeating rules key (handles user-specific keys like ::USER_ID)
+    if (event.key && (event.key === REPEATING_RULES_STORAGE_KEY || event.key.startsWith(REPEATING_RULES_STORAGE_KEY + '::'))) {
       try {
         const newValue = event.newValue
         if (!newValue) return

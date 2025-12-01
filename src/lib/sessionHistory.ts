@@ -1118,7 +1118,9 @@ export const ensureHistoryUser = (userId: string | null): void => {
       writeHistoryRecords(samples)
       broadcastHistoryRecords(samples)
     }
-  } else if (!migratingFromGuest) {
+  } else {
+    // Always clear history when switching to a real user (whether from guest or another user)
+    // This prevents guest session history from persisting on sign-in
     writeHistoryRecords([])
     broadcastHistoryRecords([])
   }
