@@ -352,8 +352,26 @@ const migrateGuestData = async (): Promise<void> => {
     ? window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
     : null
   const routinesRaw = snapshotRoutinesRaw || guestRoutinesRaw
-  const guestRoutines = routinesRaw ? JSON.parse(routinesRaw) : []
-  const routines = Array.isArray(guestRoutines) && guestRoutines.length > 0 ? guestRoutines : readStoredLifeRoutines()
+  
+  console.log('[bootstrap] Life routines migration:', {
+    hasSnapshot: !!snapshotRoutinesRaw,
+    hasGuestData: !!guestRoutinesRaw,
+    usingSource: snapshotRoutinesRaw ? 'snapshot' : guestRoutinesRaw ? 'guest' : 'none',
+  })
+  
+  // Parse and validate - ONLY use snapshot or guest data, never fallback to current user
+  let routines: LifeRoutineConfig[] = []
+  if (routinesRaw) {
+    try {
+      const parsed = JSON.parse(routinesRaw)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        routines = parsed
+        console.log('[bootstrap] Migrating', routines.length, 'life routines')
+      }
+    } catch (e) {
+      console.warn('[bootstrap] Could not parse life routines:', e)
+    }
+  }
   
   // Clear snapshots after reading
   if (typeof window !== 'undefined') {

@@ -699,6 +699,14 @@ function MainApp() {
           const guestHistory = window.localStorage.getItem('nc-taskwatch-session-history::__guest__')
           const guestRepeating = window.localStorage.getItem('nc-taskwatch-repeating-rules::__guest__')
           
+          console.log('[signup] Snapshotting guest data:', {
+            routines: guestRoutines ? JSON.parse(guestRoutines).length : 0,
+            quickList: guestQuickList ? JSON.parse(guestQuickList).length : 0,
+            goals: guestGoals ? 'exists' : 'none',
+            history: guestHistory ? JSON.parse(guestHistory).length : 0,
+            repeating: guestRepeating ? JSON.parse(guestRepeating).length : 0,
+          })
+          
           if (guestRoutines) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::life-routines', guestRoutines)
           if (guestQuickList) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::quick-list', guestQuickList)
           if (guestGoals) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::goals', guestGoals)
@@ -937,8 +945,21 @@ function MainApp() {
 
       // Acquire lock to prevent multiple tabs from aligning simultaneously
       if (userId && !acquireAlignLock(userId)) {
-        // Another tab is handling alignment, just update local tracking and wait
+        // Another tab is handling alignment
+        // Just update tracking - the winning tab will sync data via storage events
         lastAlignedUserIdRef.current = userId
+        
+        // Still need to set the user ID in each module so they know which user to track
+        // but DON'T trigger syncs (they'll get data via storage events from the winning tab)
+        if (typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem('nc-taskwatch-quicklist-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-life-routine-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-session-history-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-goals-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-repeating-rules-user-id', userId)
+          } catch {}
+        }
         return
       }
 
@@ -993,6 +1014,18 @@ function MainApp() {
           setAuthModalOpen(false)
         }
       }
+      
+      // Skip alignment if we're in the middle of signing out
+      // (we're about to reload anyway, no point triggering syncs)
+      if (typeof window !== 'undefined') {
+        try {
+          const signingOut = window.sessionStorage.getItem('nc-taskwatch-signing-out')
+          if (signingOut === 'true') {
+            return
+          }
+        } catch {}
+      }
+      
       await alignLocalStoresForUser(user?.id ?? null)
     }
 
@@ -1143,6 +1176,13 @@ function MainApp() {
     setIsSigningOut(true)
     setActiveTab('focus')
     closeProfileMenu()
+    
+    // Set flag to skip alignment (we're about to reload anyway)
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem('nc-taskwatch-signing-out', 'true')
+      } catch {}
+    }
     
     // Sign out from Supabase
     if (supabase) {
