@@ -13,7 +13,7 @@ import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
 import { clearCachedSupabaseSession, readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser, pushPendingHistoryToSupabase } from './lib/sessionHistory'
+import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded } from './lib/bootstrap'
 import { ensureGoalsUser } from './lib/goalsSync'
@@ -1112,15 +1112,8 @@ function MainApp() {
     setActiveTab('focus')
     closeProfileMenu()
     
-    // Push pending history BEFORE signing out to ensure session is still valid
-    if (supabase) {
-      try {
-        await pushPendingHistoryToSupabase()
-      } catch (err) {
-        // Silently ignore if push fails - data is still local
-        console.warn('[logout] Failed to push pending history:', err)
-      }
-    }
+    // Don't try to push pending history - just clear everything on sign-out
+    // Attempting to push can cause 400 errors if data is malformed
     
     // Sign out from Supabase
     if (supabase) {
@@ -1131,10 +1124,16 @@ function MainApp() {
       }
     }
     
-    // Clear all local state
+    // Clear all local state and reset to guest defaults
     clearCachedSupabaseSession()
     ensureQuickListUser(null)
-    ensureLifeRoutineUser(null)
+    // Clear guest routines to ensure fresh defaults
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+      } catch {}
+    }
+    ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
     ensureHistoryUser(null)
     ensureGoalsUser(null)
     ensureRepeatingRulesUser(null)
