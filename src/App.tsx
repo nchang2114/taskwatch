@@ -820,7 +820,8 @@ function MainApp() {
 
     const resetLocalStoresToGuest = (options?: { suppressGoalsSnapshot?: boolean }) => {
       ensureQuickListUser(null)
-      ensureLifeRoutineUser(null, { suppressGuestDefaults: true })
+      // Don't suppress guest defaults when signing out - user should see guest data
+      ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
       ensureHistoryUser(null)
       ensureGoalsUser(null, options?.suppressGoalsSnapshot ? { suppressGuestSnapshot: true } : undefined)
       ensureRepeatingRulesUser(null)
@@ -994,6 +995,12 @@ function MainApp() {
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
         void recheckSession({ skipDebounce: isSignOut })
+      } else if (event.key === AUTH_PROFILE_STORAGE_KEY) {
+        // Profile was cleared from another tab (sign-out), update immediately
+        const newValue = event.newValue
+        if (!newValue || newValue === 'null' || newValue === '') {
+          void recheckSession({ skipDebounce: true })
+        }
       }
     }
 

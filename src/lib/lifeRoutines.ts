@@ -564,6 +564,13 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
     return storeLifeRoutinesLocal(localSanitized, session.user.id)
   }
 
-  // Both empty: persist empty locally
-  return storeLifeRoutinesLocal([], session.user.id)
+  // Both empty: check for guest data to migrate, otherwise use defaults
+  const guestRoutines = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
+  const routinesToUse = Array.isArray(guestRoutines) && guestRoutines.length > 0
+    ? sanitizeLifeRoutineList(guestRoutines)
+    : getDefaultLifeRoutines()
+  
+  const stored = storeLifeRoutinesLocal(routinesToUse, session.user.id)
+  void pushLifeRoutinesToSupabase(stored)
+  return stored
 }
