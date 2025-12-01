@@ -226,16 +226,21 @@ type LifeRoutineDbRow = {
 }
 
 const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string | null): LifeRoutineConfig[] => {
-  const clones = routines.map(cloneRoutine)
+  // Ensure all routines have stable UUIDs before storing
+  const normalized = routines.map((routine) => ({
+    ...cloneRoutine(routine),
+    id: ensureRoutineId(routine.id),
+  }))
+  
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.setItem(storageKeyForUser(userId ?? readStoredLifeRoutineUserId()), JSON.stringify(clones))
-      window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: clones }))
+      window.localStorage.setItem(storageKeyForUser(userId ?? readStoredLifeRoutineUserId()), JSON.stringify(normalized))
+      window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: normalized }))
     } catch {
       // ignore storage errors
     }
   }
-  return clones
+  return normalized
 }
 
 // Set up cross-tab sync via storage events
@@ -388,10 +393,9 @@ export const pushLifeRoutinesToSupabase = async (
     id: ensureRoutineId(routine.id),
   }))
 
-  // Store normalized routines with ensured IDs back to local storage
-  // This prevents duplicate pushes with different IDs
-  storeLifeRoutinesLocal(normalized, session.user.id)
-
+  // Don't write back to localStorage here - it would trigger storage events
+  // and create an infinite sync loop across tabs
+  
   const rows = normalized.map((routine, index) => ({
     id: routine.id,
     user_id: session.user.id,
