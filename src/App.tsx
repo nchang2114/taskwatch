@@ -893,6 +893,7 @@ function MainApp() {
       const userChanged = previousUserId !== userId
       
       // Do not attempt to bootstrap/sync without a valid Supabase session
+      // EXCEPT when signing out (userId is null) - we need to reset to guest
       const session = await ensureSingleUserSession()
       if (!session && userId) {
         return
