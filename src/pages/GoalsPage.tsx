@@ -4100,7 +4100,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                     // Match row width to avoid layout surprises in the ghost
                                     const rowRect = row.getBoundingClientRect()
                                     clone.style.width = `${Math.floor(rowRect.width)}px`
-                                    clone.style.minHeight = `${Math.max(1, Math.round(rowRect.height))}px`
+                                    // Don't set minHeight - let it collapse to single-line height
                                     // Copy visual styles from the source row so colors match (including gradients/shadows)
                                     copyVisualStyles(row, clone)
                                     // Force single-line text in clone even if original contains line breaks
@@ -4949,7 +4949,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           clone.classList.remove('dragging', 'goal-task-row--collapsed', 'goal-task-row--expanded')
                                           const rowRect = row.getBoundingClientRect()
                                           clone.style.width = `${Math.floor(rowRect.width)}px`
-                                          clone.style.minHeight = `${Math.max(1, Math.round(rowRect.height))}px`
+                                          // Don't set minHeight - let it collapse to single-line height
                                           copyVisualStyles(row, clone)
                                           // Force single-line text in clone even if original contains line breaks
                                           const textNodes = clone.querySelectorAll('.goal-task-text, .goal-task-input, .goal-task-text--button')
@@ -9423,7 +9423,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       // Match row width to avoid layout surprises in the ghost
                                       const rect = row.getBoundingClientRect()
                                       clone.style.width = `${Math.floor(rect.width)}px`
-                                      clone.style.minHeight = `${Math.max(1, Math.round(rect.height))}px`
+                                      // Don't set minHeight - let it collapse to single-line height
                                       // Copy visual styles from the source row so colors match (including gradients/shadows)
                                       copyVisualStyles(row, clone)
                                       // Force single-line text in clone even if original contains line breaks
@@ -10020,7 +10020,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           // Match row width to avoid layout surprises in the ghost
                                           const rect = row.getBoundingClientRect()
                                           clone.style.width = `${Math.floor(rect.width)}px`
-                                          clone.style.minHeight = `${Math.max(1, Math.round(rect.height))}px`
+                                          // Don't set minHeight - let it collapse to single-line height
                                           // Copy visual styles from the source row so colors match (including gradients/shadows)
                                           copyVisualStyles(row, clone)
                                           // Force single-line text in clone even if original contains line breaks
