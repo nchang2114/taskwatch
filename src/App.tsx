@@ -1098,6 +1098,10 @@ function MainApp() {
       try {
         window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
       } catch {}
+      try {
+        // Remove profile key to signal sign-out to other tabs
+        window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
+      } catch {}
       if (preservedTheme) {
         try {
           window.localStorage.setItem(THEME_STORAGE_KEY, preservedTheme)
