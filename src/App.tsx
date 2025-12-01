@@ -1190,6 +1190,13 @@ function MainApp() {
       
       // Clear all user/guest data before reload for fresh defaults
       try {
+        // Clear user ID tracking keys (forces guest mode on reload)
+        window.localStorage.removeItem('nc-taskwatch-life-routine-user-id')
+        window.localStorage.removeItem('nc-taskwatch-quicklist-user-id')
+        window.localStorage.removeItem('nc-taskwatch-session-history-user-id')
+        window.localStorage.removeItem('nc-taskwatch-goals-user-id')
+        window.localStorage.removeItem('nc-taskwatch-repeating-rules-user-id')
+        
         // Clear guest keys
         window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
         window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
