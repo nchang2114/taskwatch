@@ -339,10 +339,12 @@ const migrateGuestData = async (): Promise<void> => {
 
   await migrateGoalsSnapshot()
 
-  const history = readStoredHistory()
-  if (history.length > 0) {
-    await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
-  }
+  // Skip migrating session history - it has stale goal/bucket/task IDs
+  // that would need complex remapping. Fresh account = fresh history.
+  // const history = readStoredHistory()
+  // if (history.length > 0) {
+  //   await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
+  // }
 
   // Read from snapshot first (created at sign-up), fall back to guest key
   const snapshotRoutinesRaw = typeof window !== 'undefined'
