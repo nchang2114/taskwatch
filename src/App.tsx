@@ -826,36 +826,89 @@ function MainApp() {
       ensureRepeatingRulesUser(null)
     }
 
+    // Track pending alignment operations to prevent race conditions across tabs
+    const ALIGN_LOCK_KEY = 'nc-taskwatch-align-lock'
+    const ALIGN_LOCK_TTL_MS = 10000 // 10 seconds
+
+    const acquireAlignLock = (userId: string): boolean => {
+      if (typeof window === 'undefined') return true
+      try {
+        const raw = window.localStorage.getItem(ALIGN_LOCK_KEY)
+        const now = Date.now()
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as { userId: string; expiresAt: number }
+            // If lock is for same user and still valid, another tab is aligning
+            if (parsed.userId === userId && parsed.expiresAt > now) {
+              return false
+            }
+          } catch {}
+        }
+        // Acquire lock
+        const expiresAt = now + ALIGN_LOCK_TTL_MS
+        window.localStorage.setItem(ALIGN_LOCK_KEY, JSON.stringify({ userId, expiresAt }))
+        return true
+      } catch {
+        return true
+      }
+    }
+
+    const releaseAlignLock = (): void => {
+      if (typeof window === 'undefined') return
+      try {
+        window.localStorage.removeItem(ALIGN_LOCK_KEY)
+      } catch {}
+    }
+
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
       const previousUserId = lastAlignedUserIdRef.current
       const userChanged = previousUserId !== userId
+      
       // Do not attempt to bootstrap/sync without a valid Supabase session
       const session = await ensureSingleUserSession()
       if (!session && userId) {
         return
       }
-      let migrated = false
-      try {
-        migrated = await bootstrapGuestDataIfNeeded(userId)
-      } catch (error) {
-        console.error('[bootstrap] failed during alignLocalStoresForUser', error)
-      }
-      if (!userChanged && !migrated) {
+
+      // If user hasn't changed and no migration needed, skip alignment
+      if (!userChanged) {
         return
       }
-      if (userId) {
-        if (!migrated) {
-          resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
-        }
-        ensureQuickListUser(userId)
-        ensureLifeRoutineUser(userId)
-        ensureHistoryUser(userId)
-        ensureGoalsUser(userId)
-        ensureRepeatingRulesUser(userId)
-      } else {
-        resetLocalStoresToGuest()
+
+      // Acquire lock to prevent multiple tabs from aligning simultaneously
+      if (userId && !acquireAlignLock(userId)) {
+        // Another tab is handling alignment, just update local tracking
+        lastAlignedUserIdRef.current = userId
+        return
       }
-      lastAlignedUserIdRef.current = userId
+
+      try {
+        let migrated = false
+        try {
+          migrated = await bootstrapGuestDataIfNeeded(userId)
+        } catch (error) {
+          console.error('[bootstrap] failed during alignLocalStoresForUser', error)
+        }
+
+        if (userId) {
+          if (!migrated) {
+            resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
+          }
+          ensureQuickListUser(userId)
+          ensureLifeRoutineUser(userId)
+          ensureHistoryUser(userId)
+          ensureGoalsUser(userId)
+          ensureRepeatingRulesUser(userId)
+        } else {
+          resetLocalStoresToGuest()
+        }
+        
+        lastAlignedUserIdRef.current = userId
+      } finally {
+        if (userId) {
+          releaseAlignLock()
+        }
+      }
     }
 
     const applySessionUser = async (user: User | null | undefined): Promise<void> => {
