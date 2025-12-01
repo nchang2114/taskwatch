@@ -1113,9 +1113,6 @@ function MainApp() {
     setActiveTab('focus')
     closeProfileMenu()
     
-    // Don't try to push pending history - just clear everything on sign-out
-    // Attempting to push can cause 400 errors if data is malformed
-    
     // Sign out from Supabase
     if (supabase) {
       try {
@@ -1125,35 +1122,17 @@ function MainApp() {
       }
     }
     
-    // Clear all local state and reset to guest defaults
-    clearCachedSupabaseSession()
-    ensureQuickListUser(null)
-    ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
-    ensureHistoryUser(null)
-    ensureGoalsUser(null)
-    ensureRepeatingRulesUser(null)
-    setUserProfile(null)
+    // Clear auth keys to signal sign-out to other tabs
     if (typeof window !== 'undefined') {
-      // Preserve user data; only clear auth-related keys so other tabs don't lose local state
-      const preservedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
       try {
         window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
       } catch {}
       try {
-        // Remove profile key to signal sign-out to other tabs
         window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
-      if (preservedTheme) {
-        try {
-          window.localStorage.setItem(THEME_STORAGE_KEY, preservedTheme)
-        } catch {}
-      }
-      try {
-        window.localStorage.setItem(QUICK_LIST_EXPANDED_STORAGE_KEY, 'false')
-      } catch {}
-      window.setTimeout(() => {
-        window.location.replace(window.location.origin)
-      }, 10)
+      // Immediately reload - don't try to clean up state, just reload
+      // The reload will handle resetting everything to guest defaults
+      window.location.reload()
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
 
