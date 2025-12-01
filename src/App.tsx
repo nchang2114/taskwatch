@@ -884,7 +884,9 @@ function MainApp() {
 
       // Acquire lock to prevent multiple tabs from aligning simultaneously
       if (userId && !acquireAlignLock(userId)) {
-        // Another tab is handling alignment, just update local tracking
+        // Another tab is handling alignment, wait briefly then just update local tracking
+        // Wait for the other tab to complete migration/sync before updating our state
+        await new Promise(resolve => setTimeout(resolve, 2000))
         lastAlignedUserIdRef.current = userId
         return
       }
