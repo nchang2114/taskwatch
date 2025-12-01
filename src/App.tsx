@@ -847,44 +847,6 @@ function MainApp() {
     const client = supabase
     let mounted = true
 
-    const resetLocalStoresToGuest = () => {
-      // Clear ALL data (both user and guest keys) for fresh start
-      if (typeof window !== 'undefined') {
-        try {
-          // Clear guest keys
-          window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
-          window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
-          window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
-          window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
-          window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
-          
-          // Clear non-suffixed data keys (goals snapshot, etc.)
-          window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
-          window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
-          window.localStorage.removeItem('nc-taskwatch-history')
-          window.localStorage.removeItem('nc-taskwatch-repeating-rules')
-          window.localStorage.removeItem('nc-taskwatch-current-session')
-          window.localStorage.removeItem('nc-taskwatch-task-details-v1')
-          
-          // Clear all user-specific keys (for any user ID)
-          const keysToRemove: string[] = []
-          for (let i = 0; i < window.localStorage.length; i++) {
-            const key = window.localStorage.key(i)
-            if (key && key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') {
-              keysToRemove.push(key)
-            }
-          }
-          keysToRemove.forEach(key => window.localStorage.removeItem(key))
-        } catch {}
-      }
-      // Initialize fresh guest defaults
-      ensureQuickListUser(null)
-      ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
-      ensureHistoryUser(null)
-      ensureGoalsUser(null)
-      ensureRepeatingRulesUser(null)
-    }
-
     // Track pending alignment operations to prevent race conditions across tabs
     const ALIGN_LOCK_KEY = 'nc-taskwatch-align-lock'
     const ALIGN_LOCK_TTL_MS = 10000 // 10 seconds
@@ -1008,8 +970,13 @@ function MainApp() {
             ensureRepeatingRulesUser(userId)
           }
         } else {
-          // Signing out - clear everything and show fresh guest defaults
-          resetLocalStoresToGuest()
+          // Guest mode - just ensure defaults exist if no data
+          // Don't clear existing guest work!
+          ensureQuickListUser(null)
+          ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
+          ensureHistoryUser(null)
+          ensureGoalsUser(null)
+          ensureRepeatingRulesUser(null)
         }
         
         // Mark alignment as complete so other tabs don't retry
@@ -1220,8 +1187,36 @@ function MainApp() {
       try {
         window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
-      // Immediately reload - don't try to clean up state, just reload
-      // The reload will handle resetting everything to guest defaults
+      
+      // Clear all user/guest data before reload for fresh defaults
+      try {
+        // Clear guest keys
+        window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+        window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
+        window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
+        window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
+        window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
+        
+        // Clear non-suffixed data keys
+        window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
+        window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
+        window.localStorage.removeItem('nc-taskwatch-history')
+        window.localStorage.removeItem('nc-taskwatch-repeating-rules')
+        window.localStorage.removeItem('nc-taskwatch-current-session')
+        window.localStorage.removeItem('nc-taskwatch-task-details-v1')
+        
+        // Clear all user-specific life routine keys
+        const keysToRemove: string[] = []
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i)
+          if (key && key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') {
+            keysToRemove.push(key)
+          }
+        }
+        keysToRemove.forEach(key => window.localStorage.removeItem(key))
+      } catch {}
+      
+      // Immediately reload - fresh page will have clean guest defaults
       window.location.reload()
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
