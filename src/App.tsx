@@ -905,13 +905,59 @@ function MainApp() {
       } catch {}
     }
 
+    // Track last session check to debounce rapid auth changes
+    let lastSessionCheckTime = 0
+    const SESSION_CHECK_DEBOUNCE_MS = 500
+
+    const recheckSession = async () => {
+      const now = Date.now()
+      if (now - lastSessionCheckTime < SESSION_CHECK_DEBOUNCE_MS) {
+        return
+      }
+      lastSessionCheckTime = now
+
+      let session: Session | null = null
+      try {
+        const { data } = await client.auth.getSession()
+        session = data.session ?? null
+      } catch {}
+      
+      if (mounted) {
+        await applySessionUser(session?.user ?? null)
+      }
+    }
+
     void bootstrapSession()
+
+    // Listen to auth state changes within this tab
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       void applySessionUser(session?.user ?? null)
     })
+
+    // Listen to auth changes from other tabs via storage events
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === AUTH_SESSION_STORAGE_KEY) {
+        void recheckSession()
+      }
+    }
+
+    // Validate session when tab regains focus
+    const handleFocus = () => {
+      void recheckSession()
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorageChange)
+      window.addEventListener('focus', handleFocus)
+    }
+
     return () => {
       mounted = false
       listener?.subscription.unsubscribe()
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', handleStorageChange)
+        window.removeEventListener('focus', handleFocus)
+      }
     }
   }, [])
 
