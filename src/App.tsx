@@ -962,9 +962,9 @@ function MainApp() {
     let lastSessionCheckTime = 0
     const SESSION_CHECK_DEBOUNCE_MS = 500
 
-    const recheckSession = async () => {
+    const recheckSession = async (options?: { skipDebounce?: boolean }) => {
       const now = Date.now()
-      if (now - lastSessionCheckTime < SESSION_CHECK_DEBOUNCE_MS) {
+      if (!options?.skipDebounce && now - lastSessionCheckTime < SESSION_CHECK_DEBOUNCE_MS) {
         return
       }
       lastSessionCheckTime = now
@@ -990,7 +990,10 @@ function MainApp() {
     // Listen to auth changes from other tabs via storage events
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === AUTH_SESSION_STORAGE_KEY) {
-        void recheckSession()
+        // Skip debounce for sign-out events to ensure immediate response
+        const newValue = event.newValue
+        const isSignOut = !newValue || newValue === 'null' || newValue === ''
+        void recheckSession({ skipDebounce: isSignOut })
       }
     }
 
@@ -1033,14 +1036,27 @@ function MainApp() {
     setIsSigningOut(true)
     setActiveTab('focus')
     closeProfileMenu()
+    
+    // Push pending history BEFORE signing out to ensure session is still valid
     if (supabase) {
       try {
         await pushPendingHistoryToSupabase()
-      } catch {}
+      } catch (err) {
+        // Silently ignore if push fails - data is still local
+        console.warn('[logout] Failed to push pending history:', err)
+      }
+    }
+    
+    // Sign out from Supabase
+    if (supabase) {
       try {
         await supabase.auth.signOut()
-      } catch {}
+      } catch (err) {
+        console.warn('[logout] Sign out error:', err)
+      }
     }
+    
+    // Clear all local state
     clearCachedSupabaseSession()
     ensureQuickListUser(null)
     ensureLifeRoutineUser(null)
