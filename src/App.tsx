@@ -955,6 +955,13 @@ function MainApp() {
         if (userId) {
           if (migrated) {
             // Bootstrap cleared guest data, now initialize user data from DB
+            // Clear history first to prevent stale data from syncing
+            if (typeof window !== 'undefined') {
+              try {
+                window.localStorage.removeItem('nc-taskwatch-history')
+                window.localStorage.removeItem('nc-taskwatch-current-session')
+              } catch {}
+            }
             ensureQuickListUser(userId)
             ensureLifeRoutineUser(userId)
             ensureHistoryUser(userId)
@@ -1197,8 +1204,9 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-goals-user-id')
         window.localStorage.removeItem('nc-taskwatch-repeating-rules-user-id')
         
-        // Clear guest keys
+        // Clear guest keys (both old and new format)
         window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+        window.localStorage.removeItem('nc-taskwatch-life-routines-v1::__guest__')
         window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
         window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
         window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
@@ -1207,16 +1215,20 @@ function MainApp() {
         // Clear non-suffixed data keys
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
         window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
-        window.localStorage.removeItem('nc-taskwatch-history')
+        window.localStorage.removeItem('nc-taskwatch-history') // This is the key one!
         window.localStorage.removeItem('nc-taskwatch-repeating-rules')
         window.localStorage.removeItem('nc-taskwatch-current-session')
         window.localStorage.removeItem('nc-taskwatch-task-details-v1')
+        window.localStorage.removeItem('nc-taskwatch-flags') // Feature flags
         
-        // Clear all user-specific life routine keys
+        // Clear ALL user-specific life routine keys (both formats)
         const keysToRemove: string[] = []
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i)
-          if (key && key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') {
+          if (key && (
+            (key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') ||
+            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__')
+          )) {
             keysToRemove.push(key)
           }
         }
