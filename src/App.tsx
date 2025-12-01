@@ -950,11 +950,13 @@ function MainApp() {
         if (userId) {
           if (migrated) {
             // Bootstrap cleared guest data, now initialize user data from DB
-            // Clear history first to prevent stale data from syncing
+            // Clear history/repeating first to prevent stale guest data from syncing
             if (typeof window !== 'undefined') {
               try {
                 window.localStorage.removeItem('nc-taskwatch-history')
                 window.localStorage.removeItem('nc-taskwatch-current-session')
+                window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
+                window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
               } catch {}
             }
             ensureQuickListUser(userId)

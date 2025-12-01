@@ -400,7 +400,34 @@ const migrateGuestData = async (): Promise<void> => {
     await pushLifeRoutinesToSupabase(routines, { strict: true })
   }
 
-  const quickItems = readStoredQuickList()
+  // Read quick list from snapshot first (created at sign-up), fall back to guest key
+  const snapshotQuickListRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::quick-list')
+    : null
+  const guestQuickListRaw = !snapshotQuickListRaw && typeof window !== 'undefined'
+    ? window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
+    : null
+  const quickListRaw = snapshotQuickListRaw || guestQuickListRaw
+  
+  console.log('[bootstrap] Quick list migration:', {
+    hasSnapshot: !!snapshotQuickListRaw,
+    hasGuestData: !!guestQuickListRaw,
+    usingSource: snapshotQuickListRaw ? 'snapshot' : guestQuickListRaw ? 'guest' : 'none',
+  })
+  
+  let quickItems: QuickItem[] = []
+  if (quickListRaw) {
+    try {
+      const parsed = JSON.parse(quickListRaw)
+      if (Array.isArray(parsed)) {
+        quickItems = parsed
+        console.log('[bootstrap] Migrating', quickItems.length, 'quick list items')
+      }
+    } catch (e) {
+      console.warn('[bootstrap] Could not parse quick list:', e)
+    }
+  }
+  
   if (quickItems.length > 0) {
     await uploadQuickListItems(quickItems)
   }
