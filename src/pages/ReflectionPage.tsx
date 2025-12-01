@@ -1378,6 +1378,7 @@ const isAllDayRangeTs = (start: number, end: number): boolean => {
 }
 const DRAG_DETECTION_THRESHOLD_PX = 3
 const MIN_SESSION_DURATION_DRAG_MS = MINUTE_MS
+const DRAG_HOLD_DURATION_MS = 300 // Hold duration required to start dragging/extending sessions
 // Double-tap (touch) detection settings
 // Double-tap (touch) detection thresholds (tighter to reduce accidental triggers)
 const DOUBLE_TAP_DELAY_MS = 220
@@ -2711,6 +2712,11 @@ const computeRangeOverview = (
 export default function ReflectionPage() {
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
+  const calendarViewRef = useRef<CalendarViewMode>(calendarView)
+  
+  useEffect(() => {
+    calendarViewRef.current = calendarView
+  }, [calendarView])
   // No explicit visibility gating; transforms are guarded until measured
   const [multiDayCount, setMultiDayCount] = useState<number>(6)
   const [showMultiDayChooser, setShowMultiDayChooser] = useState(false)
@@ -2742,7 +2748,6 @@ export default function ReflectionPage() {
     baseOffset: number
     mode: 'pending' | 'hdrag'
     lastAppliedDx: number
-    isTouch?: boolean
   } | null>(null)
   const calendarPanCleanupRef = useRef<((shouldCommit: boolean) => void) | null>(null)
   const calendarPanFallbackTimeoutRef = useRef<number | null>(null)
@@ -3016,7 +3021,7 @@ export default function ReflectionPage() {
 
   const resolvePanSnap = useCallback(
     (
-      state: { baseOffset: number; startTime: number; dayCount: number; isTouch?: boolean; mode?: 'pending' | 'hdrag' },
+      state: { baseOffset: number; startTime: number; dayCount: number; mode?: 'pending' | 'hdrag' },
       dx: number,
       dayWidth: number,
       view: CalendarViewMode,
@@ -3036,8 +3041,6 @@ export default function ReflectionPage() {
           ? 1
           : chunkSize
       const effectiveRaw = snapUnitSpan === 1 ? rawDays : rawDays / snapUnitSpan
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const elapsedMs = Math.max(now - state.startTime, 1)
       const absRaw = Math.abs(effectiveRaw)
       const direction = effectiveRaw >= 0 ? 1 : -1
 
@@ -3049,18 +3052,10 @@ export default function ReflectionPage() {
         return { snap, targetOffset }
       }
 
-      const quickTouchFling = Boolean(state.isTouch) && state.mode === 'hdrag' && (elapsedMs < 450 || absRaw > 0.2)
-      let snapUnits: number
-      if (quickTouchFling) {
-        // Fast swipe: always advance at least one chunk in the swipe direction (no snap-back on fling)
-        const steps = Math.max(1, Math.round(absRaw + 0.2))
-        snapUnits = direction * steps
-      } else {
-        // Controlled drag: snap only if past halfway into the next chunk
-        snapUnits = absRaw >= 0.5 ? direction * Math.max(1, Math.round(absRaw)) : 0
-      }
-
-      const snap = snapUnits * snapUnitSpan
+      // For 3d (X day) view: free-form panning with no minimum snap
+      // Just snap to the nearest day based on where the user dragged
+      const snapUnits = Math.round(rawDays)
+      const snap = snapUnits
       const targetOffset = state.baseOffset - snap
       return { snap, targetOffset }
     },
@@ -3230,64 +3225,81 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     }
     longPressCancelHandlersRef.current = null
   }, [])
-  // Helper: toggle global scroll lock (prevents page scroll on touch during active event drags)
-  const setPageScrollLock = (locked: boolean) => {
+  // Helper: toggle global scroll lock (prevents page scroll during active event drags)
+  // mode: 'full' = block all scrolling (for event drag), 'vertical' = block only vertical (for calendar pan)
+  const setPageScrollLock = (locked: boolean, mode: 'full' | 'vertical' = 'full') => {
     if (typeof document === 'undefined') return
-    const root = document.documentElement
     const body = document.body as HTMLBodyElement & { dataset: DOMStringMap }
-    const ua = navigator.userAgent || ''
-    const isIOS = /iP(ad|hone|od)/.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1)
     if (locked) {
       // If already locked, no-op
       if (body.dataset.scrollLockActive === '1') return
       body.dataset.scrollLockActive = '1'
-      const y = (window.scrollY || root.scrollTop || (document.scrollingElement?.scrollTop ?? 0) || 0)
-      body.dataset.scrollLockY = String(y)
-      if (isIOS) {
-        // iOS Safari: avoid position:fixed to prevent address bar/UI jumps; block scrolling via global touchmove preventer
-        const preventer: EventListener = (e: Event) => {
+      
+      // Use touch-action based on mode
+      const originalTouchAction = body.style.touchAction
+      const originalOverscrollBehavior = body.style.overscrollBehavior
+      ;(window as any).__scrollLockOriginalTouchAction = originalTouchAction
+      ;(window as any).__scrollLockOriginalOverscrollBehavior = originalOverscrollBehavior
+      body.style.touchAction = mode === 'full' ? 'none' : 'pan-x'
+      body.style.overscrollBehavior = 'none'
+      
+      // Prevent wheel events based on mode
+      const wheelPreventer: EventListener = (e: Event) => {
+        const wheelEvent = e as WheelEvent
+        if (mode === 'full') {
+          // Block all wheel scrolling
           try { e.preventDefault() } catch {}
+        } else {
+          // Only prevent vertical scrolling, allow horizontal
+          if (Math.abs(wheelEvent.deltaY) > Math.abs(wheelEvent.deltaX)) {
+            try { e.preventDefault() } catch {}
+          }
         }
-        ;(window as any).__scrollLockTouchPreventer = preventer
-        try { window.addEventListener('touchmove', preventer, { passive: false }) } catch {}
-      } else {
-        root.classList.add('scroll-lock')
-        body.classList.add('scroll-lock')
-        // Non-iOS fallback: freeze body to prevent any viewport scroll reliably
-        body.style.position = 'fixed'
-        body.style.top = `-${y}px`
-        body.style.left = '0'
-        body.style.right = '0'
-        body.style.width = '100%'
-        body.style.overflow = 'hidden'
       }
+      // Prevent touchmove as a stronger fallback for touch devices
+      const touchPreventer: EventListener = (e: Event) => {
+        // Always prevent default to stop scrolling during drag
+        try { e.preventDefault() } catch {}
+      }
+      ;(window as any).__scrollLockWheelPreventer = wheelPreventer
+      ;(window as any).__scrollLockTouchPreventer = touchPreventer
+      try { 
+        window.addEventListener('wheel', wheelPreventer, { passive: false })
+        // Add touchmove preventer with capture phase to catch it early
+        window.addEventListener('touchmove', touchPreventer, { passive: false, capture: true })
+      } catch {}
     } else {
       // If not locked, no-op
       if (body.dataset.scrollLockActive !== '1') return
       delete body.dataset.scrollLockActive
-      const yStr = body.dataset.scrollLockY || root.dataset.scrollLockY
-      delete body.dataset.scrollLockY
-      delete root.dataset.scrollLockY
-      // Remove iOS touchmove preventer if present
-      const preventer = (window as any).__scrollLockTouchPreventer as EventListener | undefined
-      if (preventer) {
-        try { window.removeEventListener('touchmove', preventer) } catch {}
+      
+      // Restore original touch-action and overscroll-behavior
+      const originalTouchAction = (window as any).__scrollLockOriginalTouchAction
+      const originalOverscrollBehavior = (window as any).__scrollLockOriginalOverscrollBehavior
+      if (typeof originalTouchAction === 'string') {
+        body.style.touchAction = originalTouchAction
+      } else {
+        body.style.touchAction = ''
+      }
+      if (typeof originalOverscrollBehavior === 'string') {
+        body.style.overscrollBehavior = originalOverscrollBehavior
+      } else {
+        body.style.overscrollBehavior = ''
+      }
+      delete (window as any).__scrollLockOriginalTouchAction
+      delete (window as any).__scrollLockOriginalOverscrollBehavior
+      
+      // Remove event preventers
+      const wheelPreventer = (window as any).__scrollLockWheelPreventer as EventListener | undefined
+      const touchPreventer = (window as any).__scrollLockTouchPreventer as EventListener | undefined
+      if (wheelPreventer) {
+        try { window.removeEventListener('wheel', wheelPreventer) } catch {}
+        delete (window as any).__scrollLockWheelPreventer
+      }
+      if (touchPreventer) {
+        try { window.removeEventListener('touchmove', touchPreventer, { capture: true } as any) } catch {}
         delete (window as any).__scrollLockTouchPreventer
       }
-      // Restore body styles (for non-iOS fallback)
-      if (body.style.position === 'fixed') {
-        body.style.position = ''
-        body.style.top = ''
-        body.style.left = ''
-        body.style.right = ''
-        body.style.width = ''
-        body.style.overflow = ''
-        root.classList.remove('scroll-lock')
-        body.classList.remove('scroll-lock')
-      }
-      // Restore scroll position
-      const y = yStr ? parseInt(yStr, 10) : (window.scrollY || 0)
-      try { window.scrollTo(0, y) } catch {}
     }
   }
 
@@ -7687,15 +7699,17 @@ useEffect(() => {
   }, [multiDayCount, setView])
 
   const handleCalendarAreaPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!(calendarView === 'day' || calendarView === '3d' || calendarView === 'week')) {
+    const currentView = calendarViewRef.current
+    if (!(currentView === 'day' || currentView === '3d' || currentView === 'week')) {
       return
     }
     if (event.button !== 0) return
-    const isTouch = (event as any).pointerType === 'touch'
     let scrollLocked = false
     let prevTouchAction: string | null = null
     const target = event.target as HTMLElement | null
-    if (target && (target.closest('.calendar-event') || target.closest('.calendar-allday-event') || target.closest('button'))) {
+    // Allow panning from anywhere, including over events
+    // Events have their own handlers that will set up drag after hold detection
+    if (target && target.closest('button')) {
       return
     }
     const area = calendarDaysAreaRef.current
@@ -7716,7 +7730,7 @@ useEffect(() => {
       allDayEl.style.transition = ''
     }
     resetCalendarPanTransform()
-    const dayCount = calendarView === '3d' ? Math.max(2, Math.min(multiDayCount, 14)) : calendarView === 'week' ? 7 : 1
+    const dayCount = currentView === '3d' ? Math.max(2, Math.min(multiDayCount, 14)) : currentView === 'week' ? 7 : 1
     const baseOffset = calendarPanDesiredOffsetRef.current
     calendarDragRef.current = {
       pointerId: event.pointerId,
@@ -7728,10 +7742,12 @@ useEffect(() => {
       baseOffset,
       mode: 'pending',
       lastAppliedDx: 0,
-      isTouch,
     }
     // Don't capture or preventDefault yet; wait until we detect horizontal intent
     const handleMove = (e: PointerEvent) => {
+      // Don't pan if an event drag is active
+      const eventDragState = calendarEventDragRef.current
+      if (eventDragState && eventDragState.activated) return
       const state = calendarDragRef.current
       if (!state || e.pointerId !== state.pointerId) return
       const dy = e.clientY - state.startY
@@ -7760,7 +7776,7 @@ useEffect(() => {
           prevTouchAction = area.style.touchAction
           area.style.touchAction = 'none'
         }
-        if (isTouch && !scrollLocked) {
+        if (!scrollLocked) {
           setPageScrollLock(true)
           scrollLocked = true
         }
@@ -7810,7 +7826,7 @@ useEffect(() => {
         if (allDayEl) {
           allDayEl.style.transform = `translateX(${totalPx}px)`
         }
-        const { snap } = resolvePanSnap(state, dx, dayWidth, calendarView, appliedDx)
+        const { snap } = resolvePanSnap(state, dx, dayWidth, calendarViewRef.current, appliedDx)
         if (snap !== 0) {
           animateCalendarPan(snap, dayWidth, state.baseOffset)
           resetImmediately = false
@@ -7845,7 +7861,7 @@ useEffect(() => {
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
     window.addEventListener('pointercancel', handleUp)
-  }, [calendarView, multiDayCount, resetCalendarPanTransform, stopCalendarPanAnimation, resolvePanSnap, animateCalendarPan])
+  }, [multiDayCount, resetCalendarPanTransform, stopCalendarPanAnimation, resolvePanSnap, animateCalendarPan])
 
   // Build minimal calendar content for non-day views
   const renderCalendarContent = useCallback(() => {
@@ -8408,12 +8424,16 @@ useEffect(() => {
               notes: '',
               subtasks: [],
             }
+            // Check if this guide is being dragged and use preview times
+            const isPreviewed = dragPreview && dragPreview.entryId === entry.id
+            const previewStart = isPreviewed ? dragPreview.startedAt : startedAt
+            const previewEnd = isPreviewed ? dragPreview.endedAt : endedAt
             return {
               entry,
-              start: Math.max(startedAt, startMs),
-              end: Math.min(endedAt, endMs),
-              previewStart: startedAt,
-              previewEnd: endedAt,
+              start: Math.max(previewStart, startMs),
+              end: Math.min(previewEnd, endMs),
+              previewStart,
+              previewEnd,
             }
           }
 
@@ -8699,8 +8719,7 @@ useEffect(() => {
       ) => (ev: ReactPointerEvent<HTMLDivElement>) => {
         if (entry.id === 'active-session') return
         if (ev.button !== 0) return
-        const isTouch = (ev as any).pointerType === 'touch'
-  const daysRoot = calendarDaysRef.current
+        const daysRoot = calendarDaysRef.current
         if (!daysRoot) return
         const columnEls = Array.from(daysRoot.querySelectorAll<HTMLDivElement>('.calendar-day-column'))
         if (columnEls.length === 0) return
@@ -8740,20 +8759,25 @@ useEffect(() => {
           activated: false,
         }
         calendarEventDragRef.current = state
-        // For mouse/pen: capture immediately. For touch: defer capture until long-press activates drag.
-        if (!isTouch) {
-          try {
-            targetEl.setPointerCapture?.(ev.pointerId)
-          } catch {}
-        }
+        // Defer capture until long-press activates drag for all devices (mouse/pen/touch)
         // For touch, require a short hold before activating drag to prevent accidental drags while scrolling
   let touchHoldTimer: number | null = null
   let panningFromEvent = false
+  let holdCancelled = false
+        // Track guide materialization info to defer state update until drag completes
+        let guideMaterialization: { realEntry: HistoryEntry; ruleId: string; ymd: string } | null = null
+        // Prevent page scroll immediately during hold period (before activation)
+        setPageScrollLock(true, 'full')
         const activateDrag = () => {
           const s = calendarEventDragRef.current
           if (!s || s.activated) return
           s.activated = true
-          // If dragging a guide (repeating) entry, materialize it now so all drag/resize semantics match real entries
+          // Clear any calendar pan state to prevent panning while dragging
+          calendarDragRef.current = null
+          // Lock page scroll while dragging an event FIRST, before any DOM changes
+          setPageScrollLock(true, 'full')
+          // If dragging a guide (repeating) entry, prepare materialization but don't update state yet
+          // This prevents React re-render from breaking pointer capture during drag
           if (entry.id.startsWith('repeat:')) {
             try {
               const parts = entry.id.split(':')
@@ -8767,34 +8791,14 @@ useEffect(() => {
                 originalTime: entry.startedAt,
                 futureSession: true,
               }
-              updateHistory((current) => {
-                const next = [...current, realEntry]
-                next.sort((a, b) => a.startedAt - b.startedAt)
-                return next
-              })
-              // Persist an exception so future guide synthesis for this occurrence is suppressed even if tags get dropped remotely
-              try {
-                void upsertRepeatingException({
-                  routineId: ruleId,
-                  occurrenceDate: ymd,
-                  action: 'rescheduled',
-                  newStartedAt: realEntry.startedAt,
-                  newEndedAt: realEntry.endedAt,
-                  notes: null,
-                })
-                // Attempt to retire the rule if its window is complete
-                void evaluateAndMaybeRetireRule(ruleId)
-              } catch {}
-              // Update the drag state to reference the new real entry id and baseline times
-              s.entryId = realEntry.id
-              s.initialStart = realEntry.startedAt
-              s.initialEnd = realEntry.endedAt
+              // Store materialization info to apply after drag completes
+              guideMaterialization = { realEntry, ruleId, ymd }
+              // Keep using the guide entry ID in drag state so preview matches DOM
+              // The materialized ID will be used when committing to history
             } catch {}
           }
           // Close any open calendar popover as soon as a drag is activated
           handleCloseCalendarPreview()
-          // Lock page scroll on touch while dragging an event
-          if (isTouch) setPageScrollLock(true)
           try { targetEl.setPointerCapture?.(ev.pointerId) } catch {}
         }
         const onMove = (e: PointerEvent) => {
@@ -8805,14 +8809,16 @@ useEffect(() => {
           const dy = e.clientY - s.startY
           const threshold = 6
           if (!s.activated) {
-            if (isTouch) {
-              // If finger moves before hold completes, cancel the long-press activation
-              if (Math.hypot(dx, dy) > threshold) {
-                if (touchHoldTimer !== null) {
-                  try { window.clearTimeout(touchHoldTimer) } catch {}
-                  touchHoldTimer = null
-                }
-                // If horizontal intent, treat this as a calendar pan even though we started on an event
+            // If pointer moves before hold completes, cancel the long-press activation
+            if (Math.hypot(dx, dy) > threshold) {
+              if (touchHoldTimer !== null) {
+                try { window.clearTimeout(touchHoldTimer) } catch {}
+                touchHoldTimer = null
+                holdCancelled = true
+              }
+              // Only allow transitioning to pan if hold was cancelled (not completed)
+              // If horizontal intent, treat this as a calendar pan for all input types
+              if (holdCancelled) {
                 const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                 if (intent === 'horizontal' && area) {
                   if (!panningFromEvent) {
@@ -8842,13 +8848,10 @@ useEffect(() => {
                         dayCount,
                         baseOffset,
                         mode: 'hdrag',
-                        isTouch,
                         lastAppliedDx: 0,
                       }
                       try { area.setPointerCapture?.(s.pointerId) } catch {}
-                      if (isTouch) {
-                        setPageScrollLock(true)
-                      }
+                      setPageScrollLock(true, 'vertical')
                       panningFromEvent = true
                     }
                   }
@@ -8870,19 +8873,15 @@ useEffect(() => {
                     }
                   }
                   return
+                } else {
+                  // Not horizontal intent - release scroll lock since we're not dragging or panning
+                  setPageScrollLock(false)
                 }
-                return
               }
-              // Not activated yet, and not moved enough — keep waiting for hold
               return
-            } else {
-              if (Math.hypot(dx, dy) <= threshold) {
-                return
-              }
-              // For mouse/pen, activate the drag using the same path as touch
-              // so guide entries materialize consistently on drag start.
-              activateDrag()
             }
+            // Not activated yet, and not moved enough — keep waiting for hold
+            return
           }
           // Prevent page/area scrolling while dragging an event
           try { e.preventDefault() } catch {}
@@ -8976,38 +8975,86 @@ useEffect(() => {
                 if (allDayEl) allDayEl.style.transform = `translateX(${base}px)`
               }
             }
-            if (isTouch) {
-              setPageScrollLock(false)
-            }
+            setPageScrollLock(false)
             calendarDragRef.current = null
             // Suppress click opening preview after a pan
             dragPreventClickRef.current = true
             return
           }
           const preview = dragPreviewRef.current
+          // Check if preview matches the guide entry ID (since we kept it during drag)
           if (preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
             // A drag occurred and resulted in a time change; commit the change and suppress the click
             dragPreventClickRef.current = true
+            // If this was a guide task, materialize it now after drag completes
+            if (guideMaterialization) {
+              const { realEntry, ruleId, ymd } = guideMaterialization
+              // Add the materialized entry with updated times from preview
+              updateHistory((current) => {
+                const materialized = {
+                  ...realEntry,
+                  startedAt: preview.startedAt,
+                  endedAt: preview.endedAt,
+                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                }
+                const next = [...current, materialized]
+                next.sort((a, b) => a.startedAt - b.startedAt)
+                return next
+              })
+              // Persist an exception so future guide synthesis is suppressed
+              try {
+                void upsertRepeatingException({
+                  routineId: ruleId,
+                  occurrenceDate: ymd,
+                  action: 'rescheduled',
+                  newStartedAt: preview.startedAt,
+                  newEndedAt: preview.endedAt,
+                  notes: null,
+                })
+                void evaluateAndMaybeRetireRule(ruleId)
+              } catch {}
+            } else {
+              // Regular entry update
+              updateHistory((current) => {
+                const idx = current.findIndex((h) => h.id === s.entryId)
+                if (idx === -1) return current
+                const target = current[idx]
+                const next = [...current]
+                const nowTs = Date.now()
+                const wasFutureSession = Boolean(target.futureSession)
+                const wasInPast = target.startedAt <= nowTs
+                const movedToFuture = preview.startedAt > nowTs
+                const isFuture = wasFutureSession || (wasInPast && movedToFuture)
+                next[idx] = {
+                  ...target,
+                  startedAt: preview.startedAt,
+                  endedAt: preview.endedAt,
+                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                  futureSession: isFuture,
+                }
+                return next
+              })
+            }
+          } else if (guideMaterialization && s.activated) {
+            // Guide was activated but no time change - still need to materialize
+            const { realEntry, ruleId, ymd } = guideMaterialization
             updateHistory((current) => {
-              const idx = current.findIndex((h) => h.id === s.entryId)
-              if (idx === -1) return current
-              const target = current[idx]
-              const next = [...current]
-              const nowTs = Date.now()
-              const wasFutureSession = Boolean(target.futureSession)
-              const wasInPast = target.startedAt <= nowTs
-              const movedToFuture = preview.startedAt > nowTs
-              // Only auto-mark as planned if a confirmed past entry is moved into the future.
-              const isFuture = wasFutureSession || (wasInPast && movedToFuture)
-              next[idx] = {
-                ...target,
-                startedAt: preview.startedAt,
-                endedAt: preview.endedAt,
-                elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
-                futureSession: isFuture,
-              }
+              const next = [...current, realEntry]
+              next.sort((a, b) => a.startedAt - b.startedAt)
               return next
             })
+            try {
+              void upsertRepeatingException({
+                routineId: ruleId,
+                occurrenceDate: ymd,
+                action: 'rescheduled',
+                newStartedAt: realEntry.startedAt,
+                newEndedAt: realEntry.endedAt,
+                notes: null,
+              })
+              void evaluateAndMaybeRetireRule(ruleId)
+            } catch {}
+            dragPreventClickRef.current = true
           } else {
             // If drag intent was activated (even if it snapped back to original), suppress the click-preview
             if (s.activated) {
@@ -9020,15 +9067,13 @@ useEffect(() => {
           // Clear drag kind marker so cursor returns to default/hover affordances
           delete targetEl.dataset.dragKind
           // Always release scroll lock at the end of a drag (noop if not locked)
-          if (isTouch) setPageScrollLock(false)
+          setPageScrollLock(false)
         }
-        // For touch, arm the hold timer to activate dragging
-        if (isTouch) {
-          touchHoldTimer = window.setTimeout(() => {
-            touchHoldTimer = null
-            activateDrag()
-          }, 360)
-        }
+        // Arm the hold timer to activate dragging for all input types (mouse/pen/touch)
+        touchHoldTimer = window.setTimeout(() => {
+          touchHoldTimer = null
+          activateDrag()
+        }, DRAG_HOLD_DURATION_MS)
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
         window.addEventListener('pointercancel', onUp)
@@ -9113,7 +9158,7 @@ useEffect(() => {
                   }}
                   onPointerDown={(pev) => {
                     if (pev.button !== 0) return
-                    // Start horizontal drag to move all-day block across days
+                    // Start horizontal drag to move all-day block across days (after hold)
                     pev.preventDefault(); pev.stopPropagation(); handleCloseCalendarPreview()
                     const track = calendarAllDayRef.current
                     if (!track) return
@@ -9121,7 +9166,9 @@ useEffect(() => {
                     if (!(Number.isFinite(rect.width) && rect.width > 0 && dayStarts.length > 0)) return
                     const pointerId = pev.pointerId
                     let moved = false
+                    let activated = false
                     const startX = pev.clientX
+                    const startY = pev.clientY
                     const dayWidth = rect.width / Math.max(1, dayStarts.length)
                     const trackLeft = rect.left
                     const clampColumnIndex = (value: number) =>
@@ -9129,9 +9176,25 @@ useEffect(() => {
                     const pointerStartIndex = clampColumnIndex(Math.floor((startX - trackLeft) / dayWidth))
                     const initialStart = bar.entry.startedAt
                     const initialEnd = bar.entry.endedAt
+                    let holdTimer: number | null = null
+                    const activateDrag = () => {
+                      if (activated) return
+                      activated = true
+                      try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
+                    }
                     const onMove = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
                       const dx = e.clientX - startX
+                      const dy = e.clientY - startY
+                      // Cancel hold timer if movement exceeds threshold before activation
+                      if (!activated && Math.hypot(dx, dy) > 6) {
+                        if (holdTimer !== null) {
+                          try { window.clearTimeout(holdTimer) } catch {}
+                          holdTimer = null
+                        }
+                        return
+                      }
+                      if (!activated) return
                       const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
                       const pointerIndex = clampColumnIndex(rawPointerIndex)
                       const deltaDays = pointerIndex - pointerStartIndex
@@ -9148,6 +9211,10 @@ useEffect(() => {
                     }
                     const onUp = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
+                      if (holdTimer !== null) {
+                        try { window.clearTimeout(holdTimer) } catch {}
+                        holdTimer = null
+                      }
                       window.removeEventListener('pointermove', onMove)
                       window.removeEventListener('pointerup', onUp)
                       window.removeEventListener('pointercancel', onUp)
@@ -9166,7 +9233,10 @@ useEffect(() => {
                       dragPreviewRef.current = null
                       setDragPreview(null)
                     }
-                    try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
+                    holdTimer = window.setTimeout(() => {
+                      holdTimer = null
+                      activateDrag()
+                    }, DRAG_HOLD_DURATION_MS)
                     window.addEventListener('pointermove', onMove)
                     window.addEventListener('pointerup', onUp)
                     window.addEventListener('pointercancel', onUp)
@@ -9263,7 +9333,6 @@ useEffect(() => {
                   const startY = ev.clientY
                   let startedCreate = false
                   let startedPan = false
-                  const isTouch = (ev as any).pointerType === 'touch'
                   let touchHoldTimer: number | null = null
 
                   const startCreate = () => {
@@ -9284,8 +9353,8 @@ useEffect(() => {
                     calendarEventDragRef.current = state
                     dragPreviewRef.current = { entryId: 'new-entry', startedAt: state.initialStart, endedAt: state.initialEnd }
                     setDragPreview(dragPreviewRef.current)
-                    // Lock page scroll while dragging to create (touch only)
-                    if (isTouch) setPageScrollLock(true)
+                    // Lock page scroll while dragging to create
+                    setPageScrollLock(true)
                     try { targetEl.setPointerCapture?.(pointerId) } catch {}
                   }
 
@@ -9319,9 +9388,7 @@ useEffect(() => {
                       lastAppliedDx: 0,
                     }
                     try { area.setPointerCapture?.(pointerId) } catch {}
-                    if (isTouch) {
-                      setPageScrollLock(true)
-                    }
+                    setPageScrollLock(true)
                   }
 
                   const onMove = (e: PointerEvent) => {
@@ -9330,25 +9397,15 @@ useEffect(() => {
                     const dy = e.clientY - startY
                     const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                     if (!startedCreate && !startedPan) {
-                      if (isTouch) {
-                        // On touch, require a hold before creating; allow horizontal pan if user slides before hold
-                        if (intent === 'horizontal') {
-                          if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
-                          startPan()
-                          try { e.preventDefault() } catch {}
-                          return
-                        }
-                        // Vertical movement before hold — do nothing (avoid accidental create)
+                      // Require a hold before creating; allow horizontal pan if user slides before hold
+                      if (intent === 'horizontal') {
+                        if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
+                        startPan()
+                        try { e.preventDefault() } catch {}
                         return
-                      } else {
-                        if (intent === 'horizontal') {
-                          startPan()
-                        } else if (intent === 'vertical') {
-                          startCreate()
-                        } else {
-                          return
-                        }
                       }
+                      // Vertical movement before hold — do nothing (avoid accidental create)
+                      return
                     }
                     if (startedPan) {
                       // Mirror handleCalendarAreaPointerDown's move behavior
@@ -9436,15 +9493,13 @@ useEffect(() => {
                         }
                       }
                       calendarDragRef.current = null
-                      if (isTouch) {
-                        setPageScrollLock(false)
-                      }
+                      setPageScrollLock(false)
                       return
                     }
 
                     if (startedCreate) {
                       // Release page scroll lock at the end of create drag (noop if not locked)
-                      if (isTouch) setPageScrollLock(false)
+                      setPageScrollLock(false)
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (preview && preview.entryId === 'new-entry') {
@@ -9488,13 +9543,11 @@ useEffect(() => {
                   window.addEventListener('pointermove', onMove)
                   window.addEventListener('pointerup', onUp)
                   window.addEventListener('pointercancel', onUp)
-                  // For touch, require a brief hold to start creation; allow pan to start immediately
-                  if (isTouch) {
-                    touchHoldTimer = window.setTimeout(() => {
-                      touchHoldTimer = null
-                      startCreate()
-                    }, 360)
-                  }
+                  // Require a hold timer to start creation for all input types
+                  touchHoldTimer = window.setTimeout(() => {
+                    touchHoldTimer = null
+                    startCreate()
+                  }, DRAG_HOLD_DURATION_MS)
                 }
                 return (
                   <div key={`col-${di}`} className="calendar-day-column" onPointerDown={handleCalendarColumnPointerDown}>
@@ -11293,6 +11346,8 @@ useEffect(() => {
       setDragPreview(null)
       dragPreventClickRef.current = state.hasMoved
       setHoveredDuringDragId(null)
+      // Release scroll lock
+      setPageScrollLock(false)
     },
     [handleWindowPointerMove, setHistoryDraft, updateHistory],
   )
@@ -11327,6 +11382,8 @@ useEffect(() => {
       } catch {}
       // Close any open calendar popover when starting a drag from timeline blocks
       handleCloseCalendarPreview()
+      // Lock page scroll while dragging (for all input types)
+      setPageScrollLock(true, 'full')
       const rect = bar.getBoundingClientRect()
       if (!rect || rect.width <= 0) {
         return
@@ -11349,57 +11406,6 @@ useEffect(() => {
       setDragPreview(null)
       setHoveredDuringDragId(segment.entry.id)
       event.stopPropagation()
-      window.addEventListener('pointermove', handleWindowPointerMove)
-      window.addEventListener('pointerup', handleWindowPointerUp)
-      window.addEventListener('pointercancel', handleWindowPointerUp)
-    },
-    [dayStart, dayEnd, handleWindowPointerMove, handleWindowPointerUp],
-  )
-
-  // Start drag from native pointer event (used after mouse moves beyond threshold)
-  const startDragFromPointer = useCallback(
-    (nativeEvent: PointerEvent, segment: TimelineSegment, type: DragKind) => {
-      if (segment.entry.id === 'active-session') {
-        return
-      }
-      // Ensure primary button is pressed for mouse
-      if (nativeEvent.pointerType === 'mouse' && (nativeEvent.buttons & 1) !== 1) {
-        return
-      }
-      if (dragStateRef.current) {
-        return
-      }
-      const bar = timelineBarRef.current
-      if (!bar) {
-        return
-      }
-      const rect = bar.getBoundingClientRect()
-      if (!rect || rect.width <= 0) {
-        return
-      }
-      try {
-        nativeEvent.preventDefault()
-        bar.setPointerCapture?.(nativeEvent.pointerId)
-      } catch {}
-      // Close any open calendar popover when starting a drag via native pointer (timeline)
-      handleCloseCalendarPreview()
-      dragStateRef.current = {
-        entryId: segment.entry.id,
-        type,
-        pointerId: nativeEvent.pointerId,
-        rectWidth: rect.width,
-        startX: nativeEvent.clientX,
-        initialStart: segment.entry.startedAt,
-        initialEnd: segment.entry.endedAt,
-        dayStart,
-        dayEnd,
-        minDurationMs: MIN_SESSION_DURATION_DRAG_MS,
-        hasMoved: false,
-      }
-      dragPreventClickRef.current = false
-      dragPreviewRef.current = null
-      setDragPreview(null)
-      setHoveredDuringDragId(segment.entry.id)
       window.addEventListener('pointermove', handleWindowPointerMove)
       window.addEventListener('pointerup', handleWindowPointerUp)
       window.addEventListener('pointercancel', handleWindowPointerUp)
@@ -12585,82 +12591,42 @@ useEffect(() => {
                 })
               }
               const handleBlockPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-                const isTouch = (event as any).pointerType === 'touch'
-                if (isTouch) {
-                  // Enable long-press to move on touch; short tap will select (handled by onClick)
-                  event.persist?.()
+                // Enable long-press to move for all input types; short press will select (handled by onClick)
+                event.persist?.()
+                clearLongPressWatch()
+                longPressPointerIdRef.current = event.pointerId
+                longPressStartRef.current = { x: event.clientX, y: event.clientY }
+
+                const threshold = 8
+                const handleMove = (e: PointerEvent) => {
+                  if (e.pointerId !== longPressPointerIdRef.current || !longPressStartRef.current) return
+                  const dx = e.clientX - longPressStartRef.current.x
+                  const dy = e.clientY - longPressStartRef.current.y
+                  if (Math.hypot(dx, dy) > threshold) {
+                    clearLongPressWatch()
+                  }
+                }
+                const handleUpOrCancel = (e: PointerEvent) => {
+                  if (e.pointerId !== longPressPointerIdRef.current) return
                   clearLongPressWatch()
-                  longPressPointerIdRef.current = event.pointerId
-                  longPressStartRef.current = { x: event.clientX, y: event.clientY }
-
-                  const threshold = 8
-                  const handleMove = (e: PointerEvent) => {
-                    if (e.pointerId !== longPressPointerIdRef.current || !longPressStartRef.current) return
-                    const dx = e.clientX - longPressStartRef.current.x
-                    const dy = e.clientY - longPressStartRef.current.y
-                    if (Math.hypot(dx, dy) > threshold) {
-                      clearLongPressWatch()
-                    }
-                  }
-                  const handleUpOrCancel = (e: PointerEvent) => {
-                    if (e.pointerId !== longPressPointerIdRef.current) return
-                    clearLongPressWatch()
-                  }
-
-                  window.addEventListener('pointermove', handleMove, { passive: true })
-                  window.addEventListener('pointerup', handleUpOrCancel, { passive: true })
-                  window.addEventListener('pointercancel', handleUpOrCancel, { passive: true })
-                  longPressCancelHandlersRef.current = { move: handleMove, up: handleUpOrCancel, cancel: handleUpOrCancel }
-
-                  longPressTimerRef.current = window.setTimeout(() => {
-                    // Start move-drag after long press
-                    try {
-                      if (typeof (event as any).preventDefault === 'function') {
-                        (event as any).preventDefault()
-                      }
-                      ;(event.currentTarget as any)?.setPointerCapture?.(event.pointerId)
-                    } catch {}
-                    clearLongPressWatch()
-                    startDrag(event, segment, 'move')
-                  }, 360)
-                  return
                 }
-                // For mouse/pen: defer starting drag until movement exceeds threshold to preserve click/dblclick
-                if ((event as any).pointerType === 'mouse' || (event as any).pointerType === 'pen') {
-                  mousePreDragRef.current = { pointerId: event.pointerId, startX: event.clientX, segment }
-                  const handleMove = (e: PointerEvent) => {
-                    const pending = mousePreDragRef.current
-                    if (!pending || e.pointerId !== pending.pointerId) return
-                    const dx = e.clientX - pending.startX
-                    if (Math.abs(dx) >= DRAG_DETECTION_THRESHOLD_PX) {
-                      // Begin drag and stop pre-drag listeners
-                      mousePreDragRef.current = null
-                      if (mousePreDragHandlersRef.current) {
-                        window.removeEventListener('pointermove', mousePreDragHandlersRef.current.move)
-                        window.removeEventListener('pointerup', mousePreDragHandlersRef.current.up)
-                        mousePreDragHandlersRef.current = null
-                      }
-                      startDragFromPointer(e, segment, 'move')
+
+                window.addEventListener('pointermove', handleMove, { passive: true })
+                window.addEventListener('pointerup', handleUpOrCancel, { passive: true })
+                window.addEventListener('pointercancel', handleUpOrCancel, { passive: true })
+                longPressCancelHandlersRef.current = { move: handleMove, up: handleUpOrCancel, cancel: handleUpOrCancel }
+
+                longPressTimerRef.current = window.setTimeout(() => {
+                  // Start move-drag after long press
+                  try {
+                    if (typeof (event as any).preventDefault === 'function') {
+                      (event as any).preventDefault()
                     }
-                  }
-                  const handleUp = (e: PointerEvent) => {
-                    const pending = mousePreDragRef.current
-                    if (pending && e.pointerId === pending.pointerId) {
-                      mousePreDragRef.current = null
-                      if (mousePreDragHandlersRef.current) {
-                        window.removeEventListener('pointermove', mousePreDragHandlersRef.current.move)
-                        window.removeEventListener('pointerup', mousePreDragHandlersRef.current.up)
-                        mousePreDragHandlersRef.current = null
-                      }
-                    }
-                  }
-                  mousePreDragHandlersRef.current = { move: handleMove, up: handleUp }
-                  window.addEventListener('pointermove', handleMove, { passive: true })
-                  window.addEventListener('pointerup', handleUp, { passive: true })
-                  return
-                }
-                // Fallback: start drag immediately
-                startDrag(event, segment, 'move')
+                    ;(event.currentTarget as any)?.setPointerCapture?.(event.pointerId)
+                  } catch {}
+                  clearLongPressWatch()
+                  startDrag(event, segment, 'move')
+                }, DRAG_HOLD_DURATION_MS)
               }
               const handleResizeStartPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
                 startDrag(event, segment, 'resize-start')
@@ -12669,10 +12635,6 @@ useEffect(() => {
                 startDrag(event, segment, 'resize-end')
               }
               const handleBlockPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-                const isTouch = (event as any).pointerType === 'touch'
-                if (!isTouch) {
-                  return
-                }
                 // If a drag is active, ignore
                 if (dragStateRef.current && dragStateRef.current.entryId === segment.entry.id) {
                   return
