@@ -893,13 +893,16 @@ function MainApp() {
 
         if (userId) {
           if (!migrated) {
+            // Only reset and ensure if we didn't just migrate
+            // (migration already set up all data correctly)
             resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
+            ensureQuickListUser(userId)
+            ensureLifeRoutineUser(userId)
+            ensureHistoryUser(userId)
+            ensureGoalsUser(userId)
+            ensureRepeatingRulesUser(userId)
           }
-          ensureQuickListUser(userId)
-          ensureLifeRoutineUser(userId)
-          ensureHistoryUser(userId)
-          ensureGoalsUser(userId)
-          ensureRepeatingRulesUser(userId)
+          // If migrated=true, skip ensure calls - bootstrap already set up everything
         } else {
           resetLocalStoresToGuest()
         }
