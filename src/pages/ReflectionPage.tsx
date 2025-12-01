@@ -506,17 +506,16 @@ const SNAPBACK_NAME = 'Snapback'
 const SNAPBACK_SURFACE: SurfaceStyle = 'ember'
 const SNAPBACK_COLOR_INFO: GoalColorInfo = {
   gradient: {
-    css: 'linear-gradient(135deg, #fb923c 0%, #ef4444 50%, #991b1b 100%)',
-    start: '#fb923c',
-    end: '#991b1b',
-    angle: 135,
+    css: 'linear-gradient(315deg, #fc9842 0%, #fe5f75 74%)',
+    start: '#fc9842',
+    end: '#fe5f75',
+    angle: 315,
     stops: [
-      { color: '#fb923c', position: 0 },
-      { color: '#ef4444', position: 0.5 },
-      { color: '#991b1b', position: 1 },
+      { color: '#fc9842', position: 0 },
+      { color: '#fe5f75', position: 0.74 },
     ],
   },
-  solidColor: '#ef4444',
+  solidColor: '#fe5f75',
 }
 // Removed default surface lookup; life routine surfaces are derived only from user data.
 

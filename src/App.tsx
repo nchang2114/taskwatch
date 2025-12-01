@@ -1182,7 +1182,7 @@ function MainApp() {
         console.warn('[logout] Sign out error:', err)
       }
     }
-     
+    
     // Clear auth keys to signal sign-out to other tabs
     if (typeof window !== 'undefined') {
       try {
