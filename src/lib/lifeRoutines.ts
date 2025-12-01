@@ -498,17 +498,18 @@ export const ensureLifeRoutineUser = (
   if (typeof window === 'undefined') return
   const normalized = normalizeLifeRoutineUserId(userId)
   const current = readStoredLifeRoutineUserId()
-  if (current === normalized) {
-    return
-  }
-  setStoredLifeRoutineUserId(normalized)
-  if (normalized === LIFE_ROUTINE_GUEST_USER_ID) {
-    if (current !== LIFE_ROUTINE_GUEST_USER_ID && !options?.suppressGuestDefaults) {
-      const existingGuest = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
-      if (!Array.isArray(existingGuest)) {
-        storeLifeRoutinesLocal(getDefaultLifeRoutines(), LIFE_ROUTINE_GUEST_USER_ID)
-      }
+  
+  // Always check for guest defaults, even if user hasn't changed
+  if (normalized === LIFE_ROUTINE_GUEST_USER_ID && !options?.suppressGuestDefaults) {
+    const existingGuest = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
+    if (!Array.isArray(existingGuest) || existingGuest.length === 0) {
+      storeLifeRoutinesLocal(getDefaultLifeRoutines(), LIFE_ROUTINE_GUEST_USER_ID)
     }
+  }
+  
+  // Only update user ID if it changed
+  if (current !== normalized) {
+    setStoredLifeRoutineUserId(normalized)
   }
 }
 
