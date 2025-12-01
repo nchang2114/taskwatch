@@ -13,7 +13,7 @@ import {
   normalizeGoalColour,
   FALLBACK_GOAL_COLOR,
 } from './goalsApi'
-import { readStoredLifeRoutines, pushLifeRoutinesToSupabase } from './lifeRoutines'
+import { pushLifeRoutinesToSupabase, type LifeRoutineConfig } from './lifeRoutines'
 import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
