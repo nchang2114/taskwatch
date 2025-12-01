@@ -172,6 +172,23 @@ export const storeRepeatingRulesLocal = (rules: RepeatingSessionRule[]): void =>
   writeLocalRules(rules)
 }
 
+export const subscribeToRepeatingRulesChange = (
+  callback: (rules: RepeatingSessionRule[]) => void,
+): (() => void) => {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+  const handler = (event: Event) => {
+    const customEvent = event as CustomEvent<RepeatingSessionRule[]>
+    const detail = Array.isArray(customEvent.detail) ? customEvent.detail : []
+    callback(detail)
+  }
+  window.addEventListener('nc-taskwatch:repeating-rules-update', handler as EventListener)
+  return () => {
+    window.removeEventListener('nc-taskwatch:repeating-rules-update', handler as EventListener)
+  }
+}
+
 type ActivationMap = Record<string, number>
 const readActivationMap = (): ActivationMap => {
   if (typeof window === 'undefined') return {}

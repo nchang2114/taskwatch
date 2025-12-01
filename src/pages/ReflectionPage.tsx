@@ -65,6 +65,7 @@ import {
   deleteMatchingRulesForEntry,
   readLocalRepeatingRules,
   storeRepeatingRulesLocal,
+  subscribeToRepeatingRulesChange,
   isRepeatingRuleId,
   type RepeatingSessionRule,
 } from '../lib/repeatingSessions'
@@ -5725,6 +5726,14 @@ useEffect(() => {
       }
       goalsSnapshotSignatureRef.current = signature
       setGoalsSnapshot(snapshot)
+    })
+    return unsubscribe
+  }, [])
+
+  // Subscribe to repeating rules changes for real-time cross-tab sync
+  useEffect(() => {
+    const unsubscribe = subscribeToRepeatingRulesChange((rules) => {
+      setRepeatingRules(rules)
     })
     return unsubscribe
   }, [])
