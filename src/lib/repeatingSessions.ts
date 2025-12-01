@@ -136,11 +136,17 @@ const storageKeyForUser = (userId: string | null | undefined): string =>
 export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
   if (typeof window === 'undefined') return getSampleRepeatingRules()
   try {
-    const raw = window.localStorage.getItem(storageKeyForUser(readStoredRepeatingRuleUserId()))
+    const currentUserId = readStoredRepeatingRuleUserId()
+    const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUserId))
     if (!raw) {
-      const sample = getSampleRepeatingRules()
-      writeLocalRules(sample)
-      return sample
+      // Only auto-populate samples for guest users, not real users
+      if (isGuest) {
+        const sample = getSampleRepeatingRules()
+        writeLocalRules(sample)
+        return sample
+      }
+      return []
     }
     const arr = JSON.parse(raw)
     if (!Array.isArray(arr)) return []
@@ -148,15 +154,25 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
       .map((row) => mapRowToRule(row))
       .filter(Boolean) as RepeatingSessionRule[]
     if (mapped.length === 0) {
+      // Only auto-populate samples for guest users, not real users
+      if (isGuest) {
+        const sample = getSampleRepeatingRules()
+        writeLocalRules(sample)
+        return sample
+      }
+      return []
+    }
+    return mapped
+  } catch {
+    // Only auto-populate samples on error for guest users
+    const currentUserId = readStoredRepeatingRuleUserId()
+    const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
+    if (isGuest) {
       const sample = getSampleRepeatingRules()
       writeLocalRules(sample)
       return sample
     }
-    return mapped
-  } catch {
-    const sample = getSampleRepeatingRules()
-    writeLocalRules(sample)
-    return sample
+    return []
   }
 }
 
