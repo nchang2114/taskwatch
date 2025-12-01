@@ -1199,7 +1199,9 @@ function MainApp() {
       try {
         // Clear user ID tracking keys (forces guest mode on reload)
         window.localStorage.removeItem('nc-taskwatch-life-routine-user-id')
+        window.localStorage.removeItem('nc-taskwatch-life-routines-user') // Alternative key
         window.localStorage.removeItem('nc-taskwatch-quicklist-user-id')
+        window.localStorage.removeItem('nc-taskwatch-quick-list-user') // Alternative key
         window.localStorage.removeItem('nc-taskwatch-session-history-user-id')
         window.localStorage.removeItem('nc-taskwatch-goals-user-id')
         window.localStorage.removeItem('nc-taskwatch-repeating-rules-user-id')
@@ -1212,14 +1214,22 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
         
-        // Clear non-suffixed data keys
+        // Clear non-suffixed data keys (goals, tasks, history, etc.)
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
         window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
-        window.localStorage.removeItem('nc-taskwatch-history') // This is the key one!
+        window.localStorage.removeItem('nc-taskwatch-history')
         window.localStorage.removeItem('nc-taskwatch-repeating-rules')
         window.localStorage.removeItem('nc-taskwatch-current-session')
         window.localStorage.removeItem('nc-taskwatch-task-details-v1')
-        window.localStorage.removeItem('nc-taskwatch-flags') // Feature flags
+        window.localStorage.removeItem('nc-taskwatch-flags')
+        
+        // Clear ALL goals-related keys (for any user)
+        const allKeys = Object.keys(window.localStorage)
+        allKeys.forEach(key => {
+          if (key.includes('goals-snapshot') || key.includes('task-details')) {
+            try { window.localStorage.removeItem(key) } catch {}
+          }
+        })
         
         // Clear ALL user-specific life routine keys (both formats)
         const keysToRemove: string[] = []

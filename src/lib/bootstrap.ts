@@ -1,5 +1,4 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import { readLocalRepeatingRules, pushRepeatingRulesToSupabase } from './repeatingSessions'
 import { readStoredQuickList, type QuickItem } from './quickList'
 import { ensureQuickListRemoteStructures, generateUuid } from './quickListRemote'
 import {
@@ -332,10 +331,11 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
  * Multi-tab: Only the tab doing sign-up bootstraps. Other tabs skip (bootstrap_completed=true)
  */
 const migrateGuestData = async (): Promise<void> => {
-  const rules = readLocalRepeatingRules()
-  if (rules.length > 0) {
-    await pushRepeatingRulesToSupabase(rules, { strict: true })
-  }
+  // Skip repeating rules - they have stale references like session history
+  // const rules = readLocalRepeatingRules()
+  // if (rules.length > 0) {
+  //   await pushRepeatingRulesToSupabase(rules, { strict: true })
+  // }
 
   await migrateGoalsSnapshot()
 
