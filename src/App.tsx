@@ -998,28 +998,20 @@ function MainApp() {
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
         if (isSignOut) {
-          // Immediately clear profile state on sign-out
-          setUserProfile(null)
-          // Reset to guest mode
-          ensureQuickListUser(null)
-          ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
-          ensureHistoryUser(null)
-          ensureGoalsUser(null)
-          ensureRepeatingRulesUser(null)
+          // Another tab signed out - reload this tab to reset to guest mode
+          if (typeof window !== 'undefined') {
+            window.location.reload()
+          }
+        } else {
+          void recheckSession({ skipDebounce: false })
         }
-        void recheckSession({ skipDebounce: isSignOut })
       } else if (event.key === AUTH_PROFILE_STORAGE_KEY) {
-        // Profile was cleared from another tab (sign-out), update immediately
+        // Profile was cleared from another tab (sign-out), reload to reset to guest
         const newValue = event.newValue
         if (!newValue || newValue === 'null' || newValue === '') {
-          // Immediately clear profile state and reset to guest
-          setUserProfile(null)
-          ensureQuickListUser(null)
-          ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
-          ensureHistoryUser(null)
-          ensureGoalsUser(null)
-          ensureRepeatingRulesUser(null)
-          void recheckSession({ skipDebounce: true })
+          if (typeof window !== 'undefined') {
+            window.location.reload()
+          }
         }
       } else if (event.key === THEME_STORAGE_KEY) {
         // Theme changed in another tab
