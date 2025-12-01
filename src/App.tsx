@@ -1128,12 +1128,6 @@ function MainApp() {
     // Clear all local state and reset to guest defaults
     clearCachedSupabaseSession()
     ensureQuickListUser(null)
-    // Clear guest routines to ensure fresh defaults
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
-      } catch {}
-    }
     ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
     ensureHistoryUser(null)
     ensureGoalsUser(null)
