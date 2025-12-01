@@ -221,6 +221,25 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
   }
 }
 
+// Listen for storage events from other tabs to sync goals
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) {
+      try {
+        const newValue = event.newValue
+        if (!newValue) return
+        const parsed = JSON.parse(newValue)
+        if (Array.isArray(parsed)) {
+          const snapshot = createGoalsSnapshot(parsed)
+          // Dispatch custom event to notify same-tab listeners
+          const customEvent = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: snapshot })
+          window.dispatchEvent(customEvent)
+        }
+      } catch {}
+    }
+  })
+}
+
 export const subscribeToGoalsSnapshot = (
   callback: (snapshot: GoalSnapshot[]) => void,
 ): (() => void) => {

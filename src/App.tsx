@@ -1001,6 +1001,12 @@ function MainApp() {
         if (!newValue || newValue === 'null' || newValue === '') {
           void recheckSession({ skipDebounce: true })
         }
+      } else if (event.key === THEME_STORAGE_KEY) {
+        // Theme changed in another tab
+        const newValue = event.newValue
+        if (newValue === 'light' || newValue === 'dark') {
+          setTheme(newValue)
+        }
       }
     }
 
@@ -1139,6 +1145,11 @@ function MainApp() {
       }
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(THEME_STORAGE_KEY, value)
+        // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
+        try {
+          const event = new CustomEvent('nc-taskwatch:theme-update', { detail: value })
+          window.dispatchEvent(event)
+        } catch {}
       }
     },
     [],

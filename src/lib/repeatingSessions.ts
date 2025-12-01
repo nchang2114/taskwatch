@@ -161,6 +161,11 @@ const writeLocalRules = (rules: RepeatingSessionRule[]) => {
   if (typeof window === 'undefined') return
   try {
     window.localStorage.setItem(REPEATING_RULES_STORAGE_KEY, JSON.stringify(rules))
+    // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
+    try {
+      const event = new CustomEvent('nc-taskwatch:repeating-rules-update', { detail: rules })
+      window.dispatchEvent(event)
+    } catch {}
   } catch {}
 }
 export const storeRepeatingRulesLocal = (rules: RepeatingSessionRule[]): void => {
@@ -178,6 +183,24 @@ const readActivationMap = (): ActivationMap => {
   } catch {
     return {}
   }
+}
+
+// Listen for storage events from other tabs to sync repeating rules
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key === REPEATING_RULES_STORAGE_KEY) {
+      try {
+        const newValue = event.newValue
+        if (!newValue) return
+        const parsed = JSON.parse(newValue)
+        if (Array.isArray(parsed)) {
+          // Dispatch custom event to notify same-tab listeners
+          const customEvent = new CustomEvent('nc-taskwatch:repeating-rules-update', { detail: parsed })
+          window.dispatchEvent(customEvent)
+        }
+      } catch {}
+    }
+  })
 }
 const writeActivationMap = (map: ActivationMap) => {
   if (typeof window === 'undefined') return
