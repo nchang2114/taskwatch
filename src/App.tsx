@@ -997,11 +997,28 @@ function MainApp() {
         // Skip debounce for sign-out events to ensure immediate response
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
+        if (isSignOut) {
+          // Immediately clear profile state on sign-out
+          setUserProfile(null)
+          // Reset to guest mode
+          ensureQuickListUser(null)
+          ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
+          ensureHistoryUser(null)
+          ensureGoalsUser(null)
+          ensureRepeatingRulesUser(null)
+        }
         void recheckSession({ skipDebounce: isSignOut })
       } else if (event.key === AUTH_PROFILE_STORAGE_KEY) {
         // Profile was cleared from another tab (sign-out), update immediately
         const newValue = event.newValue
         if (!newValue || newValue === 'null' || newValue === '') {
+          // Immediately clear profile state and reset to guest
+          setUserProfile(null)
+          ensureQuickListUser(null)
+          ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
+          ensureHistoryUser(null)
+          ensureGoalsUser(null)
+          ensureRepeatingRulesUser(null)
           void recheckSession({ skipDebounce: true })
         }
       } else if (event.key === THEME_STORAGE_KEY) {
