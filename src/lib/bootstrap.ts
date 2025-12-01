@@ -1,5 +1,4 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import { readStoredHistory, pushAllHistoryToSupabase } from './sessionHistory'
 import { readLocalRepeatingRules, pushRepeatingRulesToSupabase } from './repeatingSessions'
 import { readStoredQuickList, type QuickItem } from './quickList'
 import { ensureQuickListRemoteStructures, generateUuid } from './quickListRemote'
@@ -334,8 +333,9 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
  */
 const migrateGuestData = async (): Promise<void> => {
   const rules = readLocalRepeatingRules()
-  const ruleIdMap =
-    rules.length > 0 ? await pushRepeatingRulesToSupabase(rules, { strict: true }) : ({} as Record<string, string>)
+  if (rules.length > 0) {
+    await pushRepeatingRulesToSupabase(rules, { strict: true })
+  }
 
   await migrateGoalsSnapshot()
 
