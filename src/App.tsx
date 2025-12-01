@@ -820,6 +820,12 @@ function MainApp() {
 
     const resetLocalStoresToGuest = (options?: { suppressGoalsSnapshot?: boolean }) => {
       ensureQuickListUser(null)
+      // Clear existing guest life routines data to force defaults on sign-out
+      if (typeof window !== 'undefined' && !options?.suppressGoalsSnapshot) {
+        try {
+          window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+        } catch {}
+      }
       // Don't suppress guest defaults when signing out - user should see guest data
       ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
       ensureHistoryUser(null)

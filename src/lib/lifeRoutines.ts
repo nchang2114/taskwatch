@@ -388,6 +388,10 @@ export const pushLifeRoutinesToSupabase = async (
     id: ensureRoutineId(routine.id),
   }))
 
+  // Store normalized routines with ensured IDs back to local storage
+  // This prevents duplicate pushes with different IDs
+  storeLifeRoutinesLocal(normalized, session.user.id)
+
   const rows = normalized.map((routine, index) => ({
     id: routine.id,
     user_id: session.user.id,
