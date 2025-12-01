@@ -369,10 +369,44 @@ export const ensureRepeatingRulesUser = (userId: string | null): void => {
   if (normalized === REPEATING_RULES_GUEST_USER_ID) {
     writeLocalRules(getSampleRepeatingRules())
   } else {
-    writeLocalRules([])
-    writeActivationMap({})
-    writeEndMap({})
+    // For real users, fetch from database instead of clearing
+    syncRepeatingRulesFromSupabase().catch((err) => {
+      console.error('[repeatingSessions] Failed to sync from DB:', err)
+      // Fallback to empty state on error
+      writeLocalRules([])
+      writeActivationMap({})
+      writeEndMap({})
+    })
   }
+}
+
+export const syncRepeatingRulesFromSupabase = async (): Promise<RepeatingSessionRule[]> => {
+  if (!supabase) {
+    return []
+  }
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) {
+    return []
+  }
+  
+  const { data, error } = await supabase
+    .from('repeating_sessions')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: true })
+  
+  if (error) {
+    console.error('[repeatingSessions] Fetch error:', error)
+    return []
+  }
+  
+  if (!Array.isArray(data)) {
+    return []
+  }
+  
+  const rules = data.map(mapRowToRule).filter(Boolean) as RepeatingSessionRule[]
+  writeLocalRules(rules)
+  return rules
 }
 
 const mapRowToRule = (row: any): RepeatingSessionRule | null => {
@@ -627,6 +661,12 @@ export async function createRepeatingRuleForEntry(
     const act = readActivationMap()
     act[merged.id] = activationMs
     writeActivationMap(act)
+    
+    // Update local cache so other tabs see it via storage events
+    const current = readLocalRepeatingRules()
+    const next = [...current, merged]
+    writeLocalRules(next)
+    
     return merged
   }
   return rule
