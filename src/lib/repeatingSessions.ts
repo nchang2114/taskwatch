@@ -130,10 +130,13 @@ const getSampleRepeatingRules = (): RepeatingSessionRule[] => {
   ]
 }
 
+const storageKeyForUser = (userId: string | null | undefined): string =>
+  `${REPEATING_RULES_STORAGE_KEY}::${normalizeRepeatingRuleUserId(userId)}`
+
 export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
   if (typeof window === 'undefined') return getSampleRepeatingRules()
   try {
-    const raw = window.localStorage.getItem(REPEATING_RULES_STORAGE_KEY)
+    const raw = window.localStorage.getItem(storageKeyForUser(readStoredRepeatingRuleUserId()))
     if (!raw) {
       const sample = getSampleRepeatingRules()
       writeLocalRules(sample)
@@ -160,7 +163,7 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
 const writeLocalRules = (rules: RepeatingSessionRule[]) => {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(REPEATING_RULES_STORAGE_KEY, JSON.stringify(rules))
+    window.localStorage.setItem(storageKeyForUser(readStoredRepeatingRuleUserId()), JSON.stringify(rules))
     // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
     try {
       const event = new CustomEvent('nc-taskwatch:repeating-rules-update', { detail: rules })
