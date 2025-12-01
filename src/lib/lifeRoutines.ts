@@ -238,6 +238,27 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
   return clones
 }
 
+// Set up cross-tab sync via storage events
+if (typeof window !== 'undefined') {
+  const handleStorageChange = (event: StorageEvent) => {
+    // Check if the change is for a life routines key
+    if (event.key && event.key.startsWith(LIFE_ROUTINE_STORAGE_KEY)) {
+      try {
+        const newValue = event.newValue
+        if (newValue) {
+          const routines = JSON.parse(newValue) as LifeRoutineConfig[]
+          // Dispatch custom event so all listeners in this tab get updated
+          window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: routines }))
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }
+  
+  window.addEventListener('storage', handleStorageChange)
+}
+
 const readStoredLifeRoutineUserId = (): string | null => {
   if (typeof window === 'undefined') return null
   try {

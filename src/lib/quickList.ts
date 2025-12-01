@@ -276,3 +276,23 @@ export const subscribeQuickList = (cb: (items: QuickItem[]) => void): (() => voi
   window.addEventListener(QUICK_LIST_UPDATE_EVENT, handler as EventListener)
   return () => window.removeEventListener(QUICK_LIST_UPDATE_EVENT, handler as EventListener)
 }
+
+// Set up cross-tab sync via storage events
+if (typeof window !== 'undefined') {
+  const handleStorageChange = (event: StorageEvent) => {
+    if (event.key === QUICK_LIST_STORAGE_KEY) {
+      try {
+        const newValue = event.newValue
+        if (newValue) {
+          const items = JSON.parse(newValue) as QuickItem[]
+          // Dispatch custom event so all listeners in this tab get updated
+          window.dispatchEvent(new CustomEvent<QuickItem[]>(QUICK_LIST_UPDATE_EVENT, { detail: items }))
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }
+  
+  window.addEventListener('storage', handleStorageChange)
+}
