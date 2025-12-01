@@ -1,5 +1,5 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import { readStoredQuickList, type QuickItem } from './quickList'
+import type { QuickItem } from './quickList'
 import { ensureQuickListRemoteStructures, generateUuid } from './quickListRemote'
 import {
   createTask,
