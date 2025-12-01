@@ -358,7 +358,7 @@ const setStoredRepeatingRuleUserId = (userId: string | null): void => {
 const normalizeRepeatingRuleUserId = (userId: string | null | undefined): string =>
   typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : REPEATING_RULES_GUEST_USER_ID
 
-export const ensureRepeatingRulesUser = (userId: string | null): void => {
+export const ensureRepeatingRulesUser = async (userId: string | null): Promise<void> => {
   if (typeof window === 'undefined') return
   const normalized = normalizeRepeatingRuleUserId(userId)
   const current = readStoredRepeatingRuleUserId()
@@ -369,14 +369,17 @@ export const ensureRepeatingRulesUser = (userId: string | null): void => {
   if (normalized === REPEATING_RULES_GUEST_USER_ID) {
     writeLocalRules(getSampleRepeatingRules())
   } else {
-    // For real users, fetch from database instead of clearing
-    syncRepeatingRulesFromSupabase().catch((err) => {
+    // Clear old data immediately to prevent showing stale guest rules
+    writeLocalRules([])
+    writeActivationMap({})
+    writeEndMap({})
+    
+    // Fetch from database
+    try {
+      await syncRepeatingRulesFromSupabase()
+    } catch (err) {
       console.error('[repeatingSessions] Failed to sync from DB:', err)
-      // Fallback to empty state on error
-      writeLocalRules([])
-      writeActivationMap({})
-      writeEndMap({})
-    })
+    }
   }
 }
 

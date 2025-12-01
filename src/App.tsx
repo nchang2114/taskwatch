@@ -963,7 +963,7 @@ function MainApp() {
             ensureLifeRoutineUser(userId)
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
-            ensureRepeatingRulesUser(userId)
+            await ensureRepeatingRulesUser(userId)
           } else {
             // User already bootstrapped, just fetch from DB
             // Don't reset - just ensure user data is loaded
@@ -971,7 +971,7 @@ function MainApp() {
             ensureLifeRoutineUser(userId)
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
-            ensureRepeatingRulesUser(userId)
+            await ensureRepeatingRulesUser(userId)
           }
         } else {
           // Guest mode - just ensure defaults exist if no data
