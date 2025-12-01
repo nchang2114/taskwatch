@@ -696,22 +696,17 @@ function MainApp() {
           const guestRoutines = window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
           const guestQuickList = window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
           const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot::__guest__')
-          const guestHistory = window.localStorage.getItem('nc-taskwatch-session-history::__guest__')
-          const guestRepeating = window.localStorage.getItem('nc-taskwatch-repeating-rules::__guest__')
+          // Don't snapshot history or repeating rules - they have stale references
           
           console.log('[signup] Snapshotting guest data:', {
             routines: guestRoutines ? JSON.parse(guestRoutines).length : 0,
             quickList: guestQuickList ? JSON.parse(guestQuickList).length : 0,
             goals: guestGoals ? 'exists' : 'none',
-            history: guestHistory ? JSON.parse(guestHistory).length : 0,
-            repeating: guestRepeating ? JSON.parse(guestRepeating).length : 0,
           })
           
           if (guestRoutines) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::life-routines', guestRoutines)
           if (guestQuickList) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::quick-list', guestQuickList)
           if (guestGoals) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::goals', guestGoals)
-          if (guestHistory) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::history', guestHistory)
-          if (guestRepeating) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::repeating', guestRepeating)
         } catch (e) {
           console.warn('[signup] Could not snapshot guest data:', e)
         }

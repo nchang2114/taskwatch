@@ -338,6 +338,16 @@ const migrateGuestData = async (): Promise<void> => {
   // }
 
   await migrateGoalsSnapshot()
+  
+  // CRITICAL: Clear goals snapshot immediately after migration
+  // The snapshot has demo IDs that will cause 400 errors if used
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
+      window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::goals')
+    } catch {}
+  }
 
   // Skip migrating session history - it has stale goal/bucket/task IDs
   // that would need complex remapping. Fresh account = fresh history.
