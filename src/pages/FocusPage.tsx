@@ -4577,6 +4577,14 @@ useEffect(() => {
     })
   }
 
+  const handleSelectorContainerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest('button')) {
+      return
+    }
+    handleToggleSelector()
+  }
+
   const cycleFocusDifficulty = useCallback(() => {
     if (!canCycleFocusDifficulty || !effectiveGoalId || !effectiveBucketId || !effectiveTaskId) {
       return
@@ -5735,6 +5743,7 @@ useEffect(() => {
                   .join(' ')}
                 style={focusInlineStyle}
                 ref={focusTaskContainerRef}
+                onClick={handleSelectorContainerClick}
               >
                 <button
                   type="button"
@@ -6390,6 +6399,7 @@ useEffect(() => {
             .filter(Boolean)
             .join(' ')}
           ref={focusTaskContainerRef}
+          onClick={handleSelectorContainerClick}
         >
           <button
             type="button"

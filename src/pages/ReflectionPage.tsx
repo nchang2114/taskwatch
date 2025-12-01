@@ -3512,7 +3512,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     return result.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   }, [lifeRoutineTasks])
 
-  // Snapback trigger options (as bucket names under the Snapback goal)
   const snapbackTriggerOptions = useMemo(() => {
     const titles = new Set<string>()
     const prefix = 'Snapback • '
@@ -3524,7 +3523,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       if (rest.includes(' - ')) return rest.split(' - ').slice(1).join(' - ').trim()
       return null
     }
-    // Map base_key -> alias from DB
     const aliasByBase = new Map<string, string>()
     snapDbRows.forEach((row) => {
       if (row.base_key && !row.base_key.startsWith('custom:')) {
@@ -3532,7 +3530,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         if (alias) aliasByBase.set(row.base_key, alias)
       }
     })
-    // Add history-derived reasons, applying alias from DB when present
     history.forEach((entry) => {
       const reason = parseReason(entry.taskName)
       if (!reason) return
@@ -3540,7 +3537,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       const label = aliasByBase.get(key) || reason.slice(0, 120)
       if (label) titles.add(label)
     })
-    // Include user-defined triggers stored in DB (custom: rows)
     snapDbRows.forEach((row) => {
       if (row.base_key && row.base_key.startsWith('custom:')) {
         const label = (row.trigger_name ?? '').trim()
@@ -3942,9 +3938,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (lifeRoutineBucketOptions.length > 0) {
       map.set(LIFE_ROUTINES_NAME, lifeRoutineBucketOptions)
     }
-    if (snapbackTriggerOptions.length > 0) {
-      map.set(SNAPBACK_NAME, snapbackTriggerOptions)
-    }
+    map.set(SNAPBACK_NAME, snapbackTriggerOptions)
     return map
   }, [goalsSnapshot, lifeRoutineBucketOptions, snapbackTriggerOptions])
 
@@ -4123,11 +4117,14 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
 
   const trimmedDraftGoal = historyDraft.goalName.trim()
   const trimmedDraftBucket = historyDraft.bucketName.trim()
+  const isSnapbackGoalSelected = trimmedDraftGoal.toLowerCase() === SNAPBACK_NAME.toLowerCase()
 
   const availableBucketOptions = useMemo(() => {
+    const normalizedGoal = trimmedDraftGoal.toLowerCase()
     if (trimmedDraftGoal.length > 0) {
       const match = bucketOptionsByGoal.get(trimmedDraftGoal)
-      if (match && match.length > 0) {
+      const isSnapback = normalizedGoal === SNAPBACK_NAME.toLowerCase()
+      if (match && (match.length > 0 || isSnapback)) {
         return match
       }
     }
@@ -4225,12 +4222,26 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [lifeRoutineBucketOptions, resolvedGoalOptions])
 
   const bucketDropdownOptions = useMemo<HistoryDropdownOption[]>(
-    () => [
-      { value: '', label: 'No bucket' },
-      ...resolvedBucketOptions.map((option) => ({ value: option, label: option })),
-    ],
-    [resolvedBucketOptions],
+    () => {
+      const emptyLabel =
+        isSnapbackGoalSelected && snapbackTriggerOptions.length === 0 ? 'No triggers yet' : 'No bucket'
+      return [
+        { value: '', label: emptyLabel },
+        ...resolvedBucketOptions.map((option) => ({ value: option, label: option })),
+      ]
+    },
+    [resolvedBucketOptions, isSnapbackGoalSelected, snapbackTriggerOptions.length],
   )
+
+  const bucketDropdownPlaceholder = useMemo(() => {
+    if (isSnapbackGoalSelected && snapbackTriggerOptions.length === 0) {
+      return 'No triggers yet'
+    }
+    return availableBucketOptions.length > 0 ? 'Select bucket' : 'No buckets available'
+  }, [isSnapbackGoalSelected, availableBucketOptions.length, snapbackTriggerOptions.length])
+  const bucketDropdownDisabled = useMemo(() => {
+    return !isSnapbackGoalSelected && availableBucketOptions.length === 0
+  }, [isSnapbackGoalSelected, availableBucketOptions.length])
 
   const historyWithTaskNotes = useMemo(() => {
     if (editorOpenRef.current) {
@@ -11008,10 +11019,10 @@ useEffect(() => {
                                 id={bucketDropdownId}
                                 labelId={bucketDropdownLabelId}
                                 value={historyDraft.bucketName}
-                                placeholder={availableBucketOptions.length ? 'Select bucket' : 'No buckets available'}
+                                placeholder={bucketDropdownPlaceholder}
                                 options={bucketDropdownOptions}
                                 onChange={handleBucketDropdownChange}
-                                disabled={availableBucketOptions.length === 0}
+                                disabled={bucketDropdownDisabled}
                               />
                             </div>
                             <div className="history-timeline__field">
@@ -11727,10 +11738,10 @@ useEffect(() => {
                       id={bucketDropdownId}
                       labelId={bucketDropdownLabelId}
                       value={historyDraft.bucketName}
-                      placeholder={availableBucketOptions.length ? 'Select bucket' : 'No buckets available'}
+                      placeholder={bucketDropdownPlaceholder}
                       options={bucketDropdownOptions}
                       onChange={handleBucketDropdownChange}
-                      disabled={availableBucketOptions.length === 0}
+                      disabled={bucketDropdownDisabled}
                     />
                   </div>
                   <div className="history-timeline__field">
@@ -11896,10 +11907,10 @@ useEffect(() => {
                     id={bucketDropdownId}
                     labelId={bucketDropdownLabelId}
                     value={historyDraft.bucketName}
-                    placeholder={availableBucketOptions.length ? 'Select bucket' : 'No buckets available'}
+                    placeholder={bucketDropdownPlaceholder}
                     options={bucketDropdownOptions}
                     onChange={handleBucketDropdownChange}
-                    disabled={availableBucketOptions.length === 0}
+                    disabled={bucketDropdownDisabled}
                   />
                 </div>
               </div>
@@ -12832,10 +12843,10 @@ useEffect(() => {
                                 id={bucketDropdownId}
                                 labelId={bucketDropdownLabelId}
                                 value={historyDraft.bucketName}
-                                placeholder={availableBucketOptions.length ? 'Select bucket' : 'No buckets available'}
+                                placeholder={bucketDropdownPlaceholder}
                                 options={bucketDropdownOptions}
                                 onChange={handleBucketDropdownChange}
-                                disabled={availableBucketOptions.length === 0}
+                                disabled={bucketDropdownDisabled}
                               />
                             </div>
                             <div className="history-timeline__field">
