@@ -836,6 +836,27 @@ function MainApp() {
     // Track pending alignment operations to prevent race conditions across tabs
     const ALIGN_LOCK_KEY = 'nc-taskwatch-align-lock'
     const ALIGN_LOCK_TTL_MS = 10000 // 10 seconds
+    const ALIGN_COMPLETE_KEY = 'nc-taskwatch-align-complete'
+
+    const isAlignmentComplete = (userId: string): boolean => {
+      if (typeof window === 'undefined') return false
+      try {
+        const raw = window.localStorage.getItem(ALIGN_COMPLETE_KEY)
+        if (!raw) return false
+        const parsed = JSON.parse(raw) as { userId: string; timestamp: number }
+        // Check if alignment was completed for this user in the last 30 seconds
+        return parsed.userId === userId && Date.now() - parsed.timestamp < 30000
+      } catch {
+        return false
+      }
+    }
+
+    const markAlignmentComplete = (userId: string): void => {
+      if (typeof window === 'undefined') return
+      try {
+        window.localStorage.setItem(ALIGN_COMPLETE_KEY, JSON.stringify({ userId, timestamp: Date.now() }))
+      } catch {}
+    }
 
     const acquireAlignLock = (userId: string): boolean => {
       if (typeof window === 'undefined') return true
@@ -882,11 +903,15 @@ function MainApp() {
         return
       }
 
+      // Check if alignment was already completed by another tab
+      if (userId && isAlignmentComplete(userId)) {
+        lastAlignedUserIdRef.current = userId
+        return
+      }
+
       // Acquire lock to prevent multiple tabs from aligning simultaneously
       if (userId && !acquireAlignLock(userId)) {
-        // Another tab is handling alignment, wait briefly then just update local tracking
-        // Wait for the other tab to complete migration/sync before updating our state
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        // Another tab is handling alignment, just update local tracking and wait
         lastAlignedUserIdRef.current = userId
         return
       }
@@ -913,6 +938,11 @@ function MainApp() {
           // If migrated=true, skip ensure calls - bootstrap already set up everything
         } else {
           resetLocalStoresToGuest()
+        }
+        
+        // Mark alignment as complete so other tabs don't retry
+        if (userId) {
+          markAlignmentComplete(userId)
         }
         
         lastAlignedUserIdRef.current = userId

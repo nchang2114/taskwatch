@@ -333,7 +333,13 @@ const migrateGuestData = async (): Promise<void> => {
     await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
   }
 
-  const routines = readStoredLifeRoutines()
+  // Read guest life routines explicitly from guest storage key
+  const guestRoutinesRaw = typeof window !== 'undefined' 
+    ? window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
+    : null
+  const guestRoutines = guestRoutinesRaw ? JSON.parse(guestRoutinesRaw) : []
+  const routines = Array.isArray(guestRoutines) && guestRoutines.length > 0 ? guestRoutines : readStoredLifeRoutines()
+  
   if (routines.length > 0) {
     await pushLifeRoutinesToSupabase(routines, { strict: true })
   }
