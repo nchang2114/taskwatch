@@ -1010,14 +1010,23 @@ function MainApp() {
       }
     }
 
-    // Validate session when tab regains focus
+    // Validate session when tab regains focus or becomes visible
     const handleFocus = () => {
-      void recheckSession()
+      void recheckSession({ skipDebounce: true })
+    }
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void recheckSession({ skipDebounce: true })
+      }
     }
 
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', handleStorageChange)
       window.addEventListener('focus', handleFocus)
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+      }
     }
 
     return () => {
@@ -1026,6 +1035,9 @@ function MainApp() {
       if (typeof window !== 'undefined') {
         window.removeEventListener('storage', handleStorageChange)
         window.removeEventListener('focus', handleFocus)
+        if (typeof document !== 'undefined') {
+          document.removeEventListener('visibilitychange', handleVisibilityChange)
+        }
       }
     }
   }, [])
