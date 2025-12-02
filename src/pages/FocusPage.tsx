@@ -24,7 +24,7 @@ import {
 } from '../lib/goalsApi'
 // Repeating rules fetch not needed for selector coloring; omit imports to avoid unused warnings
 // import { readRepeatingExceptions } from '../lib/repeatingExceptions'
-import { FOCUS_EVENT_TYPE, type FocusBroadcastDetail, type FocusBroadcastEvent } from '../lib/focusChannel'
+import { FOCUS_EVENT_TYPE, PAUSE_FOCUS_EVENT_TYPE, type FocusBroadcastDetail, type FocusBroadcastEvent } from '../lib/focusChannel'
 import {
   createGoalsSnapshot,
   publishGoalsSnapshot,
@@ -5764,6 +5764,49 @@ useEffect(() => {
       window.removeEventListener(FOCUS_EVENT_TYPE, handleFocusBroadcast as EventListener)
     }
   }, [elapsed, normalizedCurrentTask, registerNewHistoryEntry, scrollFocusToTop, updateNotebookForKey, isRunning, sessionStart])
+
+  // Listen for pause focus events from other pages (e.g., ReflectionPage)
+  useEffect(() => {
+    const handlePauseFocus = () => {
+      if (isRunning && sessionStart !== null) {
+        const now = Date.now()
+        const currentElapsed = now - sessionStart
+        const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
+
+        // Log the session progress to history (same as regular pause)
+        if (delta > 0) {
+          const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+          const sessionMeta = sessionMetadataRef.current
+          const preservedMeta = { ...sessionMeta }
+
+          registerNewHistoryEntry(delta, entryName, {
+            goalId: sessionMeta.goalId,
+            bucketId: sessionMeta.bucketId,
+            taskId: sessionMeta.taskId,
+            sessionKey: currentSessionKeyRef.current,
+            goalName: sessionMeta.goalName,
+            bucketName: sessionMeta.bucketName,
+            repeatingRuleId: sessionMeta.repeatingRuleId,
+            repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
+            repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
+            startedAt: now - delta,
+          })
+
+          sessionMetadataRef.current = preservedMeta
+          lastLoggedSessionKeyRef.current = null
+        }
+
+        setIsRunning(false)
+        setElapsed(currentElapsed)
+        setSessionStart(null)
+        lastCommittedElapsedRef.current = currentElapsed
+      }
+    }
+    window.addEventListener(PAUSE_FOCUS_EVENT_TYPE, handlePauseFocus)
+    return () => {
+      window.removeEventListener(PAUSE_FOCUS_EVENT_TYPE, handlePauseFocus)
+    }
+  }, [isRunning, sessionStart, normalizedCurrentTask, registerNewHistoryEntry])
 
   const formattedTime = useMemo(() => formatTime(elapsed), [elapsed])
   const formattedClock = useMemo(() => formatClockTime(currentTime), [currentTime])

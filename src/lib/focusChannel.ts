@@ -1,6 +1,7 @@
 import type { SurfaceStyle } from './surfaceStyles'
 
 export const FOCUS_EVENT_TYPE = 'nc-taskwatch:set-focus'
+export const PAUSE_FOCUS_EVENT_TYPE = 'nc-taskwatch:pause-focus'
 
 export type FocusBroadcastSubtaskDetail = {
   id: string
@@ -35,4 +36,11 @@ export const broadcastFocusTask = (detail: FocusBroadcastDetail) => {
     return
   }
   window.dispatchEvent(new CustomEvent<FocusBroadcastDetail>(FOCUS_EVENT_TYPE, { detail }))
+}
+
+export const broadcastPauseFocus = () => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(new CustomEvent(PAUSE_FOCUS_EVENT_TYPE))
 }

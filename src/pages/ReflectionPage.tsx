@@ -25,6 +25,7 @@ import './FocusPage.css'
 import './GoalsPage.css'
 import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, type GoalSnapshot } from '../lib/goalsSync'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
+import { broadcastPauseFocus } from '../lib/focusChannel'
 import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket, updateTaskNotes as apiUpdateTaskNotes } from '../lib/goalsApi'
 import {
   DEFAULT_SURFACE_STYLE,
@@ -10207,6 +10208,12 @@ useEffect(() => {
       <path d="M18 6L6 18M6 6l12 12"/>
     </svg>
   )
+  const IconPause = () => (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </svg>
+  )
 
   // Render the popover outside the heavy calendar grid to avoid re-running grid computations on open/close
   const renderCalendarPopover = useCallback(() => {
@@ -10430,6 +10437,8 @@ useEffect(() => {
     const subtasksSummary = subtaskCount > 0 ? `${completedSubtasks}/${subtaskCount} subtasks` : 'No subtasks'
     const notesSummary = hasNotes ? 'Notes added' : 'No notes'
           const isGuide = entry.id.startsWith('repeat:')
+    const isActiveSessionEntry = entry.id === 'active-session'
+    const isActiveRunning = isActiveSessionEntry && activeSession?.isRunning
   const nowTs = Date.now()
   const isPlanned = Boolean((entry as any).futureSession)
   const isPastPlanned = isPlanned && entry.startedAt <= nowTs
@@ -10831,11 +10840,26 @@ useEffect(() => {
                 </button>
               </div>
             ) : null}
+            {isActiveRunning ? (
+              <div className="calendar-popover__cta-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                <button
+                  type="button"
+                  className="history-timeline__action-button history-timeline__action-button--primary"
+                  onClick={() => {
+                    broadcastPauseFocus()
+                    handleCloseCalendarPreview()
+                  }}
+                >
+                  Stop Focus
+                </button>
+              </div>
+            ) : null}
         </div>
       </div>,
       document.body,
     )
   }, [
+    activeSession,
     calendarPreview,
     calendarPopoverEditing,
     effectiveHistory,
