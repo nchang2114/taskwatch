@@ -6642,7 +6642,7 @@ useEffect(() => {
 
   // Compute last time the selected Snapback trigger was recorded (across all time)
   const selectedTriggerLastAtLabel = useMemo(() => {
-    if (!deferredSelectedItem) return 'Never'
+    if (!deferredSelectedItem) return { full: 'Never', short: 'Never' }
     const baseKey = deferredSelectedItem.id.startsWith('snap-') ? deferredSelectedItem.id.slice(5) : deferredSelectedItem.id
     // Build alias -> base_key map from DB so we interpret historical aliases consistently
     const aliasToBase = new Map<string, string>()
@@ -6693,18 +6693,18 @@ useEffect(() => {
         if (lastAt === null || when > lastAt) lastAt = when
       }
     }
-    if (!lastAt) return 'Never'
+    if (!lastAt) return { full: 'Never', short: 'Never' }
     const now = Date.now()
     const diff = Math.max(0, now - lastAt)
     const days = Math.floor(diff / (24 * 60 * 60 * 1000))
-    if (days <= 0) return 'Today'
-    if (days < 7) return days === 1 ? '1 day ago' : `${days} days ago`
+    if (days <= 0) return { full: 'Today', short: 'Today' }
+    if (days < 7) return days === 1 ? { full: '1 day ago', short: '1D ago' } : { full: `${days} days ago`, short: `${days}D ago` }
     const weeks = Math.floor(days / 7)
-    if (weeks < 8) return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`
+    if (weeks < 8) return weeks === 1 ? { full: '1 week ago', short: '1W ago' } : { full: `${weeks} weeks ago`, short: `${weeks}W ago` }
     const months = Math.floor(days / 30)
-    if (months < 24) return months === 1 ? '1 month ago' : `${months} months ago`
+    if (months < 24) return months === 1 ? { full: '1 month ago', short: '1M ago' } : { full: `${months} months ago`, short: `${months}M ago` }
     const years = Math.floor(days / 365)
-    return years === 1 ? '1 year ago' : `${years} years ago`
+    return years === 1 ? { full: '1 year ago', short: '1Y ago' } : { full: `${years} years ago`, short: `${years}Y ago` }
   }, [deferredSelectedItem, effectiveHistory, snapDbRows])
   const selectedPlan = useMemo(() => {
     if (!selectedItem) return { cue: '', deconstruction: '', plan: '' }
@@ -13708,7 +13708,10 @@ useEffect(() => {
                 ) : null}
                 {/* privacy note removed per request */}
               </div>
-              <div className="snapback-drawer__badge">Last recorded: {selectedTriggerLastAtLabel}</div>
+              <div className="snapback-drawer__badge">
+                <span className="snapback-drawer__badge-full">Last recorded: {selectedTriggerLastAtLabel.full}</span>
+                <span className="snapback-drawer__badge-short">Last: {selectedTriggerLastAtLabel.short}</span>
+              </div>
             </div>
             {selectedItem ? (
               <SnapbackPlanForm
