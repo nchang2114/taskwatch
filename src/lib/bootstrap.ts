@@ -15,6 +15,7 @@ import { pushLifeRoutinesToSupabase, type LifeRoutineConfig } from './lifeRoutin
 import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
+import { bulkInsertSnapbackTriggers, type SnapbackTriggerPayload } from './snapbackApi'
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
 const BOOTSTRAP_LOCK_TTL_MS = 2 * 60 * 1000
@@ -432,6 +433,89 @@ const migrateGuestData = async (): Promise<void> => {
     await uploadQuickListItems(quickItems)
   }
   
+  // Migrate Snapback triggers and plans
+  const LOCAL_TRIGGERS_KEY = 'nc-taskwatch-local-snapback-triggers'
+  const LOCAL_PLANS_KEY = 'nc-taskwatch-local-snap-plans'
+  
+  type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
+  type LocalPlan = { cue: string; deconstruction: string; plan: string }
+  
+  let localTriggers: LocalTrigger[] = []
+  let localPlans: Record<string, LocalPlan> = {}
+  
+  // Read local triggers (custom triggers created by guest)
+  const triggersRaw = typeof window !== 'undefined' ? window.localStorage.getItem(LOCAL_TRIGGERS_KEY) : null
+  if (triggersRaw) {
+    try {
+      const parsed = JSON.parse(triggersRaw)
+      if (Array.isArray(parsed)) {
+        localTriggers = parsed
+        console.log('[bootstrap] Found', localTriggers.length, 'local snapback triggers')
+      }
+    } catch (e) {
+      console.warn('[bootstrap] Could not parse local snapback triggers:', e)
+    }
+  }
+  
+  // Read local plans (plans for history-derived triggers like Doomscrolling)
+  const plansRaw = typeof window !== 'undefined' ? window.localStorage.getItem(LOCAL_PLANS_KEY) : null
+  if (plansRaw) {
+    try {
+      const parsed = JSON.parse(plansRaw)
+      if (parsed && typeof parsed === 'object') {
+        localPlans = parsed
+        console.log('[bootstrap] Found local snapback plans for', Object.keys(localPlans).length, 'triggers')
+      }
+    } catch (e) {
+      console.warn('[bootstrap] Could not parse local snapback plans:', e)
+    }
+  }
+  
+  // Build list of triggers to migrate
+  const triggersToMigrate: SnapbackTriggerPayload[] = []
+  
+  // Add custom triggers from localTriggers
+  localTriggers.forEach((lt) => {
+    const label = lt.label?.trim()
+    if (label) {
+      triggersToMigrate.push({
+        trigger_name: label,
+        cue_text: lt.cue ?? '',
+        deconstruction_text: lt.deconstruction ?? '',
+        plan_text: lt.plan ?? '',
+      })
+    }
+  })
+  
+  // Add triggers from localPlans (these are history-derived triggers with edited plans)
+  // The key format is "trigger-{triggerName}" or just the trigger name
+  Object.entries(localPlans).forEach(([key, plan]) => {
+    const triggerName = key.startsWith('trigger-') ? key.slice(8) : key
+    if (triggerName && !triggersToMigrate.some((t) => t.trigger_name.toLowerCase() === triggerName.toLowerCase())) {
+      triggersToMigrate.push({
+        trigger_name: triggerName,
+        cue_text: plan.cue ?? '',
+        deconstruction_text: plan.deconstruction ?? '',
+        plan_text: plan.plan ?? '',
+      })
+    }
+  })
+  
+  // Also ensure "Doomscrolling" default trigger exists (from sample history)
+  if (!triggersToMigrate.some((t) => t.trigger_name.toLowerCase() === 'doomscrolling')) {
+    triggersToMigrate.push({
+      trigger_name: 'Doomscrolling',
+      cue_text: '',
+      deconstruction_text: '',
+      plan_text: '',
+    })
+  }
+  
+  if (triggersToMigrate.length > 0) {
+    console.log('[bootstrap] Migrating', triggersToMigrate.length, 'snapback triggers to DB')
+    await bulkInsertSnapbackTriggers(triggersToMigrate)
+  }
+  
   // Clear all guest data after successful migration
   // This ensures sign-out will show fresh defaults
   if (typeof window !== 'undefined') {
@@ -441,6 +525,9 @@ const migrateGuestData = async (): Promise<void> => {
       window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
       window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
       window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
+      // Clear snapback guest data
+      window.localStorage.removeItem(LOCAL_TRIGGERS_KEY)
+      window.localStorage.removeItem(LOCAL_PLANS_KEY)
     } catch {}
   }
 }

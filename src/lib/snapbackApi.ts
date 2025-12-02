@@ -165,3 +165,59 @@ export async function deleteSnapbackRowById(id: string): Promise<boolean> {
   }
   return true
 }
+
+export type SnapbackTriggerPayload = {
+  trigger_name: string
+  cue_text?: string
+  deconstruction_text?: string
+  plan_text?: string
+}
+
+/**
+ * Bulk insert multiple snapback triggers (used during bootstrap migration).
+ * Skips duplicates based on trigger_name.
+ */
+export async function bulkInsertSnapbackTriggers(
+  triggers: SnapbackTriggerPayload[]
+): Promise<DbSnapbackOverview[]> {
+  if (!supabase || triggers.length === 0) return []
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) return []
+  
+  const userId = session.user.id
+  
+  // Check for existing triggers to avoid duplicates
+  const { data: existing } = await supabase
+    .from('snapback_overview')
+    .select('trigger_name')
+    .eq('user_id', userId)
+  
+  const existingNames = new Set((existing ?? []).map((r) => r.trigger_name?.toLowerCase()))
+  
+  const newTriggers = triggers.filter(
+    (t) => t.trigger_name && !existingNames.has(t.trigger_name.toLowerCase())
+  )
+  
+  if (newTriggers.length === 0) return []
+  
+  const rows = newTriggers.map((t) => ({
+    user_id: userId,
+    trigger_name: t.trigger_name.trim(),
+    cue_text: t.cue_text ?? '',
+    deconstruction_text: t.deconstruction_text ?? '',
+    plan_text: t.plan_text ?? '',
+  }))
+  
+  const { data, error } = await supabase
+    .from('snapback_overview')
+    .insert(rows)
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+  
+  if (error) {
+    console.error('[snapbackApi] bulkInsertSnapbackTriggers error:', error)
+    return []
+  }
+  
+  console.log('[snapbackApi] Bulk inserted', data?.length ?? 0, 'snapback triggers')
+  return Array.isArray(data) ? (data as DbSnapbackOverview[]) : []
+}

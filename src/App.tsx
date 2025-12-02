@@ -1211,6 +1211,10 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
         
+        // Clear snapback guest data
+        window.localStorage.removeItem('nc-taskwatch-local-snapback-triggers')
+        window.localStorage.removeItem('nc-taskwatch-local-snap-plans')
+        
         // Clear non-suffixed data keys (goals, tasks, history, etc.)
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
         window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
