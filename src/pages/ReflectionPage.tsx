@@ -4729,10 +4729,20 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         const name = historyDraft.taskName.trim()
         if (name.length === 0) return
         ;(async () => {
+          // Check for existing plan data under history-derived ID
+          const historyDerivedId = `trigger-${name}`
+          const existingPlan = snapPlansRef.current[historyDerivedId] ?? localSnapPlansRef.current[historyDerivedId]
+          
           if (isGuestUser) {
-            // Guest user: create local trigger
+            // Guest user: create local trigger with existing plan data if available
             const newId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-            const newTrigger: LocalTrigger = { id: newId, label: name, cue: '', deconstruction: '', plan: '' }
+            const newTrigger: LocalTrigger = { 
+              id: newId, 
+              label: name, 
+              cue: existingPlan?.cue ?? '', 
+              deconstruction: existingPlan?.deconstruction ?? '', 
+              plan: existingPlan?.plan ?? '' 
+            }
             setLocalTriggers((cur) => [...cur, newTrigger])
             // Set the bucket to the new trigger name
             updateHistoryDraftField('bucketName', name)
@@ -4740,7 +4750,21 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
             // Authenticated user: create via API
             const row = await apiCreateSnapbackTrigger(name)
             if (row) {
-              setSnapDbRows((cur) => [...cur, row])
+              // If there was existing plan data, update the new row
+              if (existingPlan && (existingPlan.cue || existingPlan.deconstruction || existingPlan.plan)) {
+                const updated = await apiUpsertSnapbackPlanById(row.id, {
+                  cue_text: existingPlan.cue,
+                  deconstruction_text: existingPlan.deconstruction,
+                  plan_text: existingPlan.plan,
+                })
+                if (updated) {
+                  setSnapDbRows((cur) => [...cur, updated])
+                } else {
+                  setSnapDbRows((cur) => [...cur, row])
+                }
+              } else {
+                setSnapDbRows((cur) => [...cur, row])
+              }
               broadcastSnapbackUpdate()
               // Set the bucket to the new trigger name
               updateHistoryDraftField('bucketName', name)
@@ -6068,10 +6092,11 @@ useEffect(() => {
       .map(([triggerName, info]) => ({ triggerName, count: info.count, label: info.label, durationMs: info.durationMs }))
       .sort((a, b) => (b.count === a.count ? b.durationMs - a.durationMs : b.count - a.count))
 
-    // Match to DB rows to get the ID, or use trigger- prefix for history-derived triggers
+    // Match to DB rows or local triggers to get the ID, or use trigger- prefix for history-derived triggers
     const legend = items.map((item) => {
-      const dbRow = snapDbRows.find((r) => r.trigger_name === item.triggerName)
-      const id = dbRow?.id ?? `trigger-${item.triggerName}`
+      const dbRow = snapDbRows.find((r) => r.trigger_name.toLowerCase() === item.triggerName.toLowerCase())
+      const localTrigger = localTriggers.find((lt) => lt.label.toLowerCase() === item.triggerName.toLowerCase())
+      const id = dbRow?.id ?? localTrigger?.id ?? `trigger-${item.triggerName}`
       const color = getPaletteColorForLabel(item.label)
       return { id, label: item.label, count: item.count, durationMs: item.durationMs, swatch: color }
     })
@@ -6079,7 +6104,7 @@ useEffect(() => {
     const total = items.reduce((sum, it) => sum + it.count, 0)
     const maxDurationMs = legend.reduce((max, it) => Math.max(max, it.durationMs), 0)
     return { legend, total, windowMs, maxDurationMs }
-  }, [effectiveHistory, snapActiveRange, snapDbRows])
+  }, [effectiveHistory, snapActiveRange, snapDbRows, localTriggers])
 
   // Auto-create DB rows for orphaned triggers (history has sessions but no DB row)
   const autoCreatedTriggersRef = useRef<Set<string>>(new Set())
@@ -6094,12 +6119,37 @@ useEffect(() => {
       for (const item of orphanedItems) {
         try {
           autoCreatedTriggersRef.current.add(item.label)
+          
+          // Check for existing plan data under the history-derived ID
+          const historyDerivedId = `trigger-${item.label}`
+          const existingPlan = snapPlansRef.current[historyDerivedId] ?? localSnapPlansRef.current[historyDerivedId]
+          
           const row = await apiGetOrCreateTrigger(item.label)
           if (row) {
-            setSnapDbRows((prev) => {
-              if (prev.some((r) => r.id === row.id)) return prev
-              return [...prev, row]
-            })
+            // If there was existing plan data, update the new row with it
+            if (existingPlan && (existingPlan.cue || existingPlan.deconstruction || existingPlan.plan)) {
+              const updated = await apiUpsertSnapbackPlanById(row.id, {
+                cue_text: existingPlan.cue,
+                deconstruction_text: existingPlan.deconstruction,
+                plan_text: existingPlan.plan,
+              })
+              if (updated) {
+                setSnapDbRows((prev) => {
+                  if (prev.some((r) => r.id === updated.id)) return prev
+                  return [...prev, updated]
+                })
+              } else {
+                setSnapDbRows((prev) => {
+                  if (prev.some((r) => r.id === row.id)) return prev
+                  return [...prev, row]
+                })
+              }
+            } else {
+              setSnapDbRows((prev) => {
+                if (prev.some((r) => r.id === row.id)) return prev
+                return [...prev, row]
+              })
+            }
             broadcastSnapbackUpdate()
           }
         } catch (err) {
@@ -6265,6 +6315,10 @@ useEffect(() => {
     } catch {}
     return {}
   })
+  // Ref to access localSnapPlans in callbacks without stale closures
+  const localSnapPlansRef = useRef<Record<string, { cue: string; deconstruction: string; plan: string }>>({})
+  useEffect(() => { localSnapPlansRef.current = localSnapPlans }, [localSnapPlans])
+  
   // Persist local plans to localStorage and broadcast for cross-tab sync
   useEffect(() => {
     try {
