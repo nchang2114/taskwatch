@@ -2482,15 +2482,17 @@ useEffect(() => {
     if (!focusSource) {
       return null
     }
+    // Search both goals candidates and quick list candidates
+    const allCandidates = [...focusCandidates, ...quickListFocusCandidates]
     if (focusSource.taskId) {
-      const byId = focusCandidates.find((candidate) => candidate.taskId === focusSource.taskId)
+      const byId = allCandidates.find((candidate) => candidate.taskId === focusSource.taskId)
       if (byId) {
         return byId
       }
     }
     if (focusSource.goalId && focusSource.bucketId) {
       const lower = normalizedCurrentTask.toLocaleLowerCase()
-      const byMatch = focusCandidates.find(
+      const byMatch = allCandidates.find(
         (candidate) =>
           candidate.goalId === focusSource.goalId &&
           candidate.bucketId === focusSource.bucketId &&
@@ -2501,7 +2503,7 @@ useEffect(() => {
       }
     }
     return null
-  }, [focusCandidates, focusSource, normalizedCurrentTask])
+  }, [focusCandidates, focusSource, normalizedCurrentTask, quickListFocusCandidates])
 
   const currentSessionMeta = sessionMetadataRef.current
   const sessionGoalName =
