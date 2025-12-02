@@ -1110,7 +1110,8 @@ export const ensureHistoryUser = (userId: string | null): void => {
     return
   }
   setStoredHistoryUserId(normalized)
-  try { window.dispatchEvent(new Event(HISTORY_USER_EVENT)) } catch {}
+  // Note: HISTORY_USER_EVENT is already dispatched inside setStoredHistoryUserId,
+  // so we don't dispatch it again here to avoid double-bumping the signal
   if (normalized === HISTORY_GUEST_USER_ID) {
     if (current !== HISTORY_GUEST_USER_ID) {
       const samples = createSampleHistoryRecords()
