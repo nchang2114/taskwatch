@@ -1201,7 +1201,7 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-quick-list-user') // Alternative key
         window.localStorage.removeItem('nc-taskwatch-history-user') // Correct key for history user
         window.localStorage.removeItem('nc-taskwatch-goals-user-id')
-        window.localStorage.removeItem('nc-taskwatch-repeating-rules-user-id')
+        window.localStorage.removeItem('nc-taskwatch-repeating-user') // Correct key for repeating rules user
         
         // Clear guest keys (both old and new format)
         window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
@@ -1238,7 +1238,8 @@ function MainApp() {
           const key = window.localStorage.key(i)
           if (key && (
             (key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') ||
-            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__')
+            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__') ||
+            (key.startsWith('nc-taskwatch-repeating-rules::') && key !== 'nc-taskwatch-repeating-rules::__guest__')
           )) {
             keysToRemove.push(key)
           }
