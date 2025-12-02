@@ -5316,6 +5316,24 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         return current
       }
       const next = [...current]
+      // Only evaluate futureSession changes if the time was actually modified
+      const timeChanged = nextStartedAt !== target.startedAt
+      const computedFutureSession = (() => {
+        // Newly created sessions always stay as future until explicitly confirmed
+        if (pendingNewHistoryId && target.id === pendingNewHistoryId) {
+          return true
+        }
+        // If time wasn't changed, preserve current state
+        if (!timeChanged) {
+          return target.futureSession
+        }
+        // If moved to future: become future/planned
+        if (nextStartedAt > Date.now()) {
+          return true
+        }
+        // If moved to past: future sessions auto-confirm, confirmed sessions stay confirmed
+        return target.futureSession ? false : target.futureSession
+      })()
       next[index] = {
         ...target,
         taskName: nextTaskName,
@@ -5328,17 +5346,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         bucketSurface: resolvedBucketSurface,
         notes: nextNotes,
         subtasks: nextSubtasks,
-        // Newly created sessions always stay as future sessions until explicitly confirmed.
-        // For existing sessions: future sessions auto-confirm when moved to past;
-        // confirmed sessions become future when moved to future.
-        futureSession:
-          pendingNewHistoryId && target.id === pendingNewHistoryId
-            ? true
-            : nextStartedAt > Date.now()
-              ? true
-              : target.futureSession
-                ? false
-                : false,
+        futureSession: computedFutureSession,
         goalId:
           normalizedGoalName.length > 0
             ? goalIdLookup.get(normalizedGoalName.toLowerCase()) ?? target.goalId ?? null
@@ -9049,8 +9057,9 @@ useEffect(() => {
                 const next = [...current]
                 const nowTs = Date.now()
                 // Newly created sessions always stay as future sessions until explicitly confirmed.
-                // For existing sessions: future sessions auto-confirm when moved to past;
-                // confirmed sessions become future when moved to future.
+                // For existing sessions:
+                // - If moved to future: become future/planned
+                // - If moved to past: future sessions auto-confirm, confirmed sessions stay confirmed
                 const isFuture =
                   pendingNewHistoryId && target.id === pendingNewHistoryId
                     ? true
@@ -9058,7 +9067,7 @@ useEffect(() => {
                       ? true
                       : target.futureSession
                         ? false
-                        : false
+                        : target.futureSession
                 next[idx] = {
                   ...target,
                   startedAt: preview.startedAt,
