@@ -3495,6 +3495,27 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     return () => { cancelled = true }
   }, [])
 
+  // Local triggers for guest users (stored in localStorage) - defined early for snapbackTriggerOptions
+  const LOCAL_TRIGGERS_KEY = 'nc-taskwatch-local-snapback-triggers'
+  type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
+  const [localTriggers, setLocalTriggers] = useState<LocalTrigger[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_TRIGGERS_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) return parsed as LocalTrigger[]
+      }
+    } catch {}
+    return []
+  })
+  // Persist local triggers to localStorage
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOCAL_TRIGGERS_KEY, JSON.stringify(localTriggers))
+    } catch {}
+  }, [localTriggers])
+  const isGuestUser = !historyOwnerId || historyOwnerId === HISTORY_GUEST_USER_ID
+
   const lifeRoutineBucketOptions = useMemo(() => {
     const seen = new Set<string>()
     const result: string[] = []
@@ -3532,11 +3553,23 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       }
     })
     history.forEach((entry) => {
+      // Check for explicit Snapback goal with bucket name
+      const goalLower = (entry.goalName ?? '').trim().toLowerCase()
+      if (goalLower === 'snapback') {
+        const bucket = (entry.bucketName ?? '').trim()
+        if (bucket) {
+          const key = bucket.toLowerCase()
+          const label = aliasByBase.get(key) || bucket
+          titles.add(label)
+        }
+      }
+      // Also check task name pattern
       const reason = parseReason(entry.taskName)
-      if (!reason) return
-      const key = reason.trim().toLowerCase()
-      const label = aliasByBase.get(key) || reason.slice(0, 120)
-      if (label) titles.add(label)
+      if (reason) {
+        const key = reason.trim().toLowerCase()
+        const label = aliasByBase.get(key) || reason.slice(0, 120)
+        if (label) titles.add(label)
+      }
     })
     snapDbRows.forEach((row) => {
       if (row.base_key && row.base_key.startsWith('custom:')) {
@@ -3544,8 +3577,13 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         if (label) titles.add(label)
       }
     })
+    // Include local triggers (guest users)
+    localTriggers.forEach((lt) => {
+      const label = (lt.label ?? '').trim()
+      if (label) titles.add(label)
+    })
     return Array.from(titles).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-  }, [history, snapDbRows])
+  }, [history, snapDbRows, localTriggers])
 
   const updateHistory = useCallback((updater: (current: HistoryEntry[]) => HistoryEntry[]) => {
     setHistory((current) => {
@@ -6192,6 +6230,24 @@ useEffect(() => {
   const snapbackPanelId = 'snapback-range-panel'
   const snapActiveRangeConfig = SNAP_RANGE_DEFS[snapActiveRange]
 
+  // Local plans for guest users (history-derived snap-* triggers)
+  const LOCAL_SNAP_PLANS_KEY = 'nc-taskwatch-local-snap-plans'
+  const [localSnapPlans, setLocalSnapPlans] = useState<Record<string, { cue: string; deconstruction: string; plan: string }>>(() => {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_SNAP_PLANS_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed === 'object' && parsed !== null) return parsed
+      }
+    } catch {}
+    return {}
+  })
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOCAL_SNAP_PLANS_KEY, JSON.stringify(localSnapPlans))
+    } catch {}
+  }, [localSnapPlans])
+
   // Snapback plans (DB-backed); initialize empty and hydrate from DB rows
   type SnapbackPlan = { cue: string; deconstruction: string; plan: string }
   type SnapbackPlanState = Record<string, SnapbackPlan>
@@ -6199,9 +6255,28 @@ useEffect(() => {
   const snapPlansRef = useRef<SnapbackPlanState>({})
   useEffect(() => { snapPlansRef.current = snapPlans }, [snapPlans])
   const saveTimersRef = useRef<Map<string, number>>(new Map())
+  // Ref to access localTriggers in persistPlanForId without causing re-renders
+  const localTriggersRef = useRef<LocalTrigger[]>([])
+  const setLocalTriggersRef = useRef<React.Dispatch<React.SetStateAction<LocalTrigger[]>>>(() => {})
   const persistPlanForId = useCallback(async (idKey: string, planOverride?: { cue: string; deconstruction: string; plan: string }) => {
     const plan = planOverride ?? (snapPlansRef.current[idKey] ?? { cue: '', deconstruction: '', plan: '' })
     if (!plan) return
+    // Check if this is a local trigger (guest user)
+    const localTrigger = localTriggersRef.current.find((t) => t.id === idKey)
+    if (localTrigger) {
+      // Update local trigger in state (which will persist to localStorage)
+      setLocalTriggersRef.current((cur) => cur.map((t) => 
+        t.id === idKey ? { ...t, cue: plan.cue, deconstruction: plan.deconstruction, plan: plan.plan } : t
+      ))
+      setSnapPlans((cur) => ({ ...cur, [idKey]: { ...plan } }))
+      return
+    }
+    // For guest users with history-derived triggers (snap-*), save to local storage
+    if (isGuestUser && idKey.startsWith('snap-')) {
+      setLocalSnapPlans((cur) => ({ ...cur, [idKey]: { cue: plan.cue, deconstruction: plan.deconstruction, plan: plan.plan } }))
+      setSnapPlans((cur) => ({ ...cur, [idKey]: { ...plan } }))
+      return
+    }
     let baseKey = ''
     let triggerName = ''
     if (idKey.startsWith('snap-')) {
@@ -6235,7 +6310,7 @@ useEffect(() => {
         setSnapPlans((cur) => ({ ...cur, [idKey]: { ...plan } }))
       })
     }
-  }, [snapDbRows, snapbackOverview.legend])
+  }, [snapDbRows, snapbackOverview.legend, isGuestUser])
   const schedulePersistPlan = useCallback((idKey: string, planSnapshot: { cue: string; deconstruction: string; plan: string }) => {
     if (typeof window === 'undefined') return
     const m = saveTimersRef.current
@@ -6257,7 +6332,15 @@ useEffect(() => {
     }
     const Component = memo(function Component({ idKey, initialPlan, onScheduleSave }: Props) {
       const [draft, setDraft] = useState(initialPlan)
-      useEffect(() => { setDraft(initialPlan) }, [initialPlan])
+      const prevIdKeyRef = useRef(idKey)
+      // Only reset draft when switching to a different trigger (idKey changes)
+      // Don't reset when initialPlan changes due to parent re-renders
+      useEffect(() => {
+        if (prevIdKeyRef.current !== idKey) {
+          setDraft(initialPlan)
+          prevIdKeyRef.current = idKey
+        }
+      }, [idKey, initialPlan])
       return (
         <>
           <div className="snapback-drawer__group">
@@ -6330,9 +6413,31 @@ useEffect(() => {
   
   const [customTriggers, setCustomTriggers] = useState<CustomTrigger[]>([])
 
+  // Keep refs in sync for use in persistPlanForId callback
+  useEffect(() => { localTriggersRef.current = localTriggers }, [localTriggers])
+  useEffect(() => { setLocalTriggersRef.current = setLocalTriggers }, [])
+
   // Aliases: override labels for history-derived triggers without creating new entries
   type SnapbackAliasMap = Record<string, string>
-  const [snapbackAliases, setSnapbackAliases] = useState<SnapbackAliasMap>({})
+  const LOCAL_ALIASES_KEY = 'nc-taskwatch-local-snap-aliases'
+  const [snapbackAliases, setSnapbackAliases] = useState<SnapbackAliasMap>(() => {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_ALIASES_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed === 'object' && parsed !== null) return parsed
+      }
+    } catch {}
+    return {}
+  })
+  // Persist aliases to localStorage for guest users
+  useEffect(() => {
+    if (isGuestUser) {
+      try {
+        window.localStorage.setItem(LOCAL_ALIASES_KEY, JSON.stringify(snapbackAliases))
+      } catch {}
+    }
+  }, [snapbackAliases, isGuestUser])
 
   
 
@@ -6357,7 +6462,33 @@ useEffect(() => {
         plan: row.plan_text ?? '',
       }
     })
-    setSnapbackAliases(aliasMap)
+    // Also populate plans from local triggers (guest users)
+    localTriggers.forEach((lt) => {
+      mergedPlans[lt.id] = {
+        cue: lt.cue ?? '',
+        deconstruction: lt.deconstruction ?? '',
+        plan: lt.plan ?? '',
+      }
+    })
+    // Also populate plans from localSnapPlans (guest users with history-derived triggers)
+    for (const [idKey, planData] of Object.entries(localSnapPlans)) {
+      mergedPlans[idKey] = {
+        cue: planData.cue ?? '',
+        deconstruction: planData.deconstruction ?? '',
+        plan: planData.plan ?? '',
+      }
+    }
+    // Merge with existing aliases (preserve locally-set aliases for guest users)
+    setSnapbackAliases((cur) => {
+      const next = { ...aliasMap }
+      // Preserve any aliases that were set locally (not from DB)
+      for (const [k, v] of Object.entries(cur)) {
+        if (!(k in next) || isGuestUser) {
+          next[k] = v
+        }
+      }
+      return next
+    })
     setCustomTriggers(extras)
     setSnapPlans((cur) => {
       const next: SnapbackPlanState = { ...cur }
@@ -6366,7 +6497,7 @@ useEffect(() => {
       }
       return next
     })
-  }, [snapDbRows, snapbackOverview.legend.map((i) => i.id).join('|')])
+  }, [snapDbRows, localTriggers, localSnapPlans, snapbackOverview.legend.map((i) => i.id).join('|')])
 
   // Inline edit within list for newly created trigger
   const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null)
@@ -6378,34 +6509,56 @@ useEffect(() => {
     }
   }, [editingTriggerId])
   const startAddTrigger = useCallback(async () => {
+    if (isGuestUser) {
+      // Guest user: create local trigger
+      const newId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const newTrigger: LocalTrigger = { id: newId, label: 'New Trigger', cue: '', deconstruction: '', plan: '' }
+      setLocalTriggers((cur) => [...cur, newTrigger])
+      setSelectedTriggerKey(newId)
+      setEditingTriggerId(newId)
+      return
+    }
+    // Authenticated user: create via API
     const row = await apiCreateCustomSnapback('New Trigger')
     if (!row) return
     setSnapDbRows((cur) => [...cur, row])
     setSelectedTriggerKey(row.id)
     setEditingTriggerId(row.id)
-  }, [])
+  }, [isGuestUser])
   const commitEditTrigger = useCallback(async () => {
     if (!editingTriggerId) return
     const raw = editTriggerInputRef.current?.value ?? ''
     const trimmed = raw.trim()
     const newLabel = trimmed.length === 0 ? 'New Trigger' : trimmed
+    // Check if this is a local trigger (guest user)
+    const isLocalTrigger = localTriggers.some((t) => t.id === editingTriggerId)
+    if (isLocalTrigger) {
+      setLocalTriggers((cur) => cur.map((t) => (t.id === editingTriggerId ? { ...t, label: newLabel } : t)))
+      setEditingTriggerId(null)
+      return
+    }
+    // Authenticated user: update via API
     const ok = await apiUpdateSnapbackNameById(editingTriggerId, newLabel)
     if (ok) {
       setSnapDbRows((cur) => cur.map((r) => (r.id === editingTriggerId ? { ...r, trigger_name: newLabel } as DbSnapbackOverview : r)))
     }
     setEditingTriggerId(null)
-  }, [editingTriggerId])
+  }, [editingTriggerId, localTriggers])
 
   const combinedLegend = useMemo(() => {
     const base = snapbackOverview.legend
-    if (customTriggers.length === 0) return base
     const existing = new Set(base.map((it) => it.label.toLowerCase().trim()))
-    const extras = customTriggers
+    // Add custom triggers from DB (authenticated users)
+    const dbExtras = customTriggers
       .filter((ct) => !existing.has(ct.label.toLowerCase().trim()))
       .map((ct) => ({ id: ct.id, label: ct.label, count: 0, durationMs: 0, swatch: getPaletteColorForLabel(ct.label) }))
-    const merged = [...base, ...extras]
+    // Add local triggers (guest users)
+    const localExtras = localTriggers
+      .filter((lt) => !existing.has(lt.label.toLowerCase().trim()) && !dbExtras.some((e) => e.label.toLowerCase().trim() === lt.label.toLowerCase().trim()))
+      .map((lt) => ({ id: lt.id, label: lt.label, count: 0, durationMs: 0, swatch: getPaletteColorForLabel(lt.label) }))
+    const merged = [...base, ...dbExtras, ...localExtras]
     return merged.map((it) => ({ ...it, label: snapbackAliases[it.id] ?? it.label }))
-  }, [snapbackOverview.legend, customTriggers, snapbackAliases])
+  }, [snapbackOverview.legend, customTriggers, localTriggers, snapbackAliases])
 
   // Persist current overview trigger labels for the Snapback panel to mirror
   useEffect(() => {
@@ -6528,13 +6681,16 @@ useEffect(() => {
         if (!item) return
         const next = draft.trim()
         if (next.length === 0 || next === item.label) { setEditing(false); return }
+        // Call the handler immediately (no startTransition) for instant feedback
         if (isCustom) {
-          startTransition(() => onRename(item.id, next))
+          onRename(item.id, next)
         } else {
-          startTransition(() => onAlias(item.id, next))
+          onAlias(item.id, next)
         }
         setEditing(false)
       }, [draft, isCustom, item, onAlias, onRename])
+      // Use draft as display value after editing to show instant feedback
+      const displayLabel = draft || item?.label || '—'
       if (!item) return <h3 className="snapback-drawer__title">—</h3>
       return editing ? (
         <input
@@ -6557,7 +6713,7 @@ useEffect(() => {
           onDoubleClick={() => setEditing(true)}
           title="Double-click to edit"
         >
-          {item.label}
+          {displayLabel}
         </h3>
       )
     }
@@ -13322,11 +13478,11 @@ useEffect(() => {
         )}
       </section>
 
-      {/* Snap Back Overview */}
+      {/* Snapback Overview */}
       <section className="reflection-section reflection-section--overview">
         <div className="reflection-overview__header">
           <div className="reflection-overview__titles">
-            <h2 className="reflection-section__title">Snap Back Overview</h2>
+            <h2 className="reflection-section__title">Snapback Overview</h2>
             {/* Overview description removed */}
           </div>
           {/* snap-tabs removed: always showing all-time triggers */}
@@ -13350,13 +13506,20 @@ useEffect(() => {
             <div className="snapback-list snapback-list--stack">
               {combinedLegend.map((item) => {
                 const isActive = item.id === selectedTriggerKey
-                const isCustom = customTriggers.some((ct) => ct.id === item.id)
-                const isEditing = isCustom && editingTriggerId === item.id
+                const isDbCustom = customTriggers.some((ct) => ct.id === item.id)
+                const isLocalCustom = localTriggers.some((lt) => lt.id === item.id)
+                const isCustom = isDbCustom || isLocalCustom
+                const isEditing = editingTriggerId === item.id
               return (
                 <div
                   key={item.id}
                   className={`snapback-item snapback-item--row${isActive ? ' snapback-item--active' : ''}`}
                   onClick={() => setSelectedTriggerKey(item.id)}
+                  onDoubleClick={() => {
+                    if (isCustom) {
+                      setEditingTriggerId(item.id)
+                    }
+                  }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
@@ -13399,9 +13562,15 @@ useEffect(() => {
                         onClick={(e) => {
                           e.preventDefault()
                           e.stopPropagation()
-                          apiDeleteSnapbackById(item.id).then((ok) => {
-                            if (ok) setSnapDbRows((cur) => cur.filter((r) => r.id !== item.id))
-                          })
+                          if (isLocalCustom) {
+                            // Delete local trigger (guest user)
+                            setLocalTriggers((cur) => cur.filter((t) => t.id !== item.id))
+                          } else {
+                            // Delete from DB (authenticated user)
+                            apiDeleteSnapbackById(item.id).then((ok) => {
+                              if (ok) setSnapDbRows((cur) => cur.filter((r) => r.id !== item.id))
+                            })
+                          }
                           if (editingTriggerId === item.id) setEditingTriggerId(null)
                         }}
                       >
@@ -13428,10 +13597,17 @@ useEffect(() => {
               <div className="snapback-drawer__titles">
                 <SnapbackEditableTitle
                   item={selectedItem ? { id: selectedItem.id, label: selectedItem.label } : null}
-                  isCustom={Boolean(selectedItem && customTriggers.some((ct) => ct.id === selectedItem.id))}
+                  isCustom={Boolean(selectedItem && (customTriggers.some((ct) => ct.id === selectedItem.id) || localTriggers.some((lt) => lt.id === selectedItem.id)))}
                   onRename={async (id, label) => {
                     const trimmed = label.trim()
                     if (!trimmed) return
+                    // Check if this is a local trigger (guest user)
+                    const isLocalTrigger = localTriggers.some((t) => t.id === id)
+                    if (isLocalTrigger) {
+                      setLocalTriggers((cur) => cur.map((t) => (t.id === id ? { ...t, label: trimmed } : t)))
+                      return
+                    }
+                    // Authenticated user: update via API
                     const ok = await apiUpdateSnapbackNameById(id, trimmed)
                     if (ok) setSnapDbRows((cur) => cur.map((r) => (r.id === id ? { ...r, trigger_name: trimmed } as DbSnapbackOverview : r)))
                   }}
@@ -13440,6 +13616,14 @@ useEffect(() => {
                     if (!trimmed) return
                     if (!id.startsWith('snap-')) return
                     const baseKey = id.slice(5)
+                    // For guest users, store alias locally
+                    if (isGuestUser) {
+                      // Store the alias in localSnapPlans with a special marker, or we could create a separate local aliases storage
+                      // For simplicity, we won't support aliasing for guest users since it requires DB upsert
+                      // Instead, just update the snapbackAliases state (non-persistent for guests)
+                      setSnapbackAliases((cur) => ({ ...cur, [id]: trimmed }))
+                      return
+                    }
                     const row = await apiUpsertSnapbackByKey({ base_key: baseKey, trigger_name: trimmed })
                     if (row) {
                       setSnapDbRows((cur) => {
