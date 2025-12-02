@@ -6056,6 +6056,35 @@ useEffect(() => {
     const maxDurationMs = legend.reduce((max, it) => Math.max(max, it.durationMs), 0)
     return { legend, total, windowMs, maxDurationMs }
   }, [effectiveHistory, snapActiveRange, snapDbRows])
+
+  // Auto-create DB rows for orphaned triggers (history has sessions but no DB row)
+  const autoCreatedTriggersRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (isGuestUser) return // Guests use localStorage, not DB
+    const orphanedItems = snapbackOverview.legend.filter(
+      (item) => item.id.startsWith('trigger-') && !autoCreatedTriggersRef.current.has(item.label)
+    )
+    if (orphanedItems.length === 0) return
+
+    const createMissing = async () => {
+      for (const item of orphanedItems) {
+        try {
+          autoCreatedTriggersRef.current.add(item.label)
+          const row = await apiGetOrCreateTrigger(item.label)
+          if (row) {
+            setSnapDbRows((prev) => {
+              if (prev.some((r) => r.id === row.id)) return prev
+              return [...prev, row]
+            })
+          }
+        } catch (err) {
+          logWarn('[Snapback] Failed to auto-create trigger for orphan:', item.label, err)
+        }
+      }
+    }
+    createMissing()
+  }, [snapbackOverview.legend, isGuestUser])
+
   const pieArcs = useMemo(() => createPieArcs(segments, windowMs), [segments, windowMs])
   useLayoutEffect(() => {
     if (!supportsConicGradient) {
