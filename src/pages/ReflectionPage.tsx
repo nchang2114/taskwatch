@@ -6608,8 +6608,10 @@ useEffect(() => {
     }
     setSnapPlans((cur) => {
       const next: SnapbackPlanState = { ...cur }
+      // Update existing plans with fresh data from DB/localStorage
+      // This ensures cross-tab sync works for authenticated users
       for (const [k, v] of Object.entries(mergedPlans)) {
-        if (!(k in next)) next[k] = v
+        next[k] = v
       }
       return next
     })
