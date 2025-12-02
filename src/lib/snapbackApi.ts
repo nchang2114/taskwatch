@@ -28,9 +28,15 @@ export async function fetchSnapbackOverviewRows(): Promise<DbSnapbackOverview[]>
 }
 
 export async function getOrCreateTriggerByName(trigger_name: string): Promise<DbSnapbackOverview | null> {
-  if (!supabase) return null
+  if (!supabase) {
+    console.warn('[snapbackApi] getOrCreateTriggerByName: no supabase client')
+    return null
+  }
   const session = await ensureSingleUserSession()
-  if (!session?.user?.id) return null
+  if (!session?.user?.id) {
+    console.warn('[snapbackApi] getOrCreateTriggerByName: no user session')
+    return null
+  }
   
   // First try to find existing trigger
   const { data: existing, error: findError } = await supabase
@@ -51,7 +57,6 @@ export async function getOrCreateTriggerByName(trigger_name: string): Promise<Db
     cue_text: '',
     deconstruction_text: '',
     plan_text: '',
-    sort_index: 0,
   }
   const { data, error } = await supabase
     .from('snapback_overview')
@@ -59,8 +64,10 @@ export async function getOrCreateTriggerByName(trigger_name: string): Promise<Db
     .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .single()
   if (error) {
+    console.error('[snapbackApi] getOrCreateTriggerByName insert error:', error)
     return null
   }
+  console.log('[snapbackApi] Created trigger:', trigger_name, data)
   return data as DbSnapbackOverview
 }
 
@@ -74,7 +81,6 @@ export async function createSnapbackTrigger(trigger_name: string): Promise<DbSna
     cue_text: '',
     deconstruction_text: '',
     plan_text: '',
-    sort_index: 0,
   }
   const { data, error } = await supabase
     .from('snapback_overview')
@@ -82,6 +88,7 @@ export async function createSnapbackTrigger(trigger_name: string): Promise<DbSna
     .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .single()
   if (error) {
+    console.error('[snapbackApi] createSnapbackTrigger insert error:', error)
     return null
   }
   return data as DbSnapbackOverview
