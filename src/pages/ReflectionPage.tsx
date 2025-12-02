@@ -6354,7 +6354,7 @@ useEffect(() => {
             <input
               type="text"
               className="snapback-drawer__input"
-              placeholder="Describe the lead-up or trigger."
+              placeholder="Any lead-ups or triggers?"
               value={draft.cue}
               onChange={(e) => {
                 handleChange({ cue: e.target.value, deconstruction: draft.deconstruction, plan: draft.plan })
@@ -6367,7 +6367,7 @@ useEffect(() => {
             {/* Hint removed */}
             <textarea
               className="snapback-drawer__textarea"
-              placeholder="Be honest about the short-term reward and the long-term cost."
+              placeholder="What is the short-term reward and the long-term cost?"
               value={draft.deconstruction}
               onChange={(e) => {
                 handleChange({ cue: draft.cue, deconstruction: e.target.value, plan: draft.plan })
@@ -6380,7 +6380,7 @@ useEffect(() => {
             {/* Hint removed */}
             <textarea
               className="snapback-drawer__textarea"
-              placeholder="Write one small, concrete thing you’ll try."
+              placeholder="Write one small thing you’ll try..."
               value={draft.plan}
               onChange={(e) => {
                 handleChange({ cue: draft.cue, deconstruction: draft.deconstruction, plan: e.target.value })
