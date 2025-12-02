@@ -5329,8 +5329,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         bucketSurface: resolvedBucketSurface,
         notes: nextNotes,
         subtasks: nextSubtasks,
-        // Preserve planned flag unless explicitly confirmed elsewhere; promote to planned if moved into the future
-        futureSession: Boolean(target.futureSession) || nextStartedAt > Date.now(),
+        // Preserve the confirmed/planned state - once confirmed, stay confirmed
+        futureSession: target.futureSession,
         goalId:
           normalizedGoalName.length > 0
             ? goalIdLookup.get(normalizedGoalName.toLowerCase()) ?? target.goalId ?? null
