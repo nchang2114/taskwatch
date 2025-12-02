@@ -1224,6 +1224,10 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-task-details-v1')
         window.localStorage.removeItem('nc-taskwatch-flags')
         
+        // Clear alignment tracking so next sign-in runs fresh alignment
+        window.localStorage.removeItem('nc-taskwatch-align-complete')
+        window.localStorage.removeItem('nc-taskwatch-align-lock')
+        
         // Clear ALL goals-related keys (for any user)
         const allKeys = Object.keys(window.localStorage)
         allKeys.forEach(key => {
