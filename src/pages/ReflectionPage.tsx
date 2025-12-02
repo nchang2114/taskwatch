@@ -6531,7 +6531,7 @@ useEffect(() => {
                 handleChange({ cue: draft.cue, deconstruction: e.target.value, plan: draft.plan })
               }}
             />
-          </div>
+          </div> 
 
           <div className="snapback-drawer__group">
             <label className="snapback-drawer__label">How do you change it next time?</label>
