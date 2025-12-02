@@ -3523,21 +3523,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     } catch {}
   }, [localTriggers])
   
-  // Listen for localStorage changes from other tabs (guest mode sync)
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === LOCAL_TRIGGERS_KEY && event.newValue) {
-        try {
-          const parsed = JSON.parse(event.newValue)
-          if (Array.isArray(parsed)) {
-            setLocalTriggers(parsed as LocalTrigger[])
-          }
-        } catch {}
-      }
-    }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [])
+  // Storage listener for localTriggers moved to after snapPlans is defined (for proper sync)
   
   const isGuestUser = !historyOwnerId || historyOwnerId === HISTORY_GUEST_USER_ID
 
@@ -6288,6 +6274,12 @@ useEffect(() => {
   }, [localSnapPlans])
   
   // Listen for localStorage changes from other tabs (guest mode plan sync)
+  // We need to update both localSnapPlans AND snapPlans when another tab changes
+  const localSnapPlansStorageRef = useRef<Record<string, { cue: string; deconstruction: string; plan: string }>>({})
+  useEffect(() => {
+    localSnapPlansStorageRef.current = localSnapPlans
+  }, [localSnapPlans])
+  
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (event.key === LOCAL_SNAP_PLANS_KEY && event.newValue) {
@@ -6295,6 +6287,14 @@ useEffect(() => {
           const parsed = JSON.parse(event.newValue)
           if (typeof parsed === 'object' && parsed !== null) {
             setLocalSnapPlans(parsed)
+            // Also update snapPlans for UI to reflect changes
+            setSnapPlans((cur) => {
+              const updated = { ...cur }
+              Object.entries(parsed as Record<string, { cue: string; deconstruction: string; plan: string }>).forEach(([key, plan]) => {
+                updated[key] = { cue: plan.cue, deconstruction: plan.deconstruction, plan: plan.plan }
+              })
+              return updated
+            })
           }
         } catch {}
       }
@@ -6309,6 +6309,33 @@ useEffect(() => {
   const [snapPlans, setSnapPlans] = useState<SnapbackPlanState>({})
   const snapPlansRef = useRef<SnapbackPlanState>({})
   useEffect(() => { snapPlansRef.current = snapPlans }, [snapPlans])
+  
+  // Listen for localStorage changes from other tabs (guest mode localTriggers sync)
+  // This is here because setSnapPlans needs to be defined first
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === LOCAL_TRIGGERS_KEY && event.newValue) {
+        try {
+          const parsed = JSON.parse(event.newValue)
+          if (Array.isArray(parsed)) {
+            const triggers = parsed as LocalTrigger[]
+            setLocalTriggers(triggers)
+            // Also update snapPlans with the plan data from triggers
+            setSnapPlans((cur) => {
+              const updated = { ...cur }
+              triggers.forEach((t) => {
+                updated[t.id] = { cue: t.cue, deconstruction: t.deconstruction, plan: t.plan }
+              })
+              return updated
+            })
+          }
+        } catch {}
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+  
   const saveTimersRef = useRef<Map<string, number>>(new Map())
   // Ref to access localTriggers in persistPlanForId without causing re-renders
   const localTriggersRef = useRef<LocalTrigger[]>([])
