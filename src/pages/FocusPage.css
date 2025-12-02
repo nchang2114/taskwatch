@@ -449,7 +449,7 @@ html[data-theme='light'] .taskwatch-layout-toggle--active { background: rgba(31,
   padding: clamp(1rem, 3vw, 1.4rem);
   border-radius: 1rem;
   border: 1px solid var(--panel-border);
-  background: var(--panel-background-solid, #fff);
+  background: var(--panel-background-solid, var(--panel-background));
   box-shadow: var(--panel-shadow);
   overflow-y: auto;
   display: flex;
