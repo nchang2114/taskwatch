@@ -1199,7 +1199,7 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-life-routines-user') // Alternative key
         window.localStorage.removeItem('nc-taskwatch-quicklist-user-id')
         window.localStorage.removeItem('nc-taskwatch-quick-list-user') // Alternative key
-        window.localStorage.removeItem('nc-taskwatch-session-history-user-id')
+        window.localStorage.removeItem('nc-taskwatch-history-user') // Correct key for history user
         window.localStorage.removeItem('nc-taskwatch-goals-user-id')
         window.localStorage.removeItem('nc-taskwatch-repeating-rules-user-id')
         
