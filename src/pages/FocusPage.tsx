@@ -4580,9 +4580,11 @@ useEffect(() => {
 
   const currentTaskLower = normalizedCurrentTask.toLocaleLowerCase()
   const isDefaultTask = normalizedCurrentTask.length === 0
+  // Use activeFocusCandidate first (live from goals snapshot) for difficulty/priority,
+  // fall back to focusSource (stored state) if not available
   const focusDifficulty =
-    focusSource?.taskDifficulty ?? activeFocusCandidate?.difficulty ?? null
-  const focusPriority = focusSource?.priority ?? activeFocusCandidate?.priority ?? false
+    activeFocusCandidate?.difficulty ?? focusSource?.taskDifficulty ?? null
+  const focusPriority = activeFocusCandidate?.priority ?? focusSource?.priority ?? false
   const focusGoalName = focusSource?.goalName ?? activeFocusCandidate?.goalName ?? null
   const focusBucketName = focusSource?.bucketName ?? activeFocusCandidate?.bucketName ?? null
   const effectiveTaskId = focusSource?.taskId ?? activeFocusCandidate?.taskId ?? null
