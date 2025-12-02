@@ -3515,12 +3515,30 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     } catch {}
     return []
   })
-  // Persist local triggers to localStorage
+  // Persist local triggers to localStorage and broadcast for cross-tab sync
   useEffect(() => {
     try {
       window.localStorage.setItem(LOCAL_TRIGGERS_KEY, JSON.stringify(localTriggers))
+      broadcastSnapbackUpdate()
     } catch {}
   }, [localTriggers])
+  
+  // Listen for localStorage changes from other tabs (guest mode sync)
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === LOCAL_TRIGGERS_KEY && event.newValue) {
+        try {
+          const parsed = JSON.parse(event.newValue)
+          if (Array.isArray(parsed)) {
+            setLocalTriggers(parsed as LocalTrigger[])
+          }
+        } catch {}
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+  
   const isGuestUser = !historyOwnerId || historyOwnerId === HISTORY_GUEST_USER_ID
 
   const lifeRoutineBucketOptions = useMemo(() => {
@@ -6261,11 +6279,29 @@ useEffect(() => {
     } catch {}
     return {}
   })
+  // Persist local plans to localStorage and broadcast for cross-tab sync
   useEffect(() => {
     try {
       window.localStorage.setItem(LOCAL_SNAP_PLANS_KEY, JSON.stringify(localSnapPlans))
+      broadcastSnapbackUpdate()
     } catch {}
   }, [localSnapPlans])
+  
+  // Listen for localStorage changes from other tabs (guest mode plan sync)
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === LOCAL_SNAP_PLANS_KEY && event.newValue) {
+        try {
+          const parsed = JSON.parse(event.newValue)
+          if (typeof parsed === 'object' && parsed !== null) {
+            setLocalSnapPlans(parsed)
+          }
+        } catch {}
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
 
   // Snapback plans (DB-backed); initialize empty and hydrate from DB rows
   type SnapbackPlan = { cue: string; deconstruction: string; plan: string }
