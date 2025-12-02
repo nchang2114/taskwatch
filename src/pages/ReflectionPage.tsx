@@ -2483,20 +2483,6 @@ const resolveGoalMetadata = (
   const normalizedBucketName = bucketNameRaw?.toLowerCase() ?? ''
   const storedGoalSurfaceInfo = entry.goalSurface ? getSurfaceColorInfo(entry.goalSurface) : undefined
   const entryColorInfo = resolveGoalColorInfo(entry.entryColor)
-  // Treat logged Snapback markers as a virtual goal with crimson/orange accent
-  const parseSnapbackReason = (taskName: string): string | null => {
-    const prefix = 'Snapback • '
-    if (!taskName || !taskName.startsWith(prefix)) return null
-    const rest = taskName.slice(prefix.length)
-    const enDash = ' – '
-    if (rest.includes(enDash)) return rest.split(enDash).slice(1).join(enDash).trim()
-    if (rest.includes(' - ')) return rest.split(' - ').slice(1).join(' - ').trim()
-    return null
-  }
-  const snapReason = parseSnapbackReason(entry.taskName)
-  if (snapReason) {
-    return { label: SNAPBACK_NAME, colorInfo: SNAPBACK_COLOR_INFO }
-  }
   // If a session is explicitly labeled with the Snapback goal, use the Snapback palette
   if (goalNameRaw && normalizedGoalName === SNAPBACK_NAME.toLowerCase()) {
     return { label: SNAPBACK_NAME, colorInfo: SNAPBACK_COLOR_INFO }
@@ -3537,15 +3523,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
 
   const snapbackTriggerOptions = useMemo(() => {
     const titles = new Set<string>()
-    const prefix = 'Snapback • '
-    const enDash = ' – '
-    const parseReason = (taskName: string): string | null => {
-      if (!taskName || !taskName.startsWith(prefix)) return null
-      const rest = taskName.slice(prefix.length)
-      if (rest.includes(enDash)) return rest.split(enDash).slice(1).join(enDash).trim()
-      if (rest.includes(' - ')) return rest.split(' - ').slice(1).join(' - ').trim()
-      return null
-    }
     const aliasByBase = new Map<string, string>()
     snapDbRows.forEach((row) => {
       if (row.base_key && !row.base_key.startsWith('custom:')) {
@@ -3563,13 +3540,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           const label = aliasByBase.get(key) || bucket
           titles.add(label)
         }
-      }
-      // Also check task name pattern
-      const reason = parseReason(entry.taskName)
-      if (reason) {
-        const key = reason.trim().toLowerCase()
-        const label = aliasByBase.get(key) || reason.slice(0, 120)
-        if (label) titles.add(label)
       }
     })
     snapDbRows.forEach((row) => {
@@ -4265,7 +4235,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     () => {
       const emptyLabel =
         isSnapbackGoalSelected && snapbackTriggerOptions.length === 0 ? 'No triggers yet' : 'No bucket'
-      const options: HistoryDropdownOption[] = [{ value: '', label: emptyLabel }]
+      const options: HistoryDropdownOption[] = isSnapbackGoalSelected ? [] : [{ value: '', label: emptyLabel }]
       
       // For Snapback: offer to create a new trigger from the session name if it doesn't already exist
       if (isSnapbackGoalSelected) {
@@ -6063,21 +6033,6 @@ useEffect(() => {
       if (alias) baseToLabel.set(base, alias)
     })
 
-    const parseReason = (taskName: string): string | null => {
-      const prefix = 'Snapback • '
-      if (!taskName || !taskName.startsWith(prefix)) return null
-      const rest = taskName.slice(prefix.length)
-      const enDash = ' – '
-      let reason: string | null = null
-      if (rest.includes(enDash)) {
-        reason = rest.split(enDash).slice(1).join(enDash).trim()
-      } else if (rest.includes(' - ')) {
-        reason = rest.split(' - ').slice(1).join(' - ').trim()
-      }
-      if (reason && reason.length > 0) return reason.slice(0, 120)
-      return 'Snapback'
-    }
-
     effectiveHistory.forEach((entry) => {
       const start = Math.min(entry.startedAt, entry.endedAt)
       const end = Math.max(entry.startedAt, entry.endedAt)
@@ -6089,7 +6044,7 @@ useEffect(() => {
       const goalLower = (entry.goalName ?? '').trim().toLowerCase()
       let baseKey: string | null = null
       let label: string | null = null
-      // Case 1: explicit Snapback goal — use bucket name as trigger, map to base_key via DB alias if possible
+      // Only match entries with explicit Snapback goal — use bucket name as trigger
       if (goalLower === SNAPBACK_NAME.toLowerCase()) {
         const bucket = (entry.bucketName ?? '').trim()
         if (bucket) {
@@ -6097,14 +6052,6 @@ useEffect(() => {
           baseKey = aliasToBase.get(aliasLower) ?? aliasLower
           label = baseToLabel.get(baseKey) ?? bucket
         }
-      }
-      // Case 2: marker task name
-      if (!baseKey) {
-        const reason = parseReason(entry.taskName)
-        if (!reason) return
-        const aliasLower = reason.trim().toLowerCase()
-        baseKey = aliasToBase.get(aliasLower) ?? aliasLower
-        label = baseToLabel.get(baseKey) ?? reason
       }
       if (!baseKey) return
       const existing = totals.get(baseKey)
@@ -6654,36 +6601,16 @@ useEffect(() => {
       if (alias) aliasToBase.set(alias.toLowerCase(), base)
       if (alias) baseToLabel.set(base, alias)
     })
-    const parseReason = (taskName: string): string | null => {
-      const prefix = 'Snapback • '
-      if (!taskName || !taskName.startsWith(prefix)) return null
-      const rest = taskName.slice(prefix.length)
-      const enDash = ' – '
-      let reason: string | null = null
-      if (rest.includes(enDash)) {
-        reason = rest.split(enDash).slice(1).join(enDash).trim()
-      } else if (rest.includes(' - ')) {
-        reason = rest.split(' - ').slice(1).join(' - ').trim()
-      }
-      if (reason && reason.length > 0) return reason.slice(0, 120)
-      return 'Snapback'
-    }
     let lastAt: number | null = null
     const targetBase = baseKey.toLowerCase()
     for (const entry of effectiveHistory) {
       const goalLower = (entry.goalName ?? '').trim().toLowerCase()
       let key: string | null = null
+      // Only match entries with explicit Snapback goal
       if (goalLower === SNAPBACK_NAME.toLowerCase()) {
         const bucket = (entry.bucketName ?? '').trim()
         if (bucket) {
           const aliasLower = bucket.toLowerCase()
-          key = aliasToBase.get(aliasLower) ?? aliasLower
-        }
-      }
-      if (!key) {
-        const reason = parseReason(entry.taskName)
-        if (reason) {
-          const aliasLower = reason.trim().toLowerCase()
           key = aliasToBase.get(aliasLower) ?? aliasLower
         }
       }
