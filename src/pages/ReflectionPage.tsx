@@ -10893,10 +10893,7 @@ useEffect(() => {
     const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
     const shiftStartAndPreserveDuration = (nextStart: number) => {
       setHistoryDraft((draft) => {
-        const prevStart = resolveTimestamp(draft.startedAt, startBase)
-        const prevEnd = resolveTimestamp(draft.endedAt, endBase)
-        const delta = nextStart - prevStart
-        return { ...draft, startedAt: nextStart, endedAt: prevEnd + delta }
+        return { ...draft, startedAt: nextStart }
       })
     }
     const startMinutesOfDay = (() => {
@@ -11506,10 +11503,7 @@ useEffect(() => {
       const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
       const shiftStartAndPreserveDuration = (nextStart: number) => {
         setHistoryDraft((draft) => {
-          const prevStart = resolveTimestamp(draft.startedAt, startBase)
-          const prevEnd = resolveTimestamp(draft.endedAt, endBase)
-          const delta = nextStart - prevStart
-          return { ...draft, startedAt: nextStart, endedAt: prevEnd + delta }
+          return { ...draft, startedAt: nextStart }
         })
       }
       const startMinutesOfDay = (() => {
