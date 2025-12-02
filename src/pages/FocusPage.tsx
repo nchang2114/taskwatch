@@ -73,6 +73,7 @@ import {
   QUICK_LIST_GUEST_USER_ID,
   QUICK_LIST_USER_EVENT,
   type QuickItem,
+  type QuickSubtask,
 } from '../lib/quickList'
 import { fetchQuickListRemoteItems } from '../lib/quickListRemote'
 import {
@@ -2893,11 +2894,55 @@ useEffect(() => {
     return false
   }, [])
 
+  // Helper: update Quick List item notes and subtasks, then sync to localStorage
+  const updateQuickListItemEntry = useCallback(
+    (taskId: string, entry: NotebookEntry) => {
+      setQuickListItems((current) => {
+        const index = current.findIndex((item) => item.id === taskId)
+        if (index === -1) {
+          return current
+        }
+        const item = current[index]
+        // Convert NotebookSubtask[] to QuickSubtask[]
+        const quickSubtasks: QuickSubtask[] = entry.subtasks.map((subtask) => ({
+          id: subtask.id,
+          text: subtask.text,
+          completed: subtask.completed,
+          sortIndex: subtask.sortIndex,
+          updatedAt: subtask.updatedAt ?? new Date().toISOString(),
+        }))
+        const updated: QuickItem = {
+          ...item,
+          notes: entry.notes,
+          subtasks: quickSubtasks,
+          updatedAt: new Date().toISOString(),
+        }
+        const next = [...current]
+        next[index] = updated
+        writeStoredQuickList(next)
+        return next
+      })
+    },
+    [],
+  )
+
   // Publish with fallback: if the task isn't in our current snapshot, refresh
   // from Supabase and retry once the next snapshot arrives.
+  // For Quick List tasks, update quickListItems instead of goalsSnapshot.
   const publishTaskEntry = useCallback(
     (taskId: string, entry: NotebookEntry, reason?: string) => {
       if (!taskId) return
+      // Check if this is a Quick List task
+      const goalId = focusSource?.goalId ?? activeFocusCandidate?.goalId ?? null
+      if (isQuickListGoal(goalId)) {
+        updateQuickListItemEntry(taskId, entry)
+        if (DEBUG_SYNC) {
+          try {
+            logDebug('[Sync][Focus] publish to Quick List', { taskId, reason })
+          } catch {}
+        }
+        return
+      }
       if (taskExistsIn(goalsSnapshot, taskId)) {
         updateGoalSnapshotTask(taskId, entry, true)
         if (DEBUG_SYNC) {
@@ -2941,7 +2986,7 @@ useEffect(() => {
         void handle
       }
     },
-    [goalsSnapshot, refreshGoalsSnapshotFromSupabase, taskExistsIn, updateGoalSnapshotTask],
+    [activeFocusCandidate, focusSource, goalsSnapshot, isQuickListGoal, refreshGoalsSnapshotFromSupabase, taskExistsIn, updateGoalSnapshotTask, updateQuickListItemEntry],
   )
   const updateFocusSourceFromEntry = useCallback(
     (entry: NotebookEntry) => {
@@ -3248,27 +3293,57 @@ useEffect(() => {
     if (!activeTaskId) {
       return
     }
-    let snapshotTask: GoalTaskSnapshot | null = null
-    outer: for (let goalIndex = 0; goalIndex < goalsSnapshot.length; goalIndex += 1) {
-      const goal = goalsSnapshot[goalIndex]
-      for (let bucketIndex = 0; bucketIndex < goal.buckets.length; bucketIndex += 1) {
-        const bucket = goal.buckets[bucketIndex]
-        const found = bucket.tasks.find((task) => task.id === activeTaskId)
-        if (found) {
-          snapshotTask = found
-          break outer
+    // Check if this is a Quick List task
+    const goalId = focusSource?.goalId ?? activeFocusCandidate?.goalId ?? null
+    const isQuickList = isQuickListGoal(goalId)
+
+    let entryNotes: string = ''
+    let entrySubtasks: NotebookSubtask[] = []
+    let foundTask = false
+
+    if (isQuickList) {
+      // Look for the task in quickListItems
+      const quickItem = quickListItems.find((item) => item.id === activeTaskId)
+      if (quickItem) {
+        foundTask = true
+        entryNotes = quickItem.notes ?? ''
+        entrySubtasks = (quickItem.subtasks ?? []).map((subtask) => ({
+          id: subtask.id,
+          text: subtask.text,
+          completed: subtask.completed,
+          sortIndex: subtask.sortIndex,
+          updatedAt: subtask.updatedAt,
+        }))
+      }
+    } else {
+      // Look for the task in goalsSnapshot
+      let snapshotTask: GoalTaskSnapshot | null = null
+      outer: for (let goalIndex = 0; goalIndex < goalsSnapshot.length; goalIndex += 1) {
+        const goal = goalsSnapshot[goalIndex]
+        for (let bucketIndex = 0; bucketIndex < goal.buckets.length; bucketIndex += 1) {
+          const bucket = goal.buckets[bucketIndex]
+          const found = bucket.tasks.find((task) => task.id === activeTaskId)
+          if (found) {
+            snapshotTask = found
+            break outer
+          }
         }
       }
+      if (snapshotTask) {
+        foundTask = true
+        entryNotes = snapshotTask.notes ?? ''
+        entrySubtasks = snapshotSubtasksToNotebook(snapshotTask.subtasks ?? [])
+      }
     }
-    if (!snapshotTask) {
+
+    if (!foundTask) {
       return
     }
-    const snapSubs = snapshotSubtasksToNotebook(snapshotTask.subtasks ?? [])
     const localEntry = notebookState[notebookKey] ?? createNotebookEntry()
     // Respect hydration block unless the snapshot reflects deletions of non-empty local subtasks
     if (notebookHydrationBlockRef.current > Date.now()) {
       try {
-        const snapIds = new Set(snapSubs.map((s) => s.id))
+        const snapIds = new Set(entrySubtasks.map((s) => s.id))
         let hasMeaningfulDeletion = false
         for (const s of localEntry.subtasks) {
           if (!snapIds.has(s.id) && s.text.trim().length > 0) {
@@ -3284,7 +3359,7 @@ useEffect(() => {
       }
     }
     // Mirror snapshot notes and subtasks so other tabs (Reflection/Goals) stay in sync.
-    const entryFromSnapshot: NotebookEntry = { notes: snapshotTask.notes ?? '', subtasks: snapSubs }
+    const entryFromSnapshot: NotebookEntry = { notes: entryNotes, subtasks: entrySubtasks }
     notebookChangeFromSnapshotRef.current = true
     const result = updateNotebookForKey(notebookKey, (entry) =>
       areNotebookEntriesEqual(entry, entryFromSnapshot) ? entry : entryFromSnapshot,
@@ -3302,9 +3377,13 @@ useEffect(() => {
     }
   }, [
     activeTaskId,
+    activeFocusCandidate,
     areNotebookEntriesEqual,
+    focusSource,
     goalsSnapshot,
+    isQuickListGoal,
     notebookKey,
+    quickListItems,
     snapshotSubtasksToNotebook,
     updateFocusSourceFromEntry,
     updateNotebookForKey,
@@ -3485,7 +3564,8 @@ useEffect(() => {
       // New entries are blank by design; skip snapshot work on add to keep
       // the UI snappy. We'll publish on the first text change or blur.
       if (linkedTaskId && createdSubtask.text.trim().length > 0) {
-        updateGoalSnapshotTask(linkedTaskId, result.entry)
+        // Use publishTaskEntry to handle both regular goals and Quick List
+        publishTaskEntry(linkedTaskId, result.entry, 'subtask-add')
         if (DEBUG_SYNC) {
           logDebug('[Sync][Focus] subtask add publish', {
             taskId: linkedTaskId,
@@ -3516,7 +3596,7 @@ useEffect(() => {
       blockNotebookHydration,
       notebookKey,
       updateFocusSourceFromEntry,
-      updateGoalSnapshotTask,
+      publishTaskEntry,
       updateNotebookForKey,
     ],
   )
@@ -3691,7 +3771,8 @@ useEffect(() => {
       if (!result || !result.changed) {
         // Publish on blur even if no structural change (commit point)
         if (linkedTaskId) {
-          updateGoalSnapshotTask(linkedTaskId, entryToPublish, true)
+          // Use publishTaskEntry to handle both regular goals and Quick List
+          publishTaskEntry(linkedTaskId, entryToPublish, 'subtask-blur')
           // Also flush latest subtask edit for this id to DB on blur
           const updated = entryToPublish.subtasks.find((s) => s.id === subtaskId)
           if (updated) {
@@ -3748,7 +3829,7 @@ useEffect(() => {
       activeNotebookEntry,
       notebookKey,
       updateFocusSourceFromEntry,
-      updateGoalSnapshotTask,
+      publishTaskEntry,
       updateNotebookForKey,
     ],
   )
