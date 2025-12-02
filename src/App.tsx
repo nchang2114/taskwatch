@@ -1039,6 +1039,14 @@ function MainApp() {
     }
 
     const bootstrapSession = async () => {
+      // Clear the signing-out flag at the start of a fresh page load
+      // This flag is only meant to block alignment during the immediate sign-out reload
+      if (typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.removeItem('nc-taskwatch-signing-out')
+        } catch {}
+      }
+      
       let session: Session | null = null
       try {
         const { data } = await client.auth.getSession()
