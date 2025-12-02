@@ -2368,6 +2368,12 @@ function App(): React.ReactElement {
 export default App
 
 function AuthCallbackScreen(): React.ReactElement {
+  // Apply stored theme so the callback screen respects dark/light mode
+  useEffect(() => {
+    const storedTheme = getInitialTheme()
+    document.documentElement.setAttribute('data-theme', storedTheme)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     const finalize = async () => {
