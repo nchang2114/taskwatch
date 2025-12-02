@@ -5317,23 +5317,31 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         return current
       }
       const next = [...current]
-      // Only evaluate futureSession changes if the time was actually modified
-      const timeChanged = nextStartedAt !== target.startedAt
+      // Evaluate futureSession changes based on start time and current state
+      const nowTs = Date.now()
+      const wasInPast = target.startedAt <= nowTs
+      const nowInPast = nextStartedAt <= nowTs
+      const crossedBoundary = wasInPast !== nowInPast
       const computedFutureSession = (() => {
         // Newly created sessions always stay as future until explicitly confirmed
         if (pendingNewHistoryId && target.id === pendingNewHistoryId) {
           return true
         }
-        // If time wasn't changed, preserve current state
-        if (!timeChanged) {
-          return target.futureSession
-        }
-        // If moved to future: become future/planned
-        if (nextStartedAt > Date.now()) {
+        // If start time crossed to future: become unconfirmed
+        if (crossedBoundary && !nowInPast) {
           return true
         }
-        // If moved to past: future sessions auto-confirm, confirmed sessions stay confirmed
-        return target.futureSession ? false : target.futureSession
+        // If start time crossed to past: become confirmed
+        if (crossedBoundary && nowInPast) {
+          return false
+        }
+        // Stale unconfirmed session (futureSession=true but start in past):
+        // Any edit confirms it, since user is interacting with it
+        if (target.futureSession && nowInPast) {
+          return false
+        }
+        // Otherwise preserve current state
+        return target.futureSession
       })()
       next[index] = {
         ...target,
@@ -9057,18 +9065,25 @@ useEffect(() => {
                 const target = current[idx]
                 const next = [...current]
                 const nowTs = Date.now()
+                // Evaluate futureSession based on start time and current state
+                const wasInPast = target.startedAt <= nowTs
+                const nowInPast = preview.startedAt <= nowTs
+                const crossedBoundary = wasInPast !== nowInPast
                 // Newly created sessions always stay as future sessions until explicitly confirmed.
                 // For existing sessions:
-                // - If moved to future: become future/planned
-                // - If moved to past: future sessions auto-confirm, confirmed sessions stay confirmed
+                // - Crossed to future: unconfirm
+                // - Crossed to past: confirm
+                // - Stale unconfirmed (futureSession=true but start in past): any drag confirms it
                 const isFuture =
                   pendingNewHistoryId && target.id === pendingNewHistoryId
                     ? true
-                    : preview.startedAt > nowTs
-                      ? true
-                      : target.futureSession
-                        ? false
-                        : target.futureSession
+                    : crossedBoundary && !nowInPast
+                      ? true   // Moved to future: unconfirm
+                      : crossedBoundary && nowInPast
+                        ? false  // Moved to past: confirm
+                        : target.futureSession && nowInPast
+                          ? false  // Stale unconfirmed session: confirm on any edit
+                          : target.futureSession  // Preserve current state
                 next[idx] = {
                   ...target,
                   startedAt: preview.startedAt,
