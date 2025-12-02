@@ -4,6 +4,7 @@ import {
   useId,
   useLayoutEffect,
   useMemo,
+  useDeferredValue,
   memo,
   useRef,
   useState,
@@ -4264,12 +4265,28 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     () => {
       const emptyLabel =
         isSnapbackGoalSelected && snapbackTriggerOptions.length === 0 ? 'No triggers yet' : 'No bucket'
-      return [
-        { value: '', label: emptyLabel },
-        ...resolvedBucketOptions.map((option) => ({ value: option, label: option })),
-      ]
+      const options: HistoryDropdownOption[] = [{ value: '', label: emptyLabel }]
+      
+      // For Snapback: offer to create a new trigger from the session name if it doesn't already exist
+      if (isSnapbackGoalSelected) {
+        const name = historyDraft.taskName.trim()
+        const triggerExistsAlready = name.length > 0 && snapbackTriggerOptions.some(
+          (opt) => opt.toLowerCase() === name.toLowerCase()
+        )
+        if (name.length > 0 && !triggerExistsAlready) {
+          options.push({ value: '__hdr_create_trigger__', label: 'Create from session', disabled: true })
+          const label = `➕ Add as new trigger: "${name}"`
+          options.push({ value: '__add_snapback_trigger__', label })
+          if (resolvedBucketOptions.length > 0) {
+            options.push({ value: '__hdr_existing_triggers__', label: 'Existing triggers', disabled: true })
+          }
+        }
+      }
+      
+      options.push(...resolvedBucketOptions.map((option) => ({ value: option, label: option })))
+      return options
     },
-    [resolvedBucketOptions, isSnapbackGoalSelected, snapbackTriggerOptions.length],
+    [resolvedBucketOptions, isSnapbackGoalSelected, snapbackTriggerOptions, historyDraft.taskName],
   )
 
   const bucketDropdownPlaceholder = useMemo(() => {
@@ -4725,6 +4742,31 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   // When changing the bucket while a known existing task is selected, move that task to the new bucket in Goals/DB.
   const handleBucketDropdownChange = useCallback(
     (nextValue: string) => {
+      // Handle special action to create a new Snapback trigger from session name
+      if (nextValue === '__add_snapback_trigger__') {
+        const name = historyDraft.taskName.trim()
+        if (name.length === 0) return
+        ;(async () => {
+          if (isGuestUser) {
+            // Guest user: create local trigger
+            const newId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+            const newTrigger: LocalTrigger = { id: newId, label: name, cue: '', deconstruction: '', plan: '' }
+            setLocalTriggers((cur) => [...cur, newTrigger])
+            // Set the bucket to the new trigger name
+            updateHistoryDraftField('bucketName', name)
+          } else {
+            // Authenticated user: create via API
+            const row = await apiCreateCustomSnapback(name)
+            if (row) {
+              setSnapDbRows((cur) => [...cur, row])
+              // Set the bucket to the new trigger name
+              updateHistoryDraftField('bucketName', name)
+            }
+          }
+        })()
+        return
+      }
+
       const prevBucket = historyDraft.bucketName.trim()
       const currentGoal = historyDraft.goalName.trim()
       const taskName = historyDraft.taskName.trim()
@@ -4784,7 +4826,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         }
       })()
     }, 
-    [bucketIdLookup, bucketOptionsByGoal, bucketToGoals, historyDraft.bucketName, historyDraft.goalName, historyDraft.taskName, moveTaskToBucket, taskIdLookup, taskToOwners, updateHistoryDraftField],
+    [bucketIdLookup, bucketOptionsByGoal, bucketToGoals, historyDraft.bucketName, historyDraft.goalName, historyDraft.taskName, isGuestUser, moveTaskToBucket, taskIdLookup, taskToOwners, updateHistoryDraftField],
   )
 
   const getSubtaskParent = useCallback(() => {
@@ -6570,17 +6612,38 @@ useEffect(() => {
   }, [combinedLegend.map((i) => i.label).join('|')])
 
   const [selectedTriggerKey, setSelectedTriggerKey] = useState<string | null>(null)
+  // Stable handler for trigger selection - uses data-id attribute to avoid inline closures
+  const handleTriggerSelect = useCallback((e: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>) => {
+    const id = (e.currentTarget as HTMLElement).dataset.id
+    if (id) {
+      flushSync(() => setSelectedTriggerKey(id))
+    }
+  }, [])
+  const handleTriggerKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable)) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleTriggerSelect(e)
+    }
+  }, [handleTriggerSelect])
   useEffect(() => {
-    const first = combinedLegend[0]?.id ?? null
-    setSelectedTriggerKey(first)
+    // Only set initial selection if null, on range change, or if current selection is no longer valid
+    setSelectedTriggerKey((cur) => {
+      const isValid = cur !== null && combinedLegend.some((i) => i.id === cur)
+      if (isValid) return cur
+      return combinedLegend[0]?.id ?? null
+    })
   }, [snapActiveRange, combinedLegend.map((i) => i.id).join('|')])
 
   const selectedItem = useMemo(() => combinedLegend.find((i) => i.id === selectedTriggerKey) ?? combinedLegend[0] ?? null, [selectedTriggerKey, combinedLegend])
+  // Use deferred value for expensive computation to keep selection feeling instant
+  const deferredSelectedItem = useDeferredValue(selectedItem)
 
   // Compute last time the selected Snapback trigger was recorded (across all time)
   const selectedTriggerLastAtLabel = useMemo(() => {
-    if (!selectedItem) return 'Never'
-    const baseKey = selectedItem.id.startsWith('snap-') ? selectedItem.id.slice(5) : selectedItem.id
+    if (!deferredSelectedItem) return 'Never'
+    const baseKey = deferredSelectedItem.id.startsWith('snap-') ? deferredSelectedItem.id.slice(5) : deferredSelectedItem.id
     // Build alias -> base_key map from DB so we interpret historical aliases consistently
     const aliasToBase = new Map<string, string>()
     const baseToLabel = new Map<string, string>()
@@ -6642,7 +6705,7 @@ useEffect(() => {
     if (months < 24) return months === 1 ? '1 month ago' : `${months} months ago`
     const years = Math.floor(days / 365)
     return years === 1 ? '1 year ago' : `${years} years ago`
-  }, [selectedItem, effectiveHistory, snapDbRows])
+  }, [deferredSelectedItem, effectiveHistory, snapDbRows])
   const selectedPlan = useMemo(() => {
     if (!selectedItem) return { cue: '', deconstruction: '', plan: '' }
     const key = selectedItem.id
@@ -6663,11 +6726,20 @@ useEffect(() => {
     }) {
       const [editing, setEditing] = useState(false)
       const [draft, setDraft] = useState('')
+      // Track committed label to show instant feedback
+      const [committedLabel, setCommittedLabel] = useState<string | null>(null)
       const inputRef = useRef<HTMLInputElement | null>(null)
       useEffect(() => {
         setDraft(item?.label ?? '')
+        setCommittedLabel(null)
         setEditing(false)
       }, [item?.id])
+      // Sync draft with item label when it changes externally (after API update)
+      useEffect(() => {
+        if (!editing && item?.label && committedLabel === null) {
+          setDraft(item.label)
+        }
+      }, [item?.label, editing, committedLabel])
       useEffect(() => {
         if (editing) {
           const id = setTimeout(() => {
@@ -6681,7 +6753,10 @@ useEffect(() => {
         if (!item) return
         const next = draft.trim()
         if (next.length === 0 || next === item.label) { setEditing(false); return }
-        // Call the handler immediately (no startTransition) for instant feedback
+        // Set committed label immediately for instant feedback
+        setCommittedLabel(next)
+        setDraft(next)
+        // Call the handler (no startTransition) for instant feedback
         if (isCustom) {
           onRename(item.id, next)
         } else {
@@ -6689,8 +6764,8 @@ useEffect(() => {
         }
         setEditing(false)
       }, [draft, isCustom, item, onAlias, onRename])
-      // Use draft as display value after editing to show instant feedback
-      const displayLabel = draft || item?.label || '—'
+      // Use committed label first, then draft, then item label
+      const displayLabel = committedLabel ?? (draft || item?.label || '—')
       if (!item) return <h3 className="snapback-drawer__title">—</h3>
       return editing ? (
         <input
@@ -6703,14 +6778,14 @@ useEffect(() => {
           onKeyDown={(e) => {
             e.stopPropagation()
             if (e.key === 'Enter') { e.preventDefault(); commit() }
-            if (e.key === 'Escape') { e.preventDefault(); setDraft(item.label); setEditing(false) }
+            if (e.key === 'Escape') { e.preventDefault(); setDraft(item.label); setCommittedLabel(null); setEditing(false) }
           }}
           aria-label="Edit trigger title"
         />
       ) : (
         <h3
           className="snapback-drawer__title snapback-drawer__title--editable"
-          onDoubleClick={() => setEditing(true)}
+          onDoubleClick={() => { setCommittedLabel(null); setEditing(true) }}
           title="Double-click to edit"
         >
           {displayLabel}
@@ -13513,8 +13588,9 @@ useEffect(() => {
               return (
                 <div
                   key={item.id}
+                  data-id={item.id}
                   className={`snapback-item snapback-item--row${isActive ? ' snapback-item--active' : ''}`}
-                  onClick={() => setSelectedTriggerKey(item.id)}
+                  onClick={handleTriggerSelect}
                   onDoubleClick={() => {
                     if (isCustom) {
                       setEditingTriggerId(item.id)
@@ -13522,14 +13598,7 @@ useEffect(() => {
                   }}
                   role="button"
                   tabIndex={0}
-                  onKeyDown={(e) => {
-                    const t = e.target as HTMLElement
-                    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable)) return
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      setSelectedTriggerKey(item.id)
-                    }
-                  }}
+                  onKeyDown={handleTriggerKeyDown}
                 >
                   <div className="snapback-item__row">
                     <div className="snapback-item__left">
@@ -13643,7 +13712,6 @@ useEffect(() => {
             </div>
             {selectedItem ? (
               <SnapbackPlanForm
-                key={selectedItem.id}
                 idKey={selectedItem.id}
                 initialPlan={selectedPlan}
                 onScheduleSave={schedulePersistPlan}
