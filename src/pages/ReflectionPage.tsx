@@ -88,6 +88,7 @@ import {
   upsertSnapbackPlanById as apiUpsertSnapbackPlanById,
   type DbSnapbackOverview,
 } from '../lib/snapbackApi'
+import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbackChannel'
 import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
 
@@ -3469,6 +3470,16 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
 
   // Snapback Overview rows (Supabase) — available early so we can feed the bucket dropdown
   const [snapDbRows, setSnapDbRows] = useState<DbSnapbackOverview[]>([])
+  const refetchSnapDbRows = useCallback(async () => {
+    try {
+      const rows = await apiFetchSnapbackRows()
+      if (Array.isArray(rows)) setSnapDbRows(rows)
+    } catch (err) {
+      logWarn('[Snapback] Failed to refetch overview rows', err)
+    }
+  }, [])
+  
+  // Initial load
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -3482,6 +3493,14 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     load()
     return () => { cancelled = true }
   }, [])
+  
+  // Cross-tab sync subscription
+  useEffect(() => {
+    const unsubscribe = subscribeToSnapbackSync(() => {
+      refetchSnapDbRows()
+    })
+    return unsubscribe
+  }, [refetchSnapDbRows])
 
   // Local triggers for guest users (stored in localStorage) - defined early for snapbackTriggerOptions
   const LOCAL_TRIGGERS_KEY = 'nc-taskwatch-local-snapback-triggers'
@@ -4718,6 +4737,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
             const row = await apiCreateSnapbackTrigger(name)
             if (row) {
               setSnapDbRows((cur) => [...cur, row])
+              broadcastSnapbackUpdate()
               // Set the bucket to the new trigger name
               updateHistoryDraftField('bucketName', name)
             }
@@ -6076,6 +6096,7 @@ useEffect(() => {
               if (prev.some((r) => r.id === row.id)) return prev
               return [...prev, row]
             })
+            broadcastSnapbackUpdate()
           }
         } catch (err) {
           logWarn('[Snapback] Failed to auto-create trigger for orphan:', item.label, err)
@@ -6292,6 +6313,7 @@ useEffect(() => {
         })
         setSnapPlans((cur) => ({ ...cur, [idKey]: { ...plan } }))
       })
+      broadcastSnapbackUpdate()
     }
   }, [snapDbRows])
   const schedulePersistPlan = useCallback((idKey: string, planSnapshot: { cue: string; deconstruction: string; plan: string }) => {
@@ -6480,6 +6502,7 @@ useEffect(() => {
     const row = await apiCreateSnapbackTrigger('New Trigger')
     if (!row) return
     setSnapDbRows((cur) => [...cur, row])
+    broadcastSnapbackUpdate()
     setSelectedTriggerKey(row.id)
     setEditingTriggerId(row.id)
   }, [isGuestUser])
@@ -6501,6 +6524,7 @@ useEffect(() => {
     const ok = await apiRenameSnapbackTrigger(editingTriggerId, newLabel, oldName)
     if (ok) {
       setSnapDbRows((cur) => cur.map((r) => (r.id === editingTriggerId ? { ...r, trigger_name: newLabel } as DbSnapbackOverview : r)))
+      broadcastSnapbackUpdate()
     }
     setEditingTriggerId(null)
   }, [editingTriggerId, localTriggers, snapDbRows])
@@ -13536,7 +13560,10 @@ useEffect(() => {
                           } else {
                             // Delete from DB (authenticated user)
                             apiDeleteSnapbackById(item.id).then((ok) => {
-                              if (ok) setSnapDbRows((cur) => cur.filter((r) => r.id !== item.id))
+                              if (ok) {
+                                setSnapDbRows((cur) => cur.filter((r) => r.id !== item.id))
+                                broadcastSnapbackUpdate()
+                              }
                             })
                           }
                           if (editingTriggerId === item.id) setEditingTriggerId(null)
@@ -13594,6 +13621,7 @@ useEffect(() => {
                           if (idx >= 0) { const copy = cur.slice(); copy[idx] = updatedRow; return copy }
                           return [...cur, updatedRow]
                         })
+                        broadcastSnapbackUpdate()
                       }
                       return
                     }
@@ -13604,6 +13632,7 @@ useEffect(() => {
                       const ok = await apiRenameSnapbackTrigger(row.id, trimmed, row.trigger_name)
                       if (ok) {
                         setSnapDbRows((cur) => cur.map((r) => (r.id === row.id ? { ...r, trigger_name: trimmed } : r)))
+                        broadcastSnapbackUpdate()
                       }
                     }
                   }}
