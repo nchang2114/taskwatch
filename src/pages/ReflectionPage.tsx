@@ -10208,12 +10208,6 @@ useEffect(() => {
       <path d="M18 6L6 18M6 6l12 12"/>
     </svg>
   )
-  const IconPause = () => (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="6" y="4" width="4" height="16" rx="1" />
-      <rect x="14" y="4" width="4" height="16" rx="1" />
-    </svg>
-  )
 
   // Render the popover outside the heavy calendar grid to avoid re-running grid computations on open/close
   const renderCalendarPopover = useCallback(() => {
