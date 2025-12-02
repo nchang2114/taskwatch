@@ -6403,7 +6403,10 @@ useEffect(() => {
       const prevIdKeyRef = useRef(idKey)
       const prevInitialPlanRef = useRef(initialPlan)
       const hasUserEditedRef = useRef(false)
-      // Reset draft when switching triggers OR when initialPlan hydrates with data
+      const draftRef = useRef(draft)
+      useEffect(() => { draftRef.current = draft }, [draft])
+      
+      // Reset draft when switching triggers OR when initialPlan changes externally
       useEffect(() => {
         // If idKey changed, always reset
         if (prevIdKeyRef.current !== idKey) {
@@ -6413,15 +6416,31 @@ useEffect(() => {
           hasUserEditedRef.current = false
           return
         }
-        // If initialPlan changed and user hasn't edited yet, update draft
-        // This handles the case where localStorage hydrates after initial render
+        // Check if initialPlan changed
         const prevPlan = prevInitialPlanRef.current
         const planChanged = prevPlan.cue !== initialPlan.cue || 
                            prevPlan.deconstruction !== initialPlan.deconstruction || 
                            prevPlan.plan !== initialPlan.plan
-        if (planChanged && !hasUserEditedRef.current) {
+        if (!planChanged) return
+        
+        // Check if this is an external change (from another tab)
+        // External change: initialPlan is different from current draft
+        const currentDraft = draftRef.current
+        const isExternalChange = (
+          initialPlan.cue !== currentDraft.cue ||
+          initialPlan.deconstruction !== currentDraft.deconstruction ||
+          initialPlan.plan !== currentDraft.plan
+        )
+        
+        // Always update for external changes (cross-tab sync)
+        // Also update if user hasn't edited yet
+        if (isExternalChange || !hasUserEditedRef.current) {
           setDraft(initialPlan)
           prevInitialPlanRef.current = initialPlan
+          // Reset edit flag for external changes so user can keep editing
+          if (isExternalChange) {
+            hasUserEditedRef.current = false
+          }
         }
       }, [idKey, initialPlan])
       
