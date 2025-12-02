@@ -4506,7 +4506,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const defaultDuration = 30 * 60 * 1000
     const endedAt = Math.max(startedAt + defaultDuration, startedAt + MINUTE_MS)
     const elapsed = Math.max(endedAt - startedAt, 1)
-    const isFuture = startedAt > Date.now()
     const entry: HistoryEntry = {
       id: makeHistoryId(),
       taskName: 'New session',
@@ -4523,7 +4522,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
       notes: '',
       subtasks: [],
-      futureSession: isFuture,
+      futureSession: true,
     }
     startTransition(() => {
       updateHistory((current) => {
@@ -5329,8 +5328,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         bucketSurface: resolvedBucketSurface,
         notes: nextNotes,
         subtasks: nextSubtasks,
-        // Preserve the confirmed/planned state - once confirmed, stay confirmed
-        futureSession: target.futureSession,
+        // Newly created sessions always stay as future sessions until explicitly confirmed.
+        // For existing sessions: future sessions auto-confirm when moved to past;
+        // confirmed sessions become future when moved to future.
+        futureSession:
+          pendingNewHistoryId && target.id === pendingNewHistoryId
+            ? true
+            : nextStartedAt > Date.now()
+              ? true
+              : target.futureSession
+                ? false
+                : false,
         goalId:
           normalizedGoalName.length > 0
             ? goalIdLookup.get(normalizedGoalName.toLowerCase()) ?? target.goalId ?? null
@@ -9040,10 +9048,17 @@ useEffect(() => {
                 const target = current[idx]
                 const next = [...current]
                 const nowTs = Date.now()
-                const wasFutureSession = Boolean(target.futureSession)
-                const wasInPast = target.startedAt <= nowTs
-                const movedToFuture = preview.startedAt > nowTs
-                const isFuture = wasFutureSession || (wasInPast && movedToFuture)
+                // Newly created sessions always stay as future sessions until explicitly confirmed.
+                // For existing sessions: future sessions auto-confirm when moved to past;
+                // confirmed sessions become future when moved to future.
+                const isFuture =
+                  pendingNewHistoryId && target.id === pendingNewHistoryId
+                    ? true
+                    : preview.startedAt > nowTs
+                      ? true
+                      : target.futureSession
+                        ? false
+                        : false
                 next[idx] = {
                   ...target,
                   startedAt: preview.startedAt,
