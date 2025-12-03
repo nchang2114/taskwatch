@@ -502,6 +502,7 @@ type PieArc = {
 const UNCATEGORISED_LABEL = 'Uncategorised'
 const CHART_COLORS = ['#6366f1', '#22d3ee', '#f97316', '#f472b6', '#a855f7', '#4ade80', '#60a5fa', '#facc15', '#38bdf8', '#fb7185']
 const LIFE_ROUTINES_NAME = 'Daily Life'
+const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const LIFE_ROUTINES_SURFACE: SurfaceStyle = 'linen'
 // Snapback virtual goal
 // Session History: use orange→crimson gradient
@@ -4547,17 +4548,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const entry: HistoryEntry = {
       id: makeHistoryId(),
       taskName: 'New session',
-      goalName: null,
+      goalName: LIFE_ROUTINES_NAME,
       bucketName: null,
-      goalId: null,
+      goalId: LIFE_ROUTINES_GOAL_ID,
       bucketId: null,
       taskId: null,
       elapsed,
       startedAt,
       endedAt,
-      goalSurface: DEFAULT_SURFACE_STYLE,
+      goalSurface: LIFE_ROUTINES_SURFACE,
       bucketSurface: null,
-      entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
+      entryColor: gradientFromSurface(LIFE_ROUTINES_SURFACE),
       notes: '',
       subtasks: [],
       futureSession: true,
@@ -6906,15 +6907,15 @@ useEffect(() => {
         const syntheticEntry: HistoryEntry = {
           id: 'new-entry',
           taskName: '',
-          goalName: null,
+          goalName: LIFE_ROUTINES_NAME,
           bucketName: null,
-          goalId: null,
+          goalId: LIFE_ROUTINES_GOAL_ID,
           bucketId: null,
           taskId: null,
           elapsed: Math.max(end - start, MIN_SESSION_DURATION_DRAG_MS),
           startedAt: start,
           endedAt: end,
-          goalSurface: DEFAULT_SURFACE_STYLE,
+          goalSurface: LIFE_ROUTINES_SURFACE,
           bucketSurface: null,
           notes: '',
           subtasks: [],
@@ -9611,8 +9612,8 @@ useEffect(() => {
                     const newEntry: HistoryEntry = {
                       id: newId, taskName: '', elapsed: DAY_DURATION_MS,
                       startedAt: dayStart, endedAt: dayStart + DAY_DURATION_MS,
-                      goalName: null, bucketName: null, goalId: null, bucketId: null, taskId: null,
-                      goalSurface: DEFAULT_SURFACE_STYLE, bucketSurface: null, notes: '', subtasks: [],
+                      goalName: LIFE_ROUTINES_NAME, bucketName: null, goalId: LIFE_ROUTINES_GOAL_ID, bucketId: null, taskId: null,
+                      goalSurface: LIFE_ROUTINES_SURFACE, bucketSurface: null, notes: '', subtasks: [],
                     }
                     updateHistory((current) => { const next = [...current, newEntry]; next.sort((a, b) => a.startedAt - b.startedAt); return next })
                     setPendingNewHistoryId(newId)
@@ -9859,15 +9860,15 @@ useEffect(() => {
                         const newEntry: HistoryEntry = {
                           id: newId,
                           taskName: '',
-                          goalName: null,
+                          goalName: LIFE_ROUTINES_NAME,
                           bucketName: null,
-                          goalId: null,
+                          goalId: LIFE_ROUTINES_GOAL_ID,
                           bucketId: null,
                           taskId: null,
                           elapsed,
                           startedAt,
                           endedAt,
-                          goalSurface: DEFAULT_SURFACE_STYLE,
+                          goalSurface: LIFE_ROUTINES_SURFACE,
                           bucketSurface: null,
                           notes: '',
                           subtasks: [],
@@ -11653,15 +11654,15 @@ useEffect(() => {
           const newEntry: HistoryEntry = {
             id: makeHistoryId(),
             taskName: '',
-            goalName: null,
+            goalName: LIFE_ROUTINES_NAME,
             bucketName: null,
-            goalId: null,
+            goalId: LIFE_ROUTINES_GOAL_ID,
             bucketId: null,
             taskId: null,
             elapsed,
             startedAt,
             endedAt,
-            goalSurface: DEFAULT_SURFACE_STYLE,
+            goalSurface: LIFE_ROUTINES_SURFACE,
             bucketSurface: null,
             notes: '',
             subtasks: [],

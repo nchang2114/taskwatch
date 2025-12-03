@@ -281,10 +281,10 @@ const autosizeTextArea = (el: HTMLTextAreaElement | null) => {
 // (hook moved into FocusPage component body)
 
 const createEmptySessionMetadata = (taskLabel: string): SessionMetadata => ({
-  goalId: null,
+  goalId: LIFE_ROUTINES_GOAL_ID,
   bucketId: null,
   taskId: null,
-  goalName: null,
+  goalName: LIFE_ROUTINES_NAME,
   bucketName: null,
   sessionKey: null,
   taskLabel,
