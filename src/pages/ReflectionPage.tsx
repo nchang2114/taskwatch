@@ -3276,9 +3276,12 @@ export default function ReflectionPage() {
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   
   // Handler to update app timezone and persist to localStorage
+  // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
   const updateAppTimezone = useCallback((timezone: string | null) => {
-    setAppTimezone(timezone)
     storeAppTimezone(timezone)
+    startTransition(() => {
+      setAppTimezone(timezone)
+    })
   }, [])
   
   // Timezone-aware time formatter - uses app timezone when set
