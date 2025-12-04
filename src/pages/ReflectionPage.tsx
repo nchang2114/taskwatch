@@ -11267,6 +11267,8 @@ useEffect(() => {
     setHistoryDayOffset,
     navigateByDelta,
     stepSizeByView,
+    adjustTimestampForTimezone,
+    formatTime,
   ])
 
   // Simple inline icons for popover actions
