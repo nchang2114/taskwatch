@@ -3274,6 +3274,8 @@ const computeRangeOverview = (
 export default function ReflectionPage() {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
+  // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
+  const deferredAppTimezone = useDeferredValue(appTimezone)
   
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
@@ -3284,12 +3286,12 @@ export default function ReflectionPage() {
     })
   }, [])
   
-  // Timezone-aware time formatter - uses app timezone when set
+  // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
   const formatTime = useCallback((timestamp: number) => {
-    return formatTimeOfDay(timestamp, appTimezone)
-  }, [appTimezone])
+    return formatTimeOfDay(timestamp, deferredAppTimezone)
+  }, [deferredAppTimezone])
   
-  // Get display name for current effective timezone
+  // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
     const effective = appTimezone || getCurrentSystemTimezone()
     // Try to find a friendly city name for this timezone
@@ -3301,20 +3303,20 @@ export default function ReflectionPage() {
     return effective.replace(/_/g, ' ').split('/').pop() || effective
   }, [appTimezone])
   
-  // Check if app timezone differs from system timezone
+  // Check if app timezone differs from system timezone (uses immediate value for UI)
   const isUsingCustomTimezone = useMemo(() => {
     if (!appTimezone) return false
     return appTimezone !== getCurrentSystemTimezone()
   }, [appTimezone])
   
   // Adjust a timestamp from system timezone to app timezone for visual positioning
-  // This shifts the timestamp so that when interpreted as local time, it shows the correct position
+  // Uses DEFERRED timezone to avoid blocking UI during heavy calendar re-renders
   const adjustTimestampForTimezone = useCallback((timestamp: number): number => {
-    if (!appTimezone) return timestamp
+    if (!deferredAppTimezone) return timestamp
     const systemTz = getCurrentSystemTimezone()
-    if (systemTz === appTimezone) return timestamp
-    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, appTimezone)
-  }, [appTimezone])
+    if (systemTz === deferredAppTimezone) return timestamp
+    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
+  }, [deferredAppTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
