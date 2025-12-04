@@ -1078,9 +1078,83 @@ html[data-theme='light'] {
 /* --- Intro --- */
 .reflection-intro {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   width: 100%;
+}
+
+/* Timezone indicator in top right */
+.timezone-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--control-surface);
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.timezone-indicator:hover {
+  background: var(--control-surface-hover);
+  border-color: var(--control-hover);
+}
+
+.timezone-indicator__icon {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.timezone-indicator__label {
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.timezone-indicator__reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-left: 0.2rem;
+  padding: 0;
+  background: rgba(239, 68, 68, 0.15);
+  border: none;
+  border-radius: 50%;
+  color: #ef4444;
+  font-size: 0.65rem;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.timezone-indicator__reset:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* Light mode adjustments for timezone indicator */
+html[data-theme='light'] .timezone-indicator {
+  background: rgba(250, 252, 255, 0.96);
+  border-color: rgba(98, 116, 255, 0.2);
+}
+
+html[data-theme='light'] .timezone-indicator:hover {
+  background: rgba(241, 245, 255, 0.98);
+  border-color: rgba(92, 91, 255, 0.3);
+}
+
+html[data-theme='light'] .timezone-indicator__reset {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+html[data-theme='light'] .timezone-indicator__reset:hover {
+  background: rgba(239, 68, 68, 0.2);
 }
 
 .reflection-title {
@@ -2051,6 +2125,11 @@ html[data-theme='light'] .reflection-save:hover {
   color: #fff;
 }
 
+.history-dropdown__option--focused {
+  background: rgba(86, 104, 198, 0.32);
+  color: #fff;
+}
+
 .history-dropdown__option--disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -2096,9 +2175,24 @@ html[data-theme='light'] .history-dropdown__option--selected {
   color: rgba(22, 28, 70, 0.92);
 }
 
+html[data-theme='light'] .history-dropdown__option--focused {
+  background: rgba(180, 192, 252, 0.65);
+  color: rgba(26, 34, 82, 0.92);
+}
+
 html[data-theme='light'] .history-dropdown__empty {
   background: rgba(226, 232, 255, 0.82);
   color: rgba(80, 92, 148, 0.7);
+}
+
+/* Timezone search dropdown */
+.timezone-search-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.timezone-search-dropdown__input {
+  width: 100%;
 }
 
 /* --- Responsive --- */

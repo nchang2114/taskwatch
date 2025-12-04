@@ -410,6 +410,9 @@ export type HistoryEntry = {
   // originalTime: the scheduled timestamptz (in ms) of the guide occurrence that transformed
   repeatingSessionId?: string | null
   originalTime?: number | null
+  // Timezone change marker fields
+  timezoneFrom?: string | null
+  timezoneTo?: string | null
 }
 
 export type HistoryRecord = HistoryEntry & {
@@ -437,6 +440,8 @@ type HistoryCandidate = {
   futureSession?: unknown
   repeatingSessionId?: unknown
   originalTime?: unknown
+  timezoneFrom?: unknown
+  timezoneTo?: unknown
 }
 
 type HistoryRecordCandidate = HistoryCandidate & {
@@ -879,6 +884,10 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
         typeof (candidate as any).originalTime === 'number' && Number.isFinite((candidate as any).originalTime as number)
           ? ((candidate as any).originalTime as number)
           : null
+      const timezoneFromRaw: string | null =
+        typeof (candidate as any).timezoneFrom === 'string' ? ((candidate as any).timezoneFrom as string) : null
+      const timezoneToRaw: string | null =
+        typeof (candidate as any).timezoneTo === 'string' ? ((candidate as any).timezoneTo as string) : null
 
       const normalizedGoalName = goalNameRaw.trim()
       const normalizedBucketName = bucketNameRaw.trim()
@@ -918,6 +927,8 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
         futureSession: futureSessionRaw,
         repeatingSessionId: repeatingSessionIdRaw,
         originalTime: originalTimeRaw,
+        timezoneFrom: timezoneFromRaw,
+        timezoneTo: timezoneToRaw,
       }
       return normalized
     })
@@ -1232,6 +1243,9 @@ const payloadFromRecord = (
     ...(includeRepeat ? { repeating_session_id: record.repeatingSessionId } : {}),
     ...(includeOriginal ? { original_time: new Date(record.originalTime as number).toISOString() } : {}),
     ...(includeFuture ? { future_session: record.futureSession } : {}),
+    // Timezone change marker fields
+    ...(record.timezoneFrom ? { timezone_from: record.timezoneFrom } : {}),
+    ...(record.timezoneTo ? { timezone_to: record.timezoneTo } : {}),
   }
 }
 
@@ -1268,6 +1282,8 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
     futureSession: typeof (row as any).future_session === 'boolean' ? ((row as any).future_session as boolean) : null,
     repeatingSessionId: typeof (row as any).repeating_session_id === 'string' ? (row as any).repeating_session_id : null,
     originalTime: parseTimestamp((row as any).original_time, NaN),
+    timezoneFrom: typeof (row as any).timezone_from === 'string' ? (row as any).timezone_from : null,
+    timezoneTo: typeof (row as any).timezone_to === 'string' ? (row as any).timezone_to : null,
   }
 
   const entry = sanitizeHistoryEntries([candidate])[0]
