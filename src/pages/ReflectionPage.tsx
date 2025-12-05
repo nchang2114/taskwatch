@@ -24,7 +24,7 @@ import { createPortal, flushSync } from 'react-dom'
 import './ReflectionPage.css'
 import './FocusPage.css'
 import './GoalsPage.css'
-import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, type GoalSnapshot } from '../lib/goalsSync'
+import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, syncGoalsSnapshotFromSupabase, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID, type GoalSnapshot } from '../lib/goalsSync'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
 import { broadcastPauseFocus } from '../lib/focusChannel'
 import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket, updateTaskNotes as apiUpdateTaskNotes } from '../lib/goalsApi'
@@ -42,7 +42,7 @@ import {
   syncLifeRoutinesWithSupabase,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
-import {
+import { 
   CURRENT_SESSION_EVENT_NAME,
   CURRENT_SESSION_STORAGE_KEY,
   HISTORY_EVENT_NAME,
@@ -3036,6 +3036,8 @@ type ActiveSessionState = {
   committedElapsed?: number
   isRunning: boolean
   updatedAt: number
+  // ID of the placeholder history entry currently being recorded (hidden from UI)
+  activeSessionEntryId?: string | null
 }
 
 const resolveGoalMetadata = (
@@ -3121,6 +3123,8 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
   const rawIsRunning = Boolean(candidate.isRunning)
   const isRunning = rawIsRunning
   const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : Date.now()
+  const rawActiveSessionEntryId = typeof candidate.activeSessionEntryId === 'string' ? candidate.activeSessionEntryId.trim() : ''
+  const activeSessionEntryId = rawActiveSessionEntryId.length > 0 ? rawActiveSessionEntryId : null
   return {
     taskName,
     goalName,
@@ -3135,6 +3139,7 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
     committedElapsed,
     isRunning,
     updatedAt,
+    activeSessionEntryId,
   }
 }
 
@@ -4501,6 +4506,30 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         return
       }
       setHistory((current) => (historiesAreEqual(current, synced) ? current : synced))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [historyOwnerSignal])
+
+  // Sync goals snapshot from Supabase when user is logged in
+  // This ensures gradient colors are available immediately without waiting for GoalsPage
+  useEffect(() => {
+    const owner = readGoalsSnapshotOwner()
+    if (!owner || owner === GOALS_GUEST_USER_ID) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const synced = await syncGoalsSnapshotFromSupabase()
+      if (cancelled || !synced) {
+        return
+      }
+      const signature = JSON.stringify(synced)
+      if (goalsSnapshotSignatureRef.current !== signature) {
+        goalsSnapshotSignatureRef.current = signature
+        setGoalsSnapshot(synced)
+      }
     })()
     return () => {
       cancelled = true
@@ -6671,6 +6700,11 @@ useEffect(() => {
     const totalElapsed = baseElapsed + runningElapsed
     const effectiveElapsed = Math.max(0, totalElapsed - committedElapsed)
     if (effectiveElapsed <= 0) {
+      // Still filter out the placeholder entry even if no effective elapsed
+      const placeholderEntryId = activeSession.activeSessionEntryId
+      if (placeholderEntryId) {
+        return baseHistory.filter((entry) => entry.id !== placeholderEntryId)
+      }
       return baseHistory
     }
     const defaultStart = now - effectiveElapsed
@@ -6703,7 +6737,11 @@ useEffect(() => {
       notes: '',
       subtasks: [],
     }
-    const filteredHistory = baseHistory.filter((entry) => entry.id !== activeEntry.id)
+    // Filter out the synthetic active-session entry and the placeholder entry being recorded
+    const placeholderEntryId = activeSession.activeSessionEntryId
+    const filteredHistory = baseHistory.filter(
+      (entry) => entry.id !== activeEntry.id && entry.id !== placeholderEntryId,
+    )
     return [activeEntry, ...filteredHistory]
   }, [historyWithTaskNotes, activeSession, nowTick])
 

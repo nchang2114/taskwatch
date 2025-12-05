@@ -13,10 +13,10 @@ import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser } from './lib/sessionHistory'
+import { ensureHistoryUser, syncHistoryWithSupabase } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded } from './lib/bootstrap'
-import { ensureGoalsUser } from './lib/goalsSync'
+import { ensureGoalsUser, syncGoalsSnapshotFromSupabase } from './lib/goalsSync'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -338,6 +338,15 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  // Only show "Signing you in..." screen when returning from OAuth redirect
+  const [isSigningIn, setIsSigningIn] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const hasAuthCallback = window.location.hash.includes('access_token') || 
+                              window.location.search.includes('code=')
+      return hasAuthCallback
+    }
+    return false
+  })
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -964,6 +973,11 @@ function MainApp() {
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
+            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
+            await Promise.all([
+              syncGoalsSnapshotFromSupabase(),
+              syncHistoryWithSupabase(),
+            ])
           } else {
             // User already bootstrapped, just fetch from DB
             // Don't reset - just ensure user data is loaded
@@ -972,6 +986,11 @@ function MainApp() {
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
+            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
+            await Promise.all([
+              syncGoalsSnapshotFromSupabase(),
+              syncHistoryWithSupabase(),
+            ])
           }
         } else {
           // Guest mode - just ensure defaults exist if no data
@@ -997,26 +1016,34 @@ function MainApp() {
     }
 
     const applySessionUser = async (user: User | null | undefined): Promise<void> => {
-      if (mounted) {
-        const profile = deriveProfileFromSupabaseUser(user ?? null)
-        setUserProfile(profile)
-        if (profile) {
-          setAuthModalOpen(false)
-        }
-      }
-      
       // Skip alignment if we're in the middle of signing out
       // (we're about to reload anyway, no point triggering syncs)
       if (typeof window !== 'undefined') {
         try {
           const signingOut = window.sessionStorage.getItem('nc-taskwatch-signing-out')
           if (signingOut === 'true') {
+            if (mounted) {
+              const profile = deriveProfileFromSupabaseUser(user ?? null)
+              setUserProfile(profile)
+            }
             return
           }
         } catch {}
       }
       
+      const profile = deriveProfileFromSupabaseUser(user ?? null)
+      
+      // Fetch all data BEFORE updating the profile (which triggers UI change)
+      // Keep the auth modal open during this time - user just sees the sign-in screen
       await alignLocalStoresForUser(user?.id ?? null)
+      
+      // Now that data is ready, update the profile and close the modal
+      if (mounted) {
+        setUserProfile(profile)
+        if (profile) {
+          setAuthModalOpen(false)
+        }
+      }
     }
 
     const restoreSessionFromCache = async (): Promise<Session | null> => {
@@ -1061,6 +1088,11 @@ function MainApp() {
         const resolvedUser = data?.user ?? session?.user ?? null
         await applySessionUser(resolvedUser)
       } catch {}
+      
+      // Bootstrap complete - all data is loaded, ready to show the app
+      if (mounted) {
+        setIsSigningIn(false)
+      }
     }
 
     // Track last session check to debounce rapid auth changes
@@ -1085,10 +1117,20 @@ function MainApp() {
       }
     }
 
-    void bootstrapSession()
+    // Track whether initial bootstrap is complete to avoid duplicate alignment calls
+    let bootstrapComplete = false
+
+    void (async () => {
+      await bootstrapSession()
+      bootstrapComplete = true
+    })()
 
     // Listen to auth state changes within this tab
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      // Skip during initial bootstrap - bootstrapSession handles it
+      if (!bootstrapComplete) {
+        return
+      }
       void applySessionUser(session?.user ?? null)
     })
 
@@ -1231,6 +1273,11 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-current-session')
         window.localStorage.removeItem('nc-taskwatch-task-details-v1')
         window.localStorage.removeItem('nc-taskwatch-flags')
+        
+        // Clear focus task state so defaults are shown on reload
+        window.localStorage.removeItem('nc-taskwatch-current-task')
+        window.localStorage.removeItem('nc-taskwatch-current-task-source')
+        window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
         
         // Clear alignment tracking so next sign-in runs fresh alignment
         window.localStorage.removeItem('nc-taskwatch-align-complete')
@@ -1964,6 +2011,16 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
+  if (isSigningIn) {
+    return (
+      <div className="app-loading">
+        <div className="app-loading__content">
+          <p className="app-loading__title">Signing you in...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2084,7 +2141,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
-          <GoalsPage />
+          {!isSigningIn && <GoalsPage />}
         </section>
 
         <section
@@ -2095,7 +2152,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          <FocusPage viewportWidth={viewportWidth} />
+          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} />}
         </section>
 
         <section
@@ -2106,7 +2163,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          <ReflectionPage />
+          {!isSigningIn && <ReflectionPage />}
         </section>
       </main>
       {settingsOpen ? (
@@ -2396,22 +2453,50 @@ function AuthCallbackScreen(): React.ReactElement {
       }
       const url = new URL(window.location.href)
       const hasAuthCode = Boolean(url.searchParams.get('code'))
+      let session = null
       try {
         if (hasAuthCode) {
-          const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
+          const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href)
           if (error) {
             await supabase.auth.getSession().catch(() => {})
+          } else {
+            session = data?.session
           }
         } else {
-          await supabase.auth.getSession().catch(() => {})
+          const { data } = await supabase.auth.getSession()
+          session = data?.session
         }
       } catch {
-        await supabase.auth.getSession().catch(() => {})
+        const { data } = await supabase.auth.getSession().catch(() => ({ data: null }))
+        session = data?.session
       }
-      finally {
-        if (!cancelled) {
-          window.location.replace('/')
-        }
+      
+      // Now that we're authenticated, pre-fetch all the user's data before redirecting
+      if (session?.user?.id && !cancelled) {
+        const userId = session.user.id
+        
+        // Set up user in all the stores
+        ensureQuickListUser(userId)
+        ensureLifeRoutineUser(userId)
+        ensureHistoryUser(userId)
+        ensureGoalsUser(userId)
+        await ensureRepeatingRulesUser(userId)
+        
+        // Fetch goals and history from Supabase so they're in localStorage
+        await Promise.all([
+          syncGoalsSnapshotFromSupabase(),
+          syncHistoryWithSupabase(),
+        ])
+      }
+      
+      if (!cancelled) {
+        // Clear focus task state on sign-in so user starts with default presets
+        try {
+          window.localStorage.removeItem('nc-taskwatch-current-task')
+          window.localStorage.removeItem('nc-taskwatch-current-task-source')
+          window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
+        } catch {}
+        window.location.replace('/')
       }
     }
     finalize().catch(() => {})

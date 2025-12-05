@@ -1,6 +1,7 @@
 import type { Goal } from '../pages/GoalsPage'
 import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, type SurfaceStyle } from './surfaceStyles'
 import { DEMO_GOALS } from './demoGoals'
+import { fetchGoalsHierarchy } from './goalsApi'
 
 const STORAGE_KEY = 'nc-taskwatch-goals-snapshot'
 export const GOALS_SNAPSHOT_STORAGE_KEY = STORAGE_KEY
@@ -328,3 +329,33 @@ export const ensureGoalsUser = (
 }
 
 export const readGoalsSnapshotOwner = (): string | null => readStoredGoalsSnapshotUserId()
+
+/**
+ * Fetches goals from Supabase and publishes the snapshot.
+ * This allows pages like ReflectionPage to get fresh goals data
+ * without waiting for GoalsPage to load.
+ * Returns the snapshot if successful, or null if failed/guest user.
+ */
+export const syncGoalsSnapshotFromSupabase = async (): Promise<GoalSnapshot[] | null> => {
+  const owner = readStoredGoalsSnapshotUserId()
+  if (!owner || owner === GOALS_GUEST_USER_ID) {
+    // Guest users don't sync from Supabase
+    return null
+  }
+  try {
+    const result = await fetchGoalsHierarchy()
+    if (!result?.goals || result.goals.length === 0) {
+      return null
+    }
+    // Convert the fetched goals to snapshot format
+    const snapshot = createGoalsSnapshot(result.goals)
+    if (snapshot.length > 0) {
+      // Always publish - force update even if signature matches
+      // This ensures components get the latest data after bootstrap
+      publishGoalsSnapshot(snapshot)
+    }
+    return snapshot
+  } catch {
+    return null
+  }
+}

@@ -1678,6 +1678,60 @@ html[data-theme='light'] .settings-panel__group {
   font-size: 0.9rem;
 }
 
+/* Loading state for data sync after sign-in */
+.auth-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  min-height: 200px;
+}
+
+.auth-loading__header {
+  margin-bottom: 1.5rem;
+}
+
+.auth-loading__spinner {
+  width: 48px;
+  height: 48px;
+  color: var(--accent, #6366f1);
+}
+
+.auth-loading__icon {
+  width: 100%;
+  height: 100%;
+}
+
+/* App bootstrapping loading screen */
+.app-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary, #0f0f0f);
+  z-index: 9999;
+}
+
+.app-loading__content {
+  text-align: center;
+}
+
+.app-loading__title {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+.app-loading__subtitle {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+  color: var(--text-secondary, #888);
+}
+
 .auth-modal__close {
   border: none;
   border-radius: 999px;

@@ -211,6 +211,8 @@ const QUICK_LIST_GOAL_ID = 'quick-list'
 const QUICK_LIST_BUCKET_ID = 'quick-list-bucket'
 const NEUTRAL_SURFACE: SurfaceStyle = DEFAULT_SURFACE_STYLE
 const NEUTRAL_ENTRY_GRADIENT = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
+// Placeholder duration for new session entries (1 minute) - updated when session ends
+const SESSION_PLACEHOLDER_DURATION_MS = 60_000
 const formatLocalYmd = (ms: number): string => {
   const d = new Date(ms)
   const y = d.getFullYear()
@@ -471,12 +473,12 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
 
 const getStoredTaskName = (): string => {
   if (typeof window === 'undefined') {
-    return 'New Task'
+    return ''
   }
 
   const stored = window.localStorage.getItem(CURRENT_TASK_STORAGE_KEY)
   if (!stored) {
-    return 'New Task'
+    return ''
   }
 
   const trimmed = stored.trim()
@@ -905,6 +907,8 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const currentSessionKeyRef = useRef<string | null>(null)
   const lastLoggedSessionKeyRef = useRef<string | null>(null)
   const lastCommittedElapsedRef = useRef(0)
+  // Track the history entry ID for the current active session (created on start with 1-min placeholder)
+  const activeSessionEntryIdRef = useRef<string | null>(null)
   const modeStateRef = useRef<Record<TimeMode, ModeSnapshot>>({
     focus: {
       taskName: initialTaskName,
@@ -913,20 +917,20 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       elapsed: 0,
       sessionStart: null,
       isRunning: false,
-      sessionMeta: createEmptySessionMetadata(initialTaskName || 'Focus Session'),
+      sessionMeta: createEmptySessionMetadata(initialTaskName || 'Click to choose a focus task…'),
       currentSessionKey: null,
       lastLoggedSessionKey: null,
       lastTick: null,
       lastCommittedElapsed: 0,
     },
     break: {
-      taskName: 'Break',
+      taskName: '',
       source: null,
-      customTaskDraft: 'Break',
+      customTaskDraft: '',
       elapsed: 0,
       sessionStart: null,
       isRunning: false,
-      sessionMeta: createEmptySessionMetadata('Break'),
+      sessionMeta: createEmptySessionMetadata('Click to choose a break task…'),
       currentSessionKey: null,
       lastLoggedSessionKey: null,
       lastTick: null,
@@ -1403,6 +1407,8 @@ useEffect(() => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Only persist task name for focus mode - break mode has its own separate state
+    if (timeMode !== 'focus') return
 
     const trimmed = currentTaskName.trim()
     const value = trimmed.length > 0 ? trimmed : ''
@@ -1412,10 +1418,12 @@ useEffect(() => {
     } catch (error) {
       logWarn('Failed to persist current task name', error)
     }
-  }, [currentTaskName])
+  }, [currentTaskName, timeMode])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Only persist focus source for focus mode
+    if (timeMode !== 'focus') return
     try {
       if (focusSource) {
         window.localStorage.setItem(CURRENT_TASK_SOURCE_KEY, JSON.stringify(focusSource))
@@ -1425,7 +1433,7 @@ useEffect(() => {
     } catch (error) {
       logWarn('Failed to persist current task source', error)
     }
-  }, [focusSource])
+  }, [focusSource, timeMode])
 
   useEffect(() => {
     activeTimeModeRef.current = timeMode
@@ -1576,7 +1584,8 @@ useEffect(() => {
   }, [isSelectorOpen])
 
   const normalizedCurrentTask = useMemo(() => currentTaskName.trim(), [currentTaskName])
-  const safeTaskName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+  const defaultTaskName = timeMode === 'focus' ? 'Click to choose a focus task…' : 'Click to choose a break task…'
+  const safeTaskName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : defaultTaskName
   const sessionMetadataRef = useRef<SessionMetadata>(createEmptySessionMetadata(safeTaskName))
   const elapsedSeconds = Math.floor(elapsed / 1000)
   const computeCurrentElapsed = useCallback(
@@ -1633,8 +1642,14 @@ useEffect(() => {
           snapshot.sessionMeta?.taskLabel ?? fallbackTaskName,
         ) ?? snapshot
 
-      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || 'New Task')
-      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), 'Break')
+      // Build snapshots - for the active mode, use current state; for inactive mode, use stored snapshot
+      // This ensures modes don't cross-contaminate each other
+      const focusSnapshot = timeMode === 'focus'
+        ? normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || '')
+        : modeStateRef.current.focus  // Keep the stored focus snapshot unchanged when in break mode
+      const breakSnapshot = timeMode === 'break'
+        ? normalizeSnapshot(buildModeSnapshotForPersistence('break'), currentTaskName || '')
+        : modeStateRef.current.break  // Keep the stored break snapshot unchanged when in focus mode
 
       modeStateRef.current = {
         focus: focusSnapshot,
@@ -1666,17 +1681,26 @@ useEffect(() => {
       const raw = window.localStorage.getItem(STOPWATCH_STORAGE_KEY)
       if (!raw) {
         debugStopwatch('hydrate: no stored stopwatch state')
+        // Sync modeStateRef.current.focus with the initial focusSource state
+        // This ensures the focus snapshot has the correct source from the start
+        const initialSource = readStoredFocusSource()
+        if (initialSource) {
+          modeStateRef.current.focus = {
+            ...modeStateRef.current.focus,
+            source: initialSource,
+          }
+        }
         hasHydratedStopwatchRef.current = true
         return
       }
       debugStopwatch('hydrate: raw payload', raw)
       const parsed = JSON.parse(raw)
-      const fallbackFocus = initialTaskName || 'New Task'
+      const fallbackFocus = initialTaskName || ''
       const focusSnapshot =
         sanitizeStoredModeSnapshot(parsed?.modes?.focus, fallbackFocus, fallbackFocus) ??
         modeStateRef.current.focus
       const breakSnapshot =
-        sanitizeStoredModeSnapshot(parsed?.modes?.break, 'Break', 'Break') ?? modeStateRef.current.break
+        sanitizeStoredModeSnapshot(parsed?.modes?.break, '', '') ?? modeStateRef.current.break
       modeStateRef.current = {
         focus: focusSnapshot,
         break: breakSnapshot,
@@ -4522,6 +4546,8 @@ useEffect(() => {
       bucketId: sessionBucketId,
       taskId: sessionTaskId,
       updatedAt: Date.now(),
+      // Include the active placeholder entry ID so ReflectionPage can filter it from calendar
+      activeSessionEntryId: activeSessionEntryIdRef.current,
     }
 
     try {
@@ -4579,9 +4605,10 @@ useEffect(() => {
       return next
     })
   }, [activeGoalSnapshots])
- 
+
   const currentTaskLower = normalizedCurrentTask.toLocaleLowerCase()
   const isDefaultTask = normalizedCurrentTask.length === 0
+  const defaultTaskPlaceholder = timeMode === 'focus' ? 'Click to choose a focus task…' : 'Click to choose a break task...'
   // Use activeFocusCandidate first (live from goals snapshot) for difficulty/priority,
   // fall back to focusSource (stored state) if not available
   const focusDifficulty =
@@ -4983,6 +5010,7 @@ useEffect(() => {
     selectorButtonRef.current?.focus()
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
+    activeSessionEntryIdRef.current = null
   }, [])
 
   const handleCompleteFocus = async (
@@ -5042,6 +5070,7 @@ useEffect(() => {
     lastTickRef.current = null
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
+    activeSessionEntryIdRef.current = null
     lastCommittedElapsedRef.current = 0
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
     resetStopwatchDisplay()
@@ -5174,6 +5203,61 @@ useEffect(() => {
     setCustomTaskDraft(raw.slice(0, MAX_TASK_STORAGE_LENGTH))
   }
 
+  // Create a placeholder history entry when starting a fresh session
+  // This saves to DB immediately with 1-min duration; updated when session ends
+  const createPlaceholderSessionEntry = useCallback(
+    (metadata: SessionMetadata, startTime: number) => {
+      const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+      const { goalId, bucketId, taskId, goalName, bucketName, repeatingRuleId, repeatingOriginalTime } = metadata
+
+      let entryColor: string | null = null
+      if (goalId === LIFE_ROUTINES_GOAL_ID && bucketId) {
+        entryColor = lifeRoutineColorByBucket.get(bucketId) ?? null
+      }
+      if (!entryColor && goalId) {
+        entryColor = goalGradientById.get(goalId) ?? null
+      }
+      if (!entryColor) {
+        entryColor = NEUTRAL_ENTRY_GRADIENT
+      }
+
+      const entryId = makeHistoryId()
+      const entry: HistoryEntry = {
+        id: entryId,
+        taskName: entryName,
+        elapsed: SESSION_PLACEHOLDER_DURATION_MS,
+        startedAt: startTime,
+        endedAt: startTime + SESSION_PLACEHOLDER_DURATION_MS,
+        goalName: goalName ?? null,
+        bucketName: bucketName ?? null,
+        goalId: goalId ?? null,
+        bucketId: bucketId ?? null,
+        taskId: taskId ?? null,
+        goalSurface: NEUTRAL_SURFACE,
+        bucketSurface: NEUTRAL_SURFACE,
+        entryColor,
+        notes: '',
+        subtasks: [],
+        repeatingSessionId: repeatingRuleId ?? null,
+        originalTime:
+          repeatingOriginalTime && Number.isFinite(repeatingOriginalTime)
+            ? repeatingOriginalTime
+            : null,
+      }
+
+      // Save the entry ID so we can update it later
+      activeSessionEntryIdRef.current = entryId
+
+      applyLocalHistoryChange((current) => {
+        const next = [entry, ...current]
+        return next.length > HISTORY_LIMIT ? next.slice(0, HISTORY_LIMIT) : next
+      })
+
+      return entryId
+    },
+    [applyLocalHistoryChange, goalGradientById, lifeRoutineColorByBucket, normalizedCurrentTask],
+  )
+
   const handleStartStop = () => {
     if (isRunning) {
       const now = Date.now()
@@ -5202,6 +5286,8 @@ useEffect(() => {
         // Restore metadata and clear lock to allow resuming/logging same task
         sessionMetadataRef.current = preservedMeta
         lastLoggedSessionKeyRef.current = null
+        // Clear the active entry ID so resume creates a new placeholder
+        activeSessionEntryIdRef.current = null
       }
 
       setIsRunning(false)
@@ -5217,14 +5303,17 @@ useEffect(() => {
       setIsRunning(true)
       lastTickRef.current = null
       
-      // If we are starting fresh (elapsed 0), ensure committed is 0
+      // Create placeholder entry for this run segment (fresh start or resume)
+      // Each Start→Pause cycle creates its own session entry
+      const metadata = elapsed === 0 ? deriveSessionMetadata() : sessionMetadataRef.current
       if (elapsed === 0) {
         lastCommittedElapsedRef.current = 0
-        const metadata = deriveSessionMetadata()
         sessionMetadataRef.current = metadata
         currentSessionKeyRef.current = metadata.sessionKey
         lastLoggedSessionKeyRef.current = null
       }
+      // Create placeholder entry in DB immediately (1-min duration, will be updated when session ends)
+      createPlaceholderSessionEntry(metadata, now)
     }
   }
 
@@ -5243,6 +5332,7 @@ useEffect(() => {
     lastCommittedElapsedRef.current = 0
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
+    activeSessionEntryIdRef.current = null // Clear the active entry ID on session end
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
     resetStopwatchDisplay()
   }
@@ -5324,6 +5414,82 @@ useEffect(() => {
         entryColor = NEUTRAL_ENTRY_GRADIENT
       }
 
+      // If we have an active session entry, update it instead of creating a new one
+      const activeEntryId = activeSessionEntryIdRef.current
+      if (activeEntryId) {
+        applyLocalHistoryChange((current) => {
+          const idx = current.findIndex((e) => e.id === activeEntryId)
+          if (idx === -1) {
+            // Entry not found, create new one instead
+            const entry: HistoryEntry = {
+              id: makeHistoryId(),
+              taskName,
+              elapsed: elapsedMs,
+              startedAt,
+              endedAt: now,
+              goalName: goalName ?? null,
+              bucketName: bucketName ?? null,
+              goalId: contextGoalId ?? null,
+              bucketId: contextBucketId ?? null,
+              taskId: contextTaskId ?? null,
+              goalSurface: NEUTRAL_SURFACE,
+              bucketSurface: NEUTRAL_SURFACE,
+              entryColor,
+              notes: '',
+              subtasks: [],
+              repeatingSessionId: contextRepeatingRuleId ?? null,
+              originalTime:
+                contextRepeatingOriginalTime && Number.isFinite(contextRepeatingOriginalTime)
+                  ? contextRepeatingOriginalTime
+                  : null,
+            }
+            const next = [entry, ...current]
+            return next.length > HISTORY_LIMIT ? next.slice(0, HISTORY_LIMIT) : next
+          }
+          // Update the existing entry with real duration and end time
+          const existingEntry = current[idx]
+          const updated: HistoryEntry = {
+            ...existingEntry,
+            taskName,
+            elapsed: elapsedMs,
+            startedAt,
+            endedAt: now,
+            goalName: goalName ?? null,
+            bucketName: bucketName ?? null,
+            goalId: contextGoalId ?? null,
+            bucketId: contextBucketId ?? null,
+            taskId: contextTaskId ?? null,
+            entryColor,
+            repeatingSessionId: contextRepeatingRuleId ?? null,
+            originalTime:
+              contextRepeatingOriginalTime && Number.isFinite(contextRepeatingOriginalTime)
+                ? contextRepeatingOriginalTime
+                : null,
+          }
+          const next = [...current]
+          next[idx] = updated
+          return next
+        })
+
+        if (contextRepeatingRuleId && derivedOccurrenceDate) {
+          void upsertRepeatingException({
+            routineId: contextRepeatingRuleId,
+            occurrenceDate: derivedOccurrenceDate,
+            action: 'rescheduled',
+            newStartedAt: startedAt,
+            newEndedAt: now,
+            notes: null,
+          }).catch((error) => logWarn('[Focus] Failed to upsert repeating exception', error))
+        }
+
+        if (context?.sessionKey !== undefined || sessionMeta.sessionKey !== null) {
+          const nextLabel = taskName.length > 0 ? taskName : sessionMeta.taskLabel
+          sessionMetadataRef.current = createEmptySessionMetadata(nextLabel)
+        }
+        return
+      }
+
+      // No active entry, create a new one (fallback for edge cases)
       const entry: HistoryEntry = {
         id: makeHistoryId(),
         taskName,
@@ -5368,7 +5534,7 @@ useEffect(() => {
         sessionMetadataRef.current = createEmptySessionMetadata(nextLabel)
       }
     },
-    [applyLocalHistoryChange, goalGradientById, sessionStart],
+    [applyLocalHistoryChange, goalGradientById, lifeRoutineColorByBucket, sessionStart],
   )
 
   const handleOpenSnapback = useCallback(() => {
@@ -5449,6 +5615,7 @@ useEffect(() => {
 
   currentSessionKeyRef.current = null
   lastLoggedSessionKeyRef.current = null
+  activeSessionEntryIdRef.current = null
   sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
 
     const labelParts = [durationLabel, reasonLabel]
@@ -5590,6 +5757,7 @@ useEffect(() => {
     lastTickRef.current = null
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
+    activeSessionEntryIdRef.current = null
     lastCommittedElapsedRef.current = snappedElapsed
   }, [computeCurrentElapsed, isRunning, normalizedCurrentTask, registerNewHistoryEntry])
 
@@ -5708,6 +5876,14 @@ useEffect(() => {
       setFocusSource(nextSource)
       setCustomTaskDraft(taskName)
       setIsSelectorOpen(false)
+
+      // Also update the current mode's snapshot in modeStateRef
+      modeStateRef.current[activeTimeModeRef.current] = {
+        ...modeStateRef.current[activeTimeModeRef.current],
+        taskName,
+        customTaskDraft: taskName,
+        source: nextSource,
+      }
 
       if (detail.autoStart) {
         const now = Date.now()
@@ -5978,7 +6154,7 @@ useEffect(() => {
                             .filter(Boolean)
                             .join(' ')}
                         >
-                          {isDefaultTask ? 'Choose a focus task' : safeTaskName}
+                          {isDefaultTask ? defaultTaskPlaceholder : safeTaskName}
                         </span>
                       </span>
                       {focusGoalName && focusBucketName ? (
@@ -6634,7 +6810,7 @@ useEffect(() => {
                       .filter(Boolean)
                       .join(' ')}
                   >
-                    {isDefaultTask ? 'Choose a focus task' : safeTaskName}
+                    {isDefaultTask ? defaultTaskPlaceholder : safeTaskName}
                   </span>
                 </span>
                 {focusGoalName && focusBucketName ? (
