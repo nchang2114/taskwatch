@@ -3925,6 +3925,24 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     }
   }
 
+  // Release scroll lock when user switches tabs or navigates away
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // User switched away - release any scroll lock
+        setPageScrollLock(false)
+        // Also reset interaction mode to prevent stuck state
+        calendarInteractionModeRef.current = null
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      // Also release lock on unmount (page navigation)
+      setPageScrollLock(false)
+    }
+  }, [])
+
   useEffect(() => {
     // Cleanup double-tap timer on unmount
     return () => {
@@ -8908,6 +8926,8 @@ useEffect(() => {
       if (prevTouchAction !== null) {
         area.style.touchAction = prevTouchAction
       }
+      // Always release scroll lock as safety (no-op if not locked)
+      setPageScrollLock(false)
     }
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
@@ -10125,6 +10145,8 @@ useEffect(() => {
           // Mode was still 'pending' - just a click, do nothing special
           delete targetEl.dataset.dragKind
           calendarInteractionModeRef.current = null
+          // Always release scroll lock as safety (no-op if not locked)
+          setPageScrollLock(false)
         }
         
         // Arm hold timer for drag activation
@@ -10624,6 +10646,8 @@ useEffect(() => {
                     
                     // No intent detected (tap) or still pending — clean up
                     calendarInteractionModeRef.current = null
+                    // Always release scroll lock as safety (no-op if not locked)
+                    setPageScrollLock(false)
                   }
                   window.addEventListener('pointermove', onMove)
                   window.addEventListener('pointerup', onUp)
