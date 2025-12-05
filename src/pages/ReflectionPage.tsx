@@ -3154,6 +3154,119 @@ const readStoredActiveSession = (): ActiveSessionState | null => {
   }
 }
 
+/**
+ * Splits concurrent history entries into non-overlapping time slices.
+ * When events overlap, the shorter event takes priority during the overlap period.
+ * 
+ * Example: If "eat" runs from 2-3pm and "run" runs from 2:30-2:45pm:
+ * - eat: 2:00-2:30pm
+ * - run: 2:30-2:45pm (takes priority as it's shorter)
+ * - eat: 2:45-3:00pm
+ */
+type TimeSlice = {
+  entry: HistoryEntry
+  start: number
+  end: number
+  originalDuration: number
+}
+
+const splitConcurrentEvents = (
+  history: HistoryEntry[],
+  windowStart: number,
+  windowEnd: number,
+): TimeSlice[] => {
+  // Create time slices for each entry, clamped to the window
+  const entries = history
+    .map((entry) => {
+      const start = Math.min(entry.startedAt, entry.endedAt)
+      const end = Math.max(entry.startedAt, entry.endedAt)
+      const originalDuration = end - start
+      
+      // Skip if completely outside window
+      if (end <= windowStart || start >= windowEnd) {
+        return null
+      }
+      
+      const clampedStart = Math.max(start, windowStart)
+      const clampedEnd = Math.min(end, windowEnd)
+      
+      if (clampedEnd <= clampedStart) {
+        return null
+      }
+      
+      return {
+        entry,
+        start: clampedStart,
+        end: clampedEnd,
+        originalDuration,
+      }
+    })
+    .filter((e): e is TimeSlice => e !== null)
+  
+  if (entries.length === 0) {
+    return []
+  }
+  
+  // Collect all unique time points (boundaries)
+  const timePoints = new Set<number>()
+  entries.forEach(({ start, end }) => {
+    timePoints.add(start)
+    timePoints.add(end)
+  })
+  
+  const sortedTimes = Array.from(timePoints).sort((a, b) => a - b)
+  
+  if (sortedTimes.length < 2) {
+    return entries
+  }
+  
+  const resultSlices: TimeSlice[] = []
+  
+  // For each time interval, find which entry should be active
+  for (let i = 0; i < sortedTimes.length - 1; i++) {
+    const intervalStart = sortedTimes[i]
+    const intervalEnd = sortedTimes[i + 1]
+    
+    if (intervalEnd <= intervalStart) {
+      continue
+    }
+    
+    // Find all entries active during this interval
+    const activeEntries = entries.filter(
+      (e) => e.start <= intervalStart && e.end >= intervalEnd
+    )
+    
+    if (activeEntries.length === 0) {
+      continue
+    }
+    
+    // If only one entry, use it directly
+    if (activeEntries.length === 1) {
+      resultSlices.push({
+        entry: activeEntries[0].entry,
+        start: intervalStart,
+        end: intervalEnd,
+        originalDuration: activeEntries[0].originalDuration,
+      })
+      continue
+    }
+    
+    // Multiple entries overlap - pick the one with shortest original duration
+    const winner = activeEntries.reduce((shortest, current) =>
+      current.originalDuration < shortest.originalDuration ? current : shortest
+    )
+    
+    resultSlices.push({
+      entry: winner.entry,
+      start: intervalStart,
+      end: intervalEnd,
+      originalDuration: winner.originalDuration,
+    })
+  }
+  
+  return resultSlices
+}
+
 const computeRangeOverview = (
   history: HistoryEntry[],
   range: ReflectionRangeKey,
@@ -3179,23 +3292,22 @@ const computeRangeOverview = (
     }
   >()
 
-  history.forEach((entry) => {
+  // Filter out all-day blocks before splitting (they distort time-of-day breakdown)
+  const filteredHistory = history.filter((entry) => {
     const start = Math.min(entry.startedAt, entry.endedAt)
     const end = Math.max(entry.startedAt, entry.endedAt)
-    // All-day blocks distort the time-of-day breakdown; omit them from the overview pie
-    if (isAllDayRangeTs(start, end)) {
-      return
-    }
-    if (end <= windowStart || start >= now) {
-      return
-    }
-    const clampedStart = Math.max(start, windowStart)
-    const clampedEnd = Math.min(end, now)
-    const overlapMs = Math.max(0, clampedEnd - clampedStart)
+    return !isAllDayRangeTs(start, end)
+  })
+
+  // Split concurrent events - shorter events take priority during overlaps
+  const slices = splitConcurrentEvents(filteredHistory, windowStart, now)
+
+  slices.forEach((slice) => {
+    const overlapMs = Math.max(0, slice.end - slice.start)
     if (overlapMs <= 0) {
       return
     }
-    const metadata = resolveGoalMetadata(entry, taskLookup, goalColorLookup, lifeRoutineSurfaceLookup)
+    const metadata = resolveGoalMetadata(slice.entry, taskLookup, goalColorLookup, lifeRoutineSurfaceLookup)
     const current = totals.get(metadata.label)
     if (current) {
       current.durationMs += overlapMs
@@ -10097,49 +10209,55 @@ useEffect(() => {
               dragPreventClickRef.current = true
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
-                updateHistory((current) => {
-                  const materialized = {
-                    ...realEntry,
-                    startedAt: preview.startedAt,
-                    endedAt: preview.endedAt,
-                    elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
-                  }
-                  const next = [...current, materialized]
-                  next.sort((a, b) => a.startedAt - b.startedAt)
-                  return next
+                flushSync(() => {
+                  updateHistory((current) => {
+                    const materialized = {
+                      ...realEntry,
+                      startedAt: preview.startedAt,
+                      endedAt: preview.endedAt,
+                      elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                    }
+                    const next = [...current, materialized]
+                    next.sort((a, b) => a.startedAt - b.startedAt)
+                    return next
+                  })
                 })
                 try {
                   void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: preview.startedAt, newEndedAt: preview.endedAt, notes: null })
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
-                updateHistory((current) => {
-                  const idx = current.findIndex((h) => h.id === s.entryId)
-                  if (idx === -1) return current
-                  const target = current[idx]
-                  const next = [...current]
-                  const nowTs = Date.now()
-                  const wasInPast = target.startedAt <= nowTs
-                  const nowInPast = preview.startedAt <= nowTs
-                  const crossedBoundary = wasInPast !== nowInPast
-                  const isFuture =
-                    pendingNewHistoryId && target.id === pendingNewHistoryId ? true
-                    : crossedBoundary && !nowInPast ? true
-                    : crossedBoundary && nowInPast ? false
-                    : target.futureSession && nowInPast ? false
-                    : target.futureSession
-                  const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-                  const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
-                  next[idx] = { ...target, startedAt: preview.startedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - preview.startedAt, 1), futureSession: isFuture }
-                  return next
+                flushSync(() => {
+                  updateHistory((current) => {
+                    const idx = current.findIndex((h) => h.id === s.entryId)
+                    if (idx === -1) return current
+                    const target = current[idx]
+                    const next = [...current]
+                    const nowTs = Date.now()
+                    const wasInPast = target.startedAt <= nowTs
+                    const nowInPast = preview.startedAt <= nowTs
+                    const crossedBoundary = wasInPast !== nowInPast
+                    const isFuture =
+                      pendingNewHistoryId && target.id === pendingNewHistoryId ? true
+                      : crossedBoundary && !nowInPast ? true
+                      : crossedBoundary && nowInPast ? false
+                      : target.futureSession && nowInPast ? false
+                      : target.futureSession
+                    const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
+                    const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
+                    next[idx] = { ...target, startedAt: preview.startedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - preview.startedAt, 1), futureSession: isFuture }
+                    return next
+                  })
                 })
               }
             } else if (guideMaterialization && s) {
               const { realEntry, ruleId, ymd } = guideMaterialization
-              updateHistory((current) => {
-                const next = [...current, realEntry]
-                next.sort((a, b) => a.startedAt - b.startedAt)
-                return next
+              flushSync(() => {
+                updateHistory((current) => {
+                  const next = [...current, realEntry]
+                  next.sort((a, b) => a.startedAt - b.startedAt)
+                  return next
+                })
               })
               try {
                 void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: realEntry.startedAt, newEndedAt: realEntry.endedAt, notes: null })
@@ -10317,13 +10435,15 @@ useEffect(() => {
                       try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (moved && preview && preview.entryId === bar.entry.id && (preview.startedAt !== initialStart || preview.endedAt !== initialEnd)) {
-                        updateHistory((current) => {
-                          const idx = current.findIndex((h) => h.id === bar.entry.id)
-                          if (idx === -1) return current
-                          const target = current[idx]
-                          const next = [...current]
-                          next[idx] = { ...target, startedAt: preview.startedAt, endedAt: preview.endedAt, elapsed: Math.max(preview.endedAt - preview.startedAt, 1) }
-                          return next
+                        flushSync(() => {
+                          updateHistory((current) => {
+                            const idx = current.findIndex((h) => h.id === bar.entry.id)
+                            if (idx === -1) return current
+                            const target = current[idx]
+                            const next = [...current]
+                            next[idx] = { ...target, startedAt: preview.startedAt, endedAt: preview.endedAt, elapsed: Math.max(preview.endedAt - preview.startedAt, 1) }
+                            return next
+                          })
                         })
                       }
                       dragPreviewRef.current = null
@@ -10642,10 +10762,12 @@ useEffect(() => {
                           notes: '',
                           subtasks: [],
                         }
-                        updateHistory((current) => {
-                          const next = [...current, newEntry]
-                          next.sort((a, b) => a.startedAt - b.startedAt)
-                          return next
+                        flushSync(() => {
+                          updateHistory((current) => {
+                            const next = [...current, newEntry]
+                            next.sort((a, b) => a.startedAt - b.startedAt)
+                            return next
+                          })
                         })
                         setPendingNewHistoryId(newId)
                         setTimeout(() => {
@@ -12651,33 +12773,37 @@ useEffect(() => {
             notes: '',
             subtasks: [],
           }
-          updateHistory((current) => {
-            const next = [...current, newEntry]
-            next.sort((a, b) => a.startedAt - b.startedAt)
-            return next
+          flushSync(() => {
+            updateHistory((current) => {
+              const next = [...current, newEntry]
+              next.sort((a, b) => a.startedAt - b.startedAt)
+              return next
+            })
           })
           setPendingNewHistoryId(newEntry.id)
           setTimeout(() => {
             handleStartEditingHistoryEntry(newEntry)
           }, 0)
         } else {
-          updateHistory((current) => {
-            const index = current.findIndex((entry) => entry.id === preview.entryId)
-            if (index === -1) {
-              return current
-            }
-            const target = current[index]
-            if (target.startedAt === preview.startedAt && target.endedAt === preview.endedAt) {
-              return current
-            }
-            const next = [...current]
-            next[index] = {
-              ...target,
-              startedAt: preview.startedAt,
-              endedAt: preview.endedAt,
-              elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
-            }
-            return next
+          flushSync(() => {
+            updateHistory((current) => {
+              const index = current.findIndex((entry) => entry.id === preview.entryId)
+              if (index === -1) {
+                return current
+              }
+              const target = current[index]
+              if (target.startedAt === preview.startedAt && target.endedAt === preview.endedAt) {
+                return current
+              }
+              const next = [...current]
+              next[index] = {
+                ...target,
+                startedAt: preview.startedAt,
+                endedAt: preview.endedAt,
+                elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+              }
+              return next
+            })
           })
           if (selectedHistoryIdRef.current === state.entryId) {
             setHistoryDraft((draft) => ({
