@@ -9522,8 +9522,9 @@ useEffect(() => {
           return []
         }
 
-        // Group events with similar timing (within 10 min on both start AND end) for side-by-side stacking
-        const STACK_TOLERANCE_MS = 10 * MINUTE_MS
+        // Group events with similar timing (within 15 min on both start AND end) for side-by-side stacking
+        // This includes dragged events at their preview position so the preview shows accurate stacking
+        const STACK_TOLERANCE_MS = 15 * MINUTE_MS
         const stackingGroups = new Map<string, { left: number; width: number }>()
         
         // Find groups of events with nearly identical timing
@@ -10792,9 +10793,8 @@ useEffect(() => {
                         style={{
                           top: `${ev.topPct}%`,
                           height: `${ev.heightPct}%`,
-                          // When dragging, use full width; otherwise use stacking position
-                          left: isDragging ? '2px' : `calc(${ev.leftPct}% + 2px)`,
-                          width: isDragging ? 'calc(100% - 4px)' : `calc(${ev.widthPct}% - 4px)`,
+                          left: `calc(${ev.leftPct}% + 2px)`,
+                          width: `calc(${ev.widthPct}% - 4px)`,
                           zIndex: ev.zIndex,
                           ...(isOutline ? { color: ev.baseColor ?? ev.color, boxShadow: 'none' } : {}),
                         }}
