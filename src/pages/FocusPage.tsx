@@ -4579,7 +4579,7 @@ useEffect(() => {
       return next
     })
   }, [activeGoalSnapshots])
-
+ 
   const currentTaskLower = normalizedCurrentTask.toLocaleLowerCase()
   const isDefaultTask = normalizedCurrentTask.length === 0
   // Use activeFocusCandidate first (live from goals snapshot) for difficulty/priority,
