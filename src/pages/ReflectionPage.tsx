@@ -149,26 +149,9 @@ const clampPanDelta = (dx: number, dayWidth: number, spanDays: number): number =
   return dx
 }
 
-const detectPanIntent = (
-  dx: number,
-  dy: number,
-  options?: { threshold?: number; horizontalDominance?: number; verticalDominance?: number },
-): 'horizontal' | 'vertical' | null => {
-  const threshold = options?.threshold ?? 10
-  const horizontalDominance = options?.horizontalDominance ?? 0.7
-  const verticalDominance = options?.verticalDominance ?? 1.15
-  const absX = Math.abs(dx)
-  const absY = Math.abs(dy)
-  if (absX < threshold && absY < threshold) {
-    return null
-  }
-  if (absX >= absY * horizontalDominance) {
-    return 'horizontal'
-  }
-  if (absY >= absX * verticalDominance) {
-    return 'vertical'
-  }
-  return null 
+// Simple threshold check - has user moved enough to start an interaction?
+const hasMovedPastThreshold = (dx: number, dy: number, threshold: number = 8): boolean => {
+  return Math.abs(dx) >= threshold || Math.abs(dy) >= threshold
 }
 
 type EditableSelectionSnapshot = {
@@ -8810,22 +8793,12 @@ useEffect(() => {
       const dayWidth = state.areaWidth / Math.max(1, state.dayCount)
       if (!Number.isFinite(dayWidth) || dayWidth <= 0) return
       const dx = e.clientX - state.startX
-      // Intent detection
+      // Threshold detection - start panning once user has moved enough
       if (state.mode === 'pending') {
-        const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
-        if (intent === 'vertical') {
-          // Vertical scroll intent: abort calendar drag and let page scroll
-          window.removeEventListener('pointermove', handleMove)
-          window.removeEventListener('pointerup', handleUp)
-          window.removeEventListener('pointercancel', handleUp)
-          calendarDragRef.current = null
-          calendarInteractionModeRef.current = null
+        if (!hasMovedPastThreshold(dx, dy, 8)) {
           return
         }
-        if (intent !== 'horizontal') {
-          return
-        }
-        // Horizontal drag confirmed: capture and prevent default
+        // Movement confirmed: capture and prevent default
         // Cancel any pending hold timer for create mode
         if (calendarHoldTimerRef.current !== null) {
           try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
@@ -9946,12 +9919,11 @@ useEffect(() => {
           
           if (currentInteraction === 'pending') {
             // Still waiting - check if we should transition to pan or stay pending
-            const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
-            if (intent === 'horizontal') {
+            if (hasMovedPastThreshold(dx, dy, 8)) {
               startPan()
               try { e.preventDefault() } catch {}
             }
-            // If vertical or not enough movement, do nothing - wait for hold timer
+            // Not enough movement yet - wait for hold timer or more movement
             return
           }
           
@@ -10491,13 +10463,12 @@ useEffect(() => {
                     
                     if (currentInteraction === 'pending') {
                       // Still waiting - check if we should transition to pan
-                      const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
-                      if (intent === 'horizontal') {
+                      if (hasMovedPastThreshold(dx, dy, 8)) {
                         startPan()
                         try { e.preventDefault() } catch {}
                         return
                       }
-                      // Vertical movement before hold — do nothing (avoid accidental create)
+                      // Not enough movement yet - wait for hold timer or more movement
                       return
                     }
                     
