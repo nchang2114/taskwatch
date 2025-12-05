@@ -8736,8 +8736,10 @@ useEffect(() => {
       return
     }
     if (event.button !== 0) return
-    // If another interaction is already active, don't start a new one
-    if (calendarInteractionModeRef.current !== null) return
+    // If a non-pending interaction is already active (panning/creating/dragging), don't interfere
+    // But if it's 'pending' (from event handler waiting for hold), we can still set up pan detection
+    const currentMode = calendarInteractionModeRef.current
+    if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
     let scrollLocked = false
     let prevTouchAction: string | null = null
     const target = event.target as HTMLElement | null
@@ -9787,77 +9789,73 @@ useEffect(() => {
         if (ev.button !== 0) return
         // Check if another interaction is already active
         const currentMode = calendarInteractionModeRef.current
-        if (currentMode === 'panning' || currentMode === 'creating') return
-        // Stop propagation to prevent parent handlers from firing
+        if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
+        
+        // Stop propagation - we handle both panning and dragging ourselves (like column handler)
         ev.stopPropagation()
+        
         const daysRoot = calendarDaysRef.current
-        if (!daysRoot) return
+        const area = calendarDaysAreaRef.current
+        if (!daysRoot || !area) return
         const columnEls = Array.from(daysRoot.querySelectorAll<HTMLDivElement>('.calendar-day-column'))
         if (columnEls.length === 0) return
         const columns = columnEls.map((el, idx) => ({ rect: el.getBoundingClientRect(), dayStart: dayStarts[idx] }))
-  const area = calendarDaysAreaRef.current
         // Find the column we started in
         const startColIdx = columns.findIndex((c) => ev.clientX >= c.rect.left && ev.clientX <= c.rect.right)
         const col = startColIdx >= 0 ? columns[startColIdx] : columns[0]
         const colHeight = col.rect.height
         if (!(Number.isFinite(colHeight) && colHeight > 0)) return
         // Determine drag kind by edge proximity (top/bottom = resize, else move)
-        // If forceMoveOnly is true (e.g., for timezone markers), always use move
         const evRect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
         const edgePx = Math.min(12, Math.max(6, evRect.height * 0.2))
-  let kind: DragKind = 'move'
+        let kind: DragKind = 'move'
         if (!forceMoveOnly) {
           if (ev.clientY - evRect.top <= edgePx) kind = 'resize-start'
           else if (evRect.bottom - ev.clientY <= edgePx) kind = 'resize-end'
         }
-  // Mark intended drag kind on the element so CSS can show the right cursor once dragging begins
-  const targetEl = ev.currentTarget as HTMLDivElement
-  if (kind === 'move') targetEl.dataset.dragKind = 'move'
-  else targetEl.dataset.dragKind = 'resize'
-        // Set interaction mode to pending - will transition to dragging or panning
+        const targetEl = ev.currentTarget as HTMLDivElement
+        if (kind === 'move') targetEl.dataset.dragKind = 'move'
+        else targetEl.dataset.dragKind = 'resize'
+        
+        // Set interaction mode to pending - waiting for hold timer or pan detection
         calendarInteractionModeRef.current = 'pending'
-        // Compute time-of-day at drag start (use visible edge for resize)
+        
+        const pointerId = ev.pointerId
+        const startX = ev.clientX
+        const startY = ev.clientY
+        
+        // Compute time-of-day at drag start
         const clampedStart = Math.max(Math.min(entry.startedAt, entry.endedAt), entryDayStart)
         const clampedEnd = Math.min(Math.max(entry.startedAt, entry.endedAt), entryDayStart + DAY_DURATION_MS)
         const timeOfDayMs0 = (kind === 'resize-end' ? clampedEnd : clampedStart) - entryDayStart
-        const state = {
-          pointerId: ev.pointerId,
-          entryId: entry.id,
-          startX: ev.clientX,
-          startY: ev.clientY,
-          initialStart: entry.startedAt,
-          initialEnd: entry.endedAt,
-          initialTimeOfDayMs: timeOfDayMs0,
-          durationMs: Math.max(entry.endedAt - entry.startedAt, MIN_SESSION_DURATION_DRAG_MS),
-          kind,
-          columns,
-          moved: false,
-          activated: false,
-        }
-        calendarEventDragRef.current = state
-        // Defer capture until long-press activates drag for all devices (mouse/pen/touch)
-        // For touch, require a short hold before activating drag to prevent accidental drags while scrolling
-  let touchHoldTimer: number | null = null
-  let panningFromEvent = false
-  let holdCancelled = false
-        // Track guide materialization info to defer state update until drag completes
+        
+        // Track guide materialization info
         let guideMaterialization: { realEntry: HistoryEntry; ruleId: string; ymd: string } | null = null
-        // Prevent page scroll immediately during hold period (before activation)
-        setPageScrollLock(true, 'full')
-        const activateDrag = () => {
-          const s = calendarEventDragRef.current
-          if (!s || s.activated) return
-          // Only activate if still in pending mode
+        
+        const startDrag = () => {
+          // Only start drag if still in pending mode
           if (calendarInteractionModeRef.current !== 'pending') return
-          s.activated = true
-          // Set interaction mode to dragging
           calendarInteractionModeRef.current = 'dragging'
-          // Clear any calendar pan state to prevent panning while dragging
+          
+          const state = {
+            pointerId,
+            entryId: entry.id,
+            startX,
+            startY,
+            initialStart: entry.startedAt,
+            initialEnd: entry.endedAt,
+            initialTimeOfDayMs: timeOfDayMs0,
+            durationMs: Math.max(entry.endedAt - entry.startedAt, MIN_SESSION_DURATION_DRAG_MS),
+            kind,
+            columns,
+            moved: false,
+            activated: true,
+          }
+          calendarEventDragRef.current = state
           calendarDragRef.current = null
-          // Lock page scroll while dragging an event FIRST, before any DOM changes
           setPageScrollLock(true, 'full')
-          // If dragging a guide (repeating) entry, prepare materialization but don't update state yet
-          // This prevents React re-render from breaking pointer capture during drag
+          
+          // Prepare guide materialization if needed
           if (entry.id.startsWith('repeat:')) {
             try {
               const parts = entry.id.split(':')
@@ -9871,170 +9869,159 @@ useEffect(() => {
                 originalTime: entry.startedAt,
                 futureSession: true,
               }
-              // Store materialization info to apply after drag completes
               guideMaterialization = { realEntry, ruleId, ymd }
-              // Keep using the guide entry ID in drag state so preview matches DOM
-              // The materialized ID will be used when committing to history
             } catch {}
           }
-          // Close any open calendar popover as soon as a drag is activated
+          
           handleCloseCalendarPreview()
-          try { targetEl.setPointerCapture?.(ev.pointerId) } catch {}
+          try { targetEl.setPointerCapture?.(pointerId) } catch {}
         }
+        
+        const startPan = () => {
+          // Only start pan if still in pending mode
+          if (calendarInteractionModeRef.current !== 'pending') return
+          calendarInteractionModeRef.current = 'panning'
+          
+          // Clear hold timer
+          if (calendarHoldTimerRef.current !== null) {
+            try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+            calendarHoldTimerRef.current = null
+          }
+          
+          const rect = area.getBoundingClientRect()
+          if (rect.width <= 0) return
+          const dayCount = calendarView === '3d'
+            ? Math.max(2, Math.min(multiDayCount, 14))
+            : calendarView === 'week' ? 7 : 1
+          stopCalendarPanAnimation()
+          const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+          const daysEl = calendarDaysRef.current
+          const hdrEl = calendarHeadersRef.current
+          const allDayEl = calendarAllDayRef.current
+          if (daysEl) daysEl.style.transition = ''
+          if (hdrEl) hdrEl.style.transition = ''
+          if (allDayEl) allDayEl.style.transition = ''
+          resetCalendarPanTransform()
+          const baseOffset = calendarPanDesiredOffsetRef.current
+          calendarDragRef.current = {
+            pointerId,
+            startX,
+            startY,
+            startTime: now,
+            areaWidth: rect.width,
+            dayCount,
+            baseOffset,
+            mode: 'hdrag',
+            lastAppliedDx: 0,
+          }
+          calendarEventDragRef.current = null
+          delete targetEl.dataset.dragKind
+          try { area.setPointerCapture?.(pointerId) } catch {}
+          setPageScrollLock(true)
+        }
+        
         const onMove = (e: PointerEvent) => {
-          const s = calendarEventDragRef.current
-          if (!s || e.pointerId !== s.pointerId) return
-          // Movement threshold to preserve click semantics
-          const dx = e.clientX - s.startX
-          const dy = e.clientY - s.startY
-          const threshold = 6
-          if (!s.activated) {
-            // If pointer moves before hold completes, cancel the long-press activation
-            if (Math.hypot(dx, dy) > threshold) {
-              if (touchHoldTimer !== null) {
-                try { window.clearTimeout(touchHoldTimer) } catch {}
-                touchHoldTimer = null
-                holdCancelled = true
-              }
-              // Also clear the global hold timer ref if it was set
-              if (calendarHoldTimerRef.current !== null) {
-                try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
-                calendarHoldTimerRef.current = null
-                holdCancelled = true
-              }
-              // Only allow transitioning to pan if hold was cancelled (not completed)
-              // If horizontal intent, treat this as a calendar pan for all input types
-              if (holdCancelled && calendarInteractionModeRef.current === 'pending') {
-                const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
-                if (intent === 'horizontal' && area) {
-                  if (!panningFromEvent) {
-                    // Set interaction mode to panning
-                    calendarInteractionModeRef.current = 'panning'
-                    const rect = area.getBoundingClientRect()
-                    if (rect.width > 0) {
-                      const dayCount = calendarView === '3d'
-                        ? Math.max(2, Math.min(multiDayCount, 14))
-                        : calendarView === 'week'
-                          ? 7
-                          : 1
-                      stopCalendarPanAnimation()
-                      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-                      const daysEl = calendarDaysRef.current
-                      const hdrEl = calendarHeadersRef.current
-                      const allDayEl = calendarAllDayRef.current
-                      if (daysEl) daysEl.style.transition = ''
-                      if (hdrEl) hdrEl.style.transition = ''
-                      if (allDayEl) allDayEl.style.transition = ''
-                      resetCalendarPanTransform()
-                      const baseOffset = calendarPanDesiredOffsetRef.current
-                      calendarDragRef.current = {
-                        pointerId: s.pointerId,
-                        startX: s.startX,
-                        startY: s.startY,
-                        startTime: now,
-                        areaWidth: rect.width,
-                        dayCount,
-                        baseOffset,
-                        mode: 'hdrag',
-                        lastAppliedDx: 0,
-                      }
-                      try { area.setPointerCapture?.(s.pointerId) } catch {}
-                      setPageScrollLock(true, 'vertical')
-                      panningFromEvent = true
-                    }
-                  }
-                  // Perform pan move
-                  const state = calendarDragRef.current
-                  if (state && state.mode === 'hdrag') {
-                    const dayWidth = state.areaWidth / Math.max(1, state.dayCount)
-                      if (Number.isFinite(dayWidth) && dayWidth > 0) {
-                        try { e.preventDefault() } catch {}
-                        const constrainedDx = clampPanDelta(dx, dayWidth, state.dayCount)
-                        state.lastAppliedDx = constrainedDx
-                        const totalPx = calendarBaseTranslateRef.current + constrainedDx
-                        const daysEl = calendarDaysRef.current
-                        const allDayEl = calendarAllDayRef.current
-                        if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
-                      const hdrEl = calendarHeadersRef.current
-                      if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
-                      if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
-                    }
-                  }
-                  return
-                } else {
-                  // Not horizontal intent - release scroll lock since we're not dragging or panning
-                  setPageScrollLock(false)
-                  calendarInteractionModeRef.current = null
-                }
-              }
-              return
+          if (e.pointerId !== pointerId) return
+          const dx = e.clientX - startX
+          const dy = e.clientY - startY
+          const currentInteraction = calendarInteractionModeRef.current
+          
+          if (currentInteraction === 'pending') {
+            // Still waiting - check if we should transition to pan or stay pending
+            const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
+            if (intent === 'horizontal') {
+              startPan()
+              try { e.preventDefault() } catch {}
             }
-            // Not activated yet, and not moved enough — keep waiting for hold
+            // If vertical or not enough movement, do nothing - wait for hold timer
             return
           }
-          // Prevent page/area scrolling while dragging an event
-          try { e.preventDefault() } catch {}
-          // Base column by X position (nearest if outside bounds)
-          const baseIdx = s.columns.findIndex((c) => e.clientX >= c.rect.left && e.clientX <= c.rect.right)
-          const nearestIdx = baseIdx >= 0 ? baseIdx : (e.clientX < s.columns[0].rect.left ? 0 : s.columns.length - 1)
-          const baseCol = s.columns[nearestIdx]
-          const colH = baseCol.rect.height
-          if (!(Number.isFinite(colH) && colH > 0)) return
-          // Vertical delta to time delta
-          const deltaMsRaw = (dy / colH) * DAY_DURATION_MS
-          // Snap to minute for stable movement
-          const deltaMinutes = Math.round(deltaMsRaw / MINUTE_MS)
-          const deltaMs = deltaMinutes * MINUTE_MS
-          // Allow crossing midnight by converting overflow into day shifts
-          let desiredTimeOfDay = s.initialTimeOfDayMs + deltaMs
-          let dayShift = 0
-          if (desiredTimeOfDay <= -MINUTE_MS || desiredTimeOfDay >= DAY_DURATION_MS + MINUTE_MS) {
-            dayShift = Math.floor(desiredTimeOfDay / DAY_DURATION_MS)
-            desiredTimeOfDay = desiredTimeOfDay - dayShift * DAY_DURATION_MS
-          }
-          // Compute target column after applying vertical overflow
-          const targetIdx = Math.min(Math.max(nearestIdx + dayShift, 0), s.columns.length - 1)
-          const target = s.columns[targetIdx]
-          // Clamp within the day bounds; allow duration to overflow to adjacent day
-          const timeOfDay = Math.min(Math.max(desiredTimeOfDay, 0), DAY_DURATION_MS)
-          let newStart = s.initialStart
-          let newEnd = s.initialEnd
-          if (s.kind === 'move') {
-            newStart = Math.round(target.dayStart + timeOfDay)
-            newEnd = Math.round(newStart + s.durationMs)
-          } else if (s.kind === 'resize-start') {
-            newStart = Math.round(target.dayStart + timeOfDay)
-            // Keep end fixed unless violating minimum duration
-            if (newStart > newEnd - MIN_SESSION_DURATION_DRAG_MS) {
-              newStart = newEnd - MIN_SESSION_DURATION_DRAG_MS
-            }
-          } else {
-            // resize-end
-            newEnd = Math.round(target.dayStart + timeOfDay)
-            if (newEnd < newStart + MIN_SESSION_DURATION_DRAG_MS) {
-              newEnd = newStart + MIN_SESSION_DURATION_DRAG_MS
-            }
-          }
-          const current = dragPreviewRef.current
-          if (current && current.entryId === s.entryId && current.startedAt === newStart && current.endedAt === newEnd) {
+          
+          if (currentInteraction === 'panning') {
+            // Handle pan move
+            const state = calendarDragRef.current
+            if (!state || e.pointerId !== state.pointerId) return
+            const dayWidth = state.areaWidth / Math.max(1, state.dayCount)
+            if (!Number.isFinite(dayWidth) || dayWidth <= 0) return
+            try { e.preventDefault() } catch {}
+            const constrainedDx = clampPanDelta(dx, dayWidth, state.dayCount)
+            state.lastAppliedDx = constrainedDx
+            const totalPx = calendarBaseTranslateRef.current + constrainedDx
+            const daysEl = calendarDaysRef.current
+            const hdrEl = calendarHeadersRef.current
+            const allDayEl = calendarAllDayRef.current
+            if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+            if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+            if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
             return
           }
-          const preview = { entryId: s.entryId, startedAt: newStart, endedAt: newEnd }
-          dragPreviewRef.current = preview
-          setDragPreview(preview)
-          s.moved = true
+          
+          if (currentInteraction === 'dragging') {
+            // Handle drag move
+            const s = calendarEventDragRef.current
+            if (!s || e.pointerId !== s.pointerId) return
+            try { e.preventDefault() } catch {}
+            const baseIdx = s.columns.findIndex((c) => e.clientX >= c.rect.left && e.clientX <= c.rect.right)
+            const nearestIdx = baseIdx >= 0 ? baseIdx : (e.clientX < s.columns[0].rect.left ? 0 : s.columns.length - 1)
+            const baseCol = s.columns[nearestIdx]
+            const colH = baseCol.rect.height
+            if (!(Number.isFinite(colH) && colH > 0)) return
+            const deltaMsRaw = (dy / colH) * DAY_DURATION_MS
+            const deltaMinutes = Math.round(deltaMsRaw / MINUTE_MS)
+            const deltaMs = deltaMinutes * MINUTE_MS
+            let desiredTimeOfDay = s.initialTimeOfDayMs + deltaMs
+            let dayShift = 0
+            if (desiredTimeOfDay <= -MINUTE_MS || desiredTimeOfDay >= DAY_DURATION_MS + MINUTE_MS) {
+              dayShift = Math.floor(desiredTimeOfDay / DAY_DURATION_MS)
+              desiredTimeOfDay = desiredTimeOfDay - dayShift * DAY_DURATION_MS
+            }
+            const targetIdx = Math.min(Math.max(nearestIdx + dayShift, 0), s.columns.length - 1)
+            const target = s.columns[targetIdx]
+            const timeOfDay = Math.min(Math.max(desiredTimeOfDay, 0), DAY_DURATION_MS)
+            let newStart = s.initialStart
+            let newEnd = s.initialEnd
+            if (s.kind === 'move') {
+              newStart = Math.round(target.dayStart + timeOfDay)
+              newEnd = Math.round(newStart + s.durationMs)
+            } else if (s.kind === 'resize-start') {
+              newStart = Math.round(target.dayStart + timeOfDay)
+              if (newStart > newEnd - MIN_SESSION_DURATION_DRAG_MS) {
+                newStart = newEnd - MIN_SESSION_DURATION_DRAG_MS
+              }
+            } else {
+              newEnd = Math.round(target.dayStart + timeOfDay)
+              if (newEnd < newStart + MIN_SESSION_DURATION_DRAG_MS) {
+                newEnd = newStart + MIN_SESSION_DURATION_DRAG_MS
+              }
+            }
+            const current = dragPreviewRef.current
+            if (current && current.entryId === s.entryId && current.startedAt === newStart && current.endedAt === newEnd) return
+            const preview = { entryId: s.entryId, startedAt: newStart, endedAt: newEnd }
+            dragPreviewRef.current = preview
+            setDragPreview(preview)
+            s.moved = true
+            return
+          }
         }
+        
         const onUp = (e: PointerEvent) => {
-          const s = calendarEventDragRef.current
-          if (!s || e.pointerId !== s.pointerId) return
+          if (e.pointerId !== pointerId) return
           window.removeEventListener('pointermove', onMove)
           window.removeEventListener('pointerup', onUp)
           window.removeEventListener('pointercancel', onUp)
-          try { (targetEl as any).releasePointerCapture?.(s.pointerId) } catch {}
-          if (panningFromEvent) {
-            // Finish calendar pan gesture
+          
+          // Clear hold timer
+          if (calendarHoldTimerRef.current !== null) {
+            try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+            calendarHoldTimerRef.current = null
+          }
+          
+          const finalMode = calendarInteractionModeRef.current
+          
+          if (finalMode === 'panning') {
+            // Finish pan
             const state = calendarDragRef.current
-            if (state && area) {
+            if (state && e.pointerId === state.pointerId) {
               try { area.releasePointerCapture?.(state.pointerId) } catch {}
               const dx = e.clientX - state.startX
               const dayWidth = state.areaWidth / Math.max(1, state.dayCount)
@@ -10043,152 +10030,112 @@ useEffect(() => {
                 state.lastAppliedDx = appliedDx
                 const totalPx = calendarBaseTranslateRef.current + appliedDx
                 const daysEl = calendarDaysRef.current
+                const hdrEl = calendarHeadersRef.current
                 const allDayEl = calendarAllDayRef.current
                 if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
-                const hdrEl = calendarHeadersRef.current
                 if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
                 if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
                 const { snap } = resolvePanSnap(state, dx, dayWidth, calendarView, appliedDx)
-                if (snap !== 0) {
-                  animateCalendarPan(snap, dayWidth, state.baseOffset)
-                } else {
-                  animateCalendarPan(0, dayWidth, state.baseOffset)
-                }
+                animateCalendarPan(snap, dayWidth, state.baseOffset)
               } else {
                 const base = calendarBaseTranslateRef.current
                 const daysEl = calendarDaysRef.current
-                const allDayEl = calendarAllDayRef.current
-                if (daysEl) daysEl.style.transform = `translateX(${base}px)`
                 const hdrEl = calendarHeadersRef.current
+                if (daysEl) daysEl.style.transform = `translateX(${base}px)`
                 if (hdrEl) hdrEl.style.transform = `translateX(${base}px)`
-                if (allDayEl) allDayEl.style.transform = `translateX(${base}px)`
               }
             }
-            setPageScrollLock(false)
             calendarDragRef.current = null
-            // Clear interaction mode
+            setPageScrollLock(false)
             calendarInteractionModeRef.current = null
-            // Suppress click opening preview after a pan
             dragPreventClickRef.current = true
             return
           }
-          const preview = dragPreviewRef.current
-          // Check if preview matches the guide entry ID (since we kept it during drag)
-          if (preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
-            // A drag occurred and resulted in a time change; commit the change and suppress the click
-            dragPreventClickRef.current = true
-            // If this was a guide task, materialize it now after drag completes
-            if (guideMaterialization) {
+          
+          if (finalMode === 'dragging') {
+            // Finish drag
+            const s = calendarEventDragRef.current
+            try { targetEl.releasePointerCapture?.(pointerId) } catch {}
+            const preview = dragPreviewRef.current
+            if (s && preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
+              dragPreventClickRef.current = true
+              if (guideMaterialization) {
+                const { realEntry, ruleId, ymd } = guideMaterialization
+                updateHistory((current) => {
+                  const materialized = {
+                    ...realEntry,
+                    startedAt: preview.startedAt,
+                    endedAt: preview.endedAt,
+                    elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                  }
+                  const next = [...current, materialized]
+                  next.sort((a, b) => a.startedAt - b.startedAt)
+                  return next
+                })
+                try {
+                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: preview.startedAt, newEndedAt: preview.endedAt, notes: null })
+                  void evaluateAndMaybeRetireRule(ruleId)
+                } catch {}
+              } else if (s) {
+                updateHistory((current) => {
+                  const idx = current.findIndex((h) => h.id === s.entryId)
+                  if (idx === -1) return current
+                  const target = current[idx]
+                  const next = [...current]
+                  const nowTs = Date.now()
+                  const wasInPast = target.startedAt <= nowTs
+                  const nowInPast = preview.startedAt <= nowTs
+                  const crossedBoundary = wasInPast !== nowInPast
+                  const isFuture =
+                    pendingNewHistoryId && target.id === pendingNewHistoryId ? true
+                    : crossedBoundary && !nowInPast ? true
+                    : crossedBoundary && nowInPast ? false
+                    : target.futureSession && nowInPast ? false
+                    : target.futureSession
+                  const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
+                  const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
+                  next[idx] = { ...target, startedAt: preview.startedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - preview.startedAt, 1), futureSession: isFuture }
+                  return next
+                })
+              }
+            } else if (guideMaterialization && s) {
               const { realEntry, ruleId, ymd } = guideMaterialization
-              // Add the materialized entry with updated times from preview
               updateHistory((current) => {
-                const materialized = {
-                  ...realEntry,
-                  startedAt: preview.startedAt,
-                  endedAt: preview.endedAt,
-                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
-                }
-                const next = [...current, materialized]
+                const next = [...current, realEntry]
                 next.sort((a, b) => a.startedAt - b.startedAt)
                 return next
               })
-              // Persist an exception so future guide synthesis is suppressed
               try {
-                void upsertRepeatingException({
-                  routineId: ruleId,
-                  occurrenceDate: ymd,
-                  action: 'rescheduled',
-                  newStartedAt: preview.startedAt,
-                  newEndedAt: preview.endedAt,
-                  notes: null,
-                })
+                void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: realEntry.startedAt, newEndedAt: realEntry.endedAt, notes: null })
                 void evaluateAndMaybeRetireRule(ruleId)
               } catch {}
-            } else {
-              // Regular entry update
-              updateHistory((current) => {
-                const idx = current.findIndex((h) => h.id === s.entryId)
-                if (idx === -1) return current
-                const target = current[idx]
-                const next = [...current]
-                const nowTs = Date.now()
-                // Evaluate futureSession based on start time and current state
-                const wasInPast = target.startedAt <= nowTs
-                const nowInPast = preview.startedAt <= nowTs
-                const crossedBoundary = wasInPast !== nowInPast
-                // Newly created sessions always stay as future sessions until explicitly confirmed.
-                // For existing sessions:
-                // - Crossed to future: unconfirm
-                // - Crossed to past: confirm
-                // - Stale unconfirmed (futureSession=true but start in past): any drag confirms it
-                const isFuture =
-                  pendingNewHistoryId && target.id === pendingNewHistoryId
-                    ? true
-                    : crossedBoundary && !nowInPast
-                      ? true   // Moved to future: unconfirm
-                      : crossedBoundary && nowInPast
-                        ? false  // Moved to past: confirm
-                        : target.futureSession && nowInPast
-                          ? false  // Stale unconfirmed session: confirm on any edit
-                          : target.futureSession  // Preserve current state
-                // For timezone markers, keep endedAt equal to startedAt
-                const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-                const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
-                next[idx] = {
-                  ...target,
-                  startedAt: preview.startedAt,
-                  endedAt: finalEndedAt,
-                  elapsed: Math.max(finalEndedAt - preview.startedAt, 1),
-                  futureSession: isFuture,
-                }
-                return next
-              })
-            }
-          } else if (guideMaterialization && s.activated) {
-            // Guide was activated but no time change - still need to materialize
-            const { realEntry, ruleId, ymd } = guideMaterialization
-            updateHistory((current) => {
-              const next = [...current, realEntry]
-              next.sort((a, b) => a.startedAt - b.startedAt)
-              return next
-            })
-            try {
-              void upsertRepeatingException({
-                routineId: ruleId,
-                occurrenceDate: ymd,
-                action: 'rescheduled',
-                newStartedAt: realEntry.startedAt,
-                newEndedAt: realEntry.endedAt,
-                notes: null,
-              })
-              void evaluateAndMaybeRetireRule(ruleId)
-            } catch {}
-            dragPreventClickRef.current = true
-          } else {
-            // If drag intent was activated (even if it snapped back to original), suppress the click-preview
-            if (s.activated) {
+              dragPreventClickRef.current = true
+            } else if (s) {
               dragPreventClickRef.current = true
             }
+            calendarEventDragRef.current = null
+            dragPreviewRef.current = null
+            setDragPreview(null)
+            delete targetEl.dataset.dragKind
+            setPageScrollLock(false)
+            calendarInteractionModeRef.current = null
+            return
           }
-          calendarEventDragRef.current = null
-          dragPreviewRef.current = null
-          setDragPreview(null)
-          // Clear drag kind marker so cursor returns to default/hover affordances
+          
+          // Mode was still 'pending' - just a click, do nothing special
           delete targetEl.dataset.dragKind
-          // Always release scroll lock at the end of a drag (noop if not locked)
-          setPageScrollLock(false)
-          // Clear interaction mode
           calendarInteractionModeRef.current = null
         }
-        // Arm the hold timer to activate dragging for all input types (mouse/pen/touch)
-        touchHoldTimer = window.setTimeout(() => {
-          touchHoldTimer = null
-          activateDrag()
+        
+        // Arm hold timer for drag activation
+        calendarHoldTimerRef.current = window.setTimeout(() => {
+          calendarHoldTimerRef.current = null
+          startDrag()
         }, DRAG_HOLD_DURATION_MS)
+        
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
         window.addEventListener('pointercancel', onUp)
-        // Timer is cleared in onMove (when movement occurs) and onUp (when finishing)
       }
       const headers = dayStarts.map((start, i) => {
         const d = new Date(start)
