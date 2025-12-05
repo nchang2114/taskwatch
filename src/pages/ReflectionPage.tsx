@@ -7682,7 +7682,7 @@ useEffect(() => {
     window.setTimeout(() => {
       suppressEventOpenRef.current = false
     }, 300)
-  }, [])
+  }, []) 
 
   const positionCalendarPreview = useCallback((anchorEl: HTMLElement | null) => {
     if (!anchorEl) return
