@@ -10196,7 +10196,8 @@ useEffect(() => {
             calendarDragRef.current = null
             setPageScrollLock(false)
             calendarInteractionModeRef.current = null
-            dragPreventClickRef.current = true
+            // Don't set dragPreventClickRef here - panning doesn't generate a click event,
+            // so there's nothing to suppress. Setting it would block the next intentional click.            
             return
           }
           
