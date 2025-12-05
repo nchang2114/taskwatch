@@ -1224,10 +1224,10 @@ function MainApp() {
       } catch {}
     }
     
-    // Sign out from Supabase
+    // Sign out from Supabase (local only - don't invalidate sessions on other devices)
     if (supabase) {
       try {
-        await supabase.auth.signOut()
+        await supabase.auth.signOut({ scope: 'local' })
       } catch (err) {
         console.warn('[logout] Sign out error:', err)
       }
