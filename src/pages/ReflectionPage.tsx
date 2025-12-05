@@ -255,8 +255,10 @@ const createHistoryDraftFromEntry = (entry?: HistoryEntry | null): HistoryDraftS
   taskName: entry?.taskName ?? '',
   goalName: entry?.goalName ?? '',
   bucketName: entry?.bucketName ?? '',
-  startedAt: entry?.startedAt ?? null,
-  endedAt: entry?.endedAt ?? null,
+  // Keep timestamps as null - they are derived from the entry with timezone adjustment at render time
+  // Only set when user explicitly changes via picker
+  startedAt: null,
+  endedAt: null,
   notes: entry?.notes ?? '',
   subtasks: entry ? cloneHistorySubtasks(entry.subtasks) : [],
   timezoneFrom: entry?.timezoneFrom ?? '',
@@ -791,9 +793,6 @@ const getDateTimeFormatter = (timeZone: string): Intl.DateTimeFormat => {
 const clearTimezoneCaches = () => {
   timezoneOffsetCache.clear()
   // Keep dateTimeFormatCache - those are still valid
-  if (TIMEZONE_DEBUG) {
-    console.log('🧹 Cleared timezone offset cache')
-  }
 }
 
 // Get the offset in milliseconds between two timezones at a given timestamp
@@ -816,9 +815,6 @@ const getTimezoneOffsetMs = (timestamp: number, sourceTz: string, targetTz: stri
   if (timezoneOffsetCache.size >= MAX_TZ_CACHE_SIZE) {
     // Clear oldest entries (simple approach: clear all and let it rebuild)
     timezoneOffsetCache.clear()
-    if (TIMEZONE_DEBUG) {
-      console.log('🧹 Timezone cache reached max size, cleared')
-    }
   }
   
   // Get the local time components in each timezone using cached formatters
@@ -2142,10 +2138,16 @@ const InspectorDateInput = ({ value, onChange, ariaLabel }: InspectorDateInputPr
   today.setHours(0, 0, 0, 0)
 
   const handleSelect = (date: Date) => {
-    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    const current = new Date(value)
-    next.setHours(current.getHours(), current.getMinutes(), current.getSeconds(), current.getMilliseconds())
-    onChange(next.getTime())
+    // Get the midnight of the selected date (in system timezone, as the calendar operates in system TZ)
+    const selectedDayMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+    // Get the midnight of the current value's day (using system TZ interpretation)
+    const currentDate = new Date(value)
+    const currentDayMidnight = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime()
+    // Calculate the time-of-day offset from midnight (this works in display coordinates)
+    const timeOfDayOffset = value - currentDayMidnight
+    // Apply the same time offset to the new day
+    const nextTs = selectedDayMidnight + timeOfDayOffset
+    onChange(nextTs)
     setOpen(false)
   }
 
@@ -2408,11 +2410,12 @@ const InspectorTimeInput = ({
       const nextTs = alignedAnchorTimestamp + offsetMinutes * 60000
       onChange(nextTs)
     } else {
-      const next = new Date(value)
-      const hoursPart = Math.floor(minutes / 60)
-      const minutesPart = minutes % 60
-      next.setHours(hoursPart, minutesPart, 0, 0)
-      onChange(next.getTime())
+      // Compute day start in display coordinates and add selected minutes.
+      // This avoids timezone issues with setHours() which uses system timezone.
+      const dayStart = new Date(value)
+      dayStart.setHours(0, 0, 0, 0)
+      const nextTs = dayStart.getTime() + minutes * 60000
+      onChange(nextTs)
     }
     setOpen(false)
     // Suppress the date picker opening for a brief moment after time selection
@@ -3422,12 +3425,6 @@ const computeRangeOverview = (
   }
 }
 
-// ========== TIMEZONE DEBUG: Set to true to enable diagnostic logging ==========
-const TIMEZONE_DEBUG = true
-let tzDebugCallCount = 0
-let tzDebugTotalMs = 0
-let tzDebugLastReportTime = 0
-
 export default function ReflectionPage() {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
@@ -3437,42 +3434,6 @@ export default function ReflectionPage() {
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
   const updateAppTimezone = useCallback((timezone: string | null) => {
-    if (TIMEZONE_DEBUG) {
-      console.group('🕐 TIMEZONE CHANGE TRIGGERED')
-      console.log('From:', appTimezone || '(system default)')
-      console.log('To:', timezone || '(system default)')
-      console.log('System timezone:', getCurrentSystemTimezone())
-      // Reset counters for new measurement
-      tzDebugCallCount = 0
-      tzDebugTotalMs = 0
-      tzDebugLastReportTime = Date.now()
-      // Check localStorage size
-      try {
-        const historyRaw = localStorage.getItem('nc-taskwatch-history')
-        const historySize = historyRaw ? historyRaw.length : 0
-        const historyEntries = historyRaw ? JSON.parse(historyRaw) : []
-        const tzMarkerCount = historyEntries.filter((e: any) => 
-          e?.bucketName?.trim() === 'Timezone Change marker'
-        ).length
-        console.log('📊 localStorage history size:', (historySize / 1024).toFixed(2), 'KB')
-        console.log('📊 Total history entries:', historyEntries.length)
-        console.log('📊 Timezone marker entries:', tzMarkerCount)
-        // Check for potentially malformed entries
-        const malformed = historyEntries.filter((e: any) => {
-          if (!e) return true
-          if (!Number.isFinite(e.startedAt) || !Number.isFinite(e.endedAt)) return true
-          if (e.startedAt > e.endedAt && e.bucketName?.trim() !== 'Timezone Change marker') return true
-          return false
-        })
-        if (malformed.length > 0) {
-          console.warn('⚠️ Potentially malformed entries:', malformed.length)
-          console.log('Malformed samples:', malformed.slice(0, 3))
-        }
-      } catch (err) {
-        console.error('Failed to analyze localStorage:', err)
-      }
-      console.groupEnd()
-    }
     // Clear timezone offset cache before changing timezone
     clearTimezoneCaches()
     storeAppTimezone(timezone)
@@ -3481,10 +3442,17 @@ export default function ReflectionPage() {
     })
   }, [appTimezone])
   
-  // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
+  // Timezone-aware time formatter for RAW UTC timestamps
+  // This applies timezone conversion during display formatting
   const formatTime = useCallback((timestamp: number) => {
     return formatTimeOfDay(timestamp, deferredAppTimezone)
   }, [deferredAppTimezone])
+  
+  // Format an already-adjusted timestamp (no timezone conversion needed)
+  // Use this for previewStart/previewEnd values which are already timezone-shifted
+  const formatAdjustedTime = useCallback((adjustedTimestamp: number) => {
+    return formatTimeOfDay(adjustedTimestamp) // No timezone - just format as local time
+  }, [])
   
   // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
@@ -3511,23 +3479,19 @@ export default function ReflectionPage() {
     const systemTz = getCurrentSystemTimezone()
     if (systemTz === deferredAppTimezone) return timestamp
     
-    // DEBUG: Track performance
-    const debugStart = TIMEZONE_DEBUG ? performance.now() : 0
-    const result = timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
-    if (TIMEZONE_DEBUG) {
-      const elapsed = performance.now() - debugStart
-      tzDebugCallCount++
-      tzDebugTotalMs += elapsed
-      // Report every 500ms or every 1000 calls
-      const now = Date.now()
-      if (now - tzDebugLastReportTime > 500 || tzDebugCallCount % 1000 === 0) {
-        const cacheSize = timezoneOffsetCache.size
-        console.log(`⏱️ adjustTimestampForTimezone: ${tzDebugCallCount} calls, ${tzDebugTotalMs.toFixed(2)}ms total, ${(tzDebugTotalMs / tzDebugCallCount).toFixed(4)}ms avg, cache size: ${cacheSize}`)
-        tzDebugLastReportTime = now
-      }
-    }
-    return result
+    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
   }, [deferredAppTimezone])
+  
+  // Reverse of adjustTimestampForTimezone - converts display time back to UTC for storage
+  // When creating/editing entries in a custom timezone, the visual position is in "display space"
+  // (already adjusted for the app timezone). Before saving, we need to un-adjust back to UTC.
+  const unadjustTimestampForTimezone = useCallback((displayTimestamp: number): number => {
+    if (!appTimezone) return displayTimestamp
+    const systemTz = getCurrentSystemTimezone()
+    if (systemTz === appTimezone) return displayTimestamp
+    // Subtract instead of add (reverse of adjustTimestampForTimezone)
+    return displayTimestamp - getTimezoneOffsetMs(displayTimestamp, systemTz, appTimezone)
+  }, [appTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
@@ -3887,44 +3851,7 @@ export default function ReflectionPage() {
   const [activeRange, setActiveRange] = useState<ReflectionRangeKey>('24h')
   // Snapback overview uses its own range and defaults to All Time
   const [snapActiveRange] = useState<SnapRangeKey>('all')
-  const [history, setHistory] = useState<HistoryEntry[]>(() => {
-    const entries = readPersistedHistory()
-    // DEBUG: Log history stats on page load
-    if (TIMEZONE_DEBUG) {
-      console.group('📋 HISTORY LOAD DIAGNOSTICS')
-      console.log('Total entries loaded:', entries.length)
-      const tzMarkers = entries.filter(e => e.bucketName?.trim() === 'Timezone Change marker')
-      console.log('Timezone marker entries:', tzMarkers.length)
-      if (tzMarkers.length > 0) {
-        console.log('Timezone markers:', tzMarkers.map(m => ({
-          id: m.id,
-          task: m.taskName,
-          startedAt: new Date(m.startedAt).toISOString(),
-          timezoneFrom: m.timezoneFrom,
-          timezoneTo: m.timezoneTo,
-        })))
-      }
-      // Check for issues
-      const issues: string[] = []
-      entries.forEach((e, i) => {
-        if (!Number.isFinite(e.startedAt)) issues.push(`Entry ${i} (${e.id}): invalid startedAt`)
-        if (!Number.isFinite(e.endedAt)) issues.push(`Entry ${i} (${e.id}): invalid endedAt`)
-        if (e.startedAt > e.endedAt && e.bucketName?.trim() !== 'Timezone Change marker') {
-          issues.push(`Entry ${i} (${e.id}): startedAt > endedAt`)
-        }
-        if (e.elapsed < 0) issues.push(`Entry ${i} (${e.id}): negative elapsed`)
-      })
-      if (issues.length > 0) {
-        console.warn('⚠️ Data issues found:', issues.length)
-        issues.slice(0, 10).forEach(issue => console.warn('  -', issue))
-        if (issues.length > 10) console.warn(`  ... and ${issues.length - 10} more`)
-      } else {
-        console.log('✅ No data issues detected')
-      }
-      console.groupEnd()
-    }
-    return entries
-  })
+  const [history, setHistory] = useState<HistoryEntry[]>(() => readPersistedHistory())
   const [repeatingExceptions, setRepeatingExceptions] = useState<RepeatingException[]>(() => readRepeatingExceptions())
   const latestHistoryRef = useRef(history)
   const goalsSnapshotSignatureRef = useRef<string | null>(null)
@@ -3999,6 +3926,22 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const calendarTouchAction = 'none'
   // Ref to the session name input inside the calendar editor modal (for autofocus on new entries)
   const calendarEditorNameInputRef = useRef<HTMLInputElement | null>(null)
+  // Track when we should auto-focus the name input (for touch devices that need immediate focus)
+  const pendingNameInputFocusRef = useRef(false)
+  
+  // Callback ref for the name input that focuses immediately on mount when pending
+  const calendarEditorNameInputCallbackRef = useCallback((node: HTMLInputElement | null) => {
+    calendarEditorNameInputRef.current = node
+    if (node && pendingNameInputFocusRef.current) {
+      pendingNameInputFocusRef.current = false
+      // Focus synchronously - critical for touch devices to show keyboard
+      try {
+        node.focus()
+        const len = node.value?.length ?? 0
+        node.setSelectionRange(len, len)
+      } catch {}
+    }
+  }, [])
 
   const isInspectorInteractiveTarget = useCallback((target: HTMLElement | null) => {
     if (!target) return false
@@ -6243,8 +6186,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const nextBucketName = draft.bucketName.trim()
     let nextNotes = draft.notes
     const nextSubtasks = cloneHistorySubtasks(draft.subtasks)
-    const draftStartedAt = draft.startedAt ?? selectedHistoryEntry.startedAt
-    const draftEndedAt = draft.endedAt ?? selectedHistoryEntry.endedAt
+    
+    // Draft timestamps are in display-space (adjusted for app timezone) when set by the user.
+    // We need to unadjust them back to storage-space for saving.
+    // If draft.startedAt is null, we fall back to entry's existing (storage-space) timestamp.
+    const draftStartedAt = draft.startedAt !== null ? unadjustTimestampForTimezone(draft.startedAt) : selectedHistoryEntry.startedAt
+    const draftEndedAt = draft.endedAt !== null ? unadjustTimestampForTimezone(draft.endedAt) : selectedHistoryEntry.endedAt
     let nextStartedAt = Number.isFinite(draftStartedAt) ? draftStartedAt : selectedHistoryEntry.startedAt
     let nextEndedAt = Number.isFinite(draftEndedAt) ? draftEndedAt : selectedHistoryEntry.endedAt
     if (!Number.isFinite(nextStartedAt)) {
@@ -6402,12 +6349,15 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       didUpdateHistory = true
       return next
     })
+    // After saving, reset draft timestamps to null so future saves read from the entry
+    // (which has the canonical storage-space values). This prevents double-unadjusting
+    // if save is called multiple times.
     const normalizedDraft: HistoryDraftState = {
       taskName: nextTaskName,
       goalName: normalizedGoalName,
       bucketName: normalizedBucketName,
-      startedAt: nextStartedAt,
-      endedAt: nextEndedAt,
+      startedAt: null,
+      endedAt: null,
       notes: nextNotes,
       subtasks: cloneHistorySubtasks(nextSubtasks),
       timezoneFrom: draft.timezoneFrom,
@@ -6449,6 +6399,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     selectedHistoryId,
     setPendingNewHistoryId,
     updateHistory,
+    unadjustTimestampForTimezone,
   ])
 
   useEffect(() => {
@@ -9614,8 +9565,8 @@ useEffect(() => {
             const rawStart = isPreviewed ? dragPreview.startedAt : entry.startedAt
             const rawEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
             
-            // For actual sessions (not guides), adjust timestamps for app timezone
-            // Guide tasks (repeating rules) should stay in their original scheduled time
+            // Guide tasks show at their scheduled local time (not timezone-adjusted)
+            // Real sessions are timezone-adjusted so they appear in app timezone
             const isGuideEntry = entry.id.startsWith('repeat:')
             const previewStart = isGuideEntry ? rawStart : adjustTimestampForTimezone(rawStart)
             const previewEnd = isGuideEntry ? rawEnd : adjustTimestampForTimezone(rawEnd)
@@ -10061,11 +10012,11 @@ useEffect(() => {
           const isGuide = info.entry.id.startsWith('repeat:')
           const isPlanned = !!(info.entry as any).futureSession
           
-          // Guide tasks (repeating rules) should show original local times, not timezone-adjusted
-          // Actual sessions should use timezone-adjusted times
+          // Guides show at scheduled local time (format without timezone)
+          // Real sessions are timezone-adjusted (format as local since already adjusted)
           const rangeLabel = isGuide
             ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
-            : `${formatTime(info.previewStart)} — ${formatTime(info.previewEnd)}`
+            : `${formatAdjustedTime(info.previewStart)} — ${formatAdjustedTime(info.previewEnd)}`
 
           const duration = Math.max(info.end - info.start, 1)
           const durationScore = Math.max(0, Math.round((DAY_DURATION_MS - duration) / MINUTE_MS))
@@ -10384,15 +10335,21 @@ useEffect(() => {
             const preview = dragPreviewRef.current
             if (s && preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
               dragPreventClickRef.current = true
+              // For existing entries (non-guides), the drag calculation uses system timezone dayStarts,
+              // and real sessions are displayed with timezone adjustment, so no conversion needed.
+              // For guide materializations: the preview is calculated using system timezone dayStarts.
+              // Guide timestamps represent intended LOCAL time, so we need to unadjust for storage.
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
+                const storedStartedAt = unadjustTimestampForTimezone(preview.startedAt)
+                const storedEndedAt = unadjustTimestampForTimezone(preview.endedAt)
                 flushSync(() => {
                   updateHistory((current) => {
                     const materialized = {
                       ...realEntry,
-                      startedAt: preview.startedAt,
-                      endedAt: preview.endedAt,
-                      elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                      startedAt: storedStartedAt,
+                      endedAt: storedEndedAt,
+                      elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                     }
                     const next = [...current, materialized]
                     next.sort((a, b) => a.startedAt - b.startedAt)
@@ -10400,10 +10357,13 @@ useEffect(() => {
                   })
                 })
                 try {
-                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: preview.startedAt, newEndedAt: preview.endedAt, notes: null })
+                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: storedStartedAt, newEndedAt: storedEndedAt, notes: null })
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
+                // Existing real entry - preview values are already correct
+                const finalStartedAt = preview.startedAt
+                const finalEndedAt = preview.endedAt
                 flushSync(() => {
                   updateHistory((current) => {
                     const idx = current.findIndex((h) => h.id === s.entryId)
@@ -10412,7 +10372,7 @@ useEffect(() => {
                     const next = [...current]
                     const nowTs = Date.now()
                     const wasInPast = target.startedAt <= nowTs
-                    const nowInPast = preview.startedAt <= nowTs
+                    const nowInPast = finalStartedAt <= nowTs
                     const crossedBoundary = wasInPast !== nowInPast
                     const isFuture =
                       pendingNewHistoryId && target.id === pendingNewHistoryId ? true
@@ -10421,23 +10381,35 @@ useEffect(() => {
                       : target.futureSession && nowInPast ? false
                       : target.futureSession
                     const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-                    const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
-                    next[idx] = { ...target, startedAt: preview.startedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - preview.startedAt, 1), futureSession: isFuture }
+                    const finalEnd = isTimezoneMarkerEntry ? finalStartedAt : finalEndedAt
+                    next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEnd, elapsed: Math.max(finalEnd - finalStartedAt, 1), futureSession: isFuture }
                     return next
                   })
                 })
               }
             } else if (guideMaterialization && s) {
+              // Guide held but not moved - materialize at same visual position.
+              // Guide timestamps represent intended LOCAL time, unadjust for storage.
               const { realEntry, ruleId, ymd } = guideMaterialization
+              const storedStartedAt = unadjustTimestampForTimezone(realEntry.startedAt)
+              const storedEndedAt = unadjustTimestampForTimezone(realEntry.endedAt)
+              const materializedEntry = {
+                ...realEntry,
+                startedAt: storedStartedAt,
+                endedAt: storedEndedAt,
+                elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
+                // originalTime must match the guide's time for suppression lookup to work
+                originalTime: realEntry.startedAt,
+              }
               flushSync(() => {
                 updateHistory((current) => {
-                  const next = [...current, realEntry]
+                  const next = [...current, materializedEntry]
                   next.sort((a, b) => a.startedAt - b.startedAt)
                   return next
                 })
               })
               try {
-                void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: realEntry.startedAt, newEndedAt: realEntry.endedAt, notes: null })
+                void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: storedStartedAt, newEndedAt: storedEndedAt, notes: null })
                 void evaluateAndMaybeRetireRule(ruleId)
               } catch {}
               dragPreventClickRef.current = true
@@ -10612,13 +10584,17 @@ useEffect(() => {
                       try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (moved && preview && preview.entryId === bar.entry.id && (preview.startedAt !== initialStart || preview.endedAt !== initialEnd)) {
+                        // Use preview values directly - they're already computed in system timezone space
+                        // (dayStarts uses system local time, so no unadjust needed for existing entries)
+                        const finalStartedAt = preview.startedAt
+                        const finalEndedAt = preview.endedAt
                         flushSync(() => {
                           updateHistory((current) => {
                             const idx = current.findIndex((h) => h.id === bar.entry.id)
                             if (idx === -1) return current
                             const target = current[idx]
                             const next = [...current]
-                            next[idx] = { ...target, startedAt: preview.startedAt, endedAt: preview.endedAt, elapsed: Math.max(preview.endedAt - preview.startedAt, 1) }
+                            next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - finalStartedAt, 1) }
                             return next
                           })
                         })
@@ -10919,9 +10895,10 @@ useEffect(() => {
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (preview && preview.entryId === 'new-entry') {
-                        const startedAt = Math.min(preview.startedAt, preview.endedAt)
-                        const endedAt = Math.max(preview.startedAt, preview.endedAt)
-                        const elapsed = Math.max(endedAt - startedAt, MIN_SESSION_DURATION_DRAG_MS)
+                        // Convert from display time back to UTC for storage
+                        const rawStartedAt = unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
+                        const rawEndedAt = unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
+                        const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
                         const newId = makeHistoryId()
                         const newEntry: HistoryEntry = {
                           id: newId,
@@ -10932,8 +10909,8 @@ useEffect(() => {
                           bucketId: null,
                           taskId: null,
                           elapsed,
-                          startedAt,
-                          endedAt,
+                          startedAt: rawStartedAt,
+                          endedAt: rawEndedAt,
                           goalSurface: LIFE_ROUTINES_SURFACE,
                           bucketSurface: null,
                           notes: '',
@@ -10947,9 +10924,19 @@ useEffect(() => {
                           })
                         })
                         setPendingNewHistoryId(newId)
-                        setTimeout(() => {
+                        // Open editor synchronously to maintain user gesture chain for touch keyboard
+                        flushSync(() => {
                           openCalendarInspector(newEntry)
-                        }, 0)
+                        })
+                        // Focus the input immediately after flushSync renders the modal
+                        const input = calendarEditorNameInputRef.current
+                        if (input) {
+                          try {
+                            input.focus()
+                            const len = input.value?.length ?? 0
+                            input.setSelectionRange(len, len)
+                          } catch {}
+                        }
                       }
                       calendarEventDragRef.current = null
                       dragPreviewRef.current = null
@@ -11137,10 +11124,17 @@ useEffect(() => {
                             const ruleId = parts[1]
                             const dayStart = Number(parts[2])
                             const ymd = formatLocalYmd(dayStart)
+                            // Guide timestamps represent intended LOCAL time, unadjust for storage.
+                            const storedStartedAt = unadjustTimestampForTimezone(ev.entry.startedAt)
+                            const storedEndedAt = unadjustTimestampForTimezone(ev.entry.endedAt)
                             const newEntry: HistoryEntry = {
                               ...ev.entry,
                               id: makeHistoryId(),
+                              startedAt: storedStartedAt,
+                              endedAt: storedEndedAt,
+                              elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                               repeatingSessionId: ruleId,
+                              // originalTime must match guide's time for suppression lookup
                               originalTime: ev.entry.startedAt,
                             }
                             updateHistory((current) => {
@@ -11153,8 +11147,8 @@ useEffect(() => {
                                 routineId: ruleId,
                                 occurrenceDate: ymd,
                                 action: 'rescheduled',
-                                newStartedAt: newEntry.startedAt,
-                                newEndedAt: newEntry.endedAt,
+                                newStartedAt: storedStartedAt,
+                                newEndedAt: storedEndedAt,
                                 notes: null,
                               })
                             } catch {}
@@ -11220,7 +11214,8 @@ useEffect(() => {
                       if (endClamped <= startClamped) return null
                       const topPct = ((startClamped - dayStart) / DAY_DURATION_MS) * 100
                       const heightPct = Math.max(((endClamped - startClamped) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-                      const label = `${formatTime(startClamped)} — ${formatTime(endClamped)}`
+                      // Drag preview values are computed from dayStarts (system timezone), so format as local
+                      const label = `${formatAdjustedTime(startClamped)} — ${formatAdjustedTime(endClamped)}`
                       return (
                         <div
                           className="calendar-event calendar-event--dragging"
@@ -12178,13 +12173,24 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                  const newEntry: HistoryEntry = {
-                    ...entry,
-                    id: makeHistoryId(),
-                    repeatingSessionId: parsedGuide.ruleId,
-                    originalTime: entry.startedAt,
-                    futureSession: false,
-                  }
+                    // Guide timestamps are computed in system timezone (baseDayStart + timeOfDayMinutes).
+                    // Guide timestamps represent intended LOCAL time (e.g., "11 AM wherever I am").
+                    // We need to unadjust them so that when displayed with adjustTimestampForTimezone,
+                    // the session appears at the same visual position as the guide.
+                    const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
+                    const storedEndedAt = unadjustTimestampForTimezone(entry.endedAt)
+                    const newEntry: HistoryEntry = {
+                      ...entry,
+                      id: makeHistoryId(),
+                      startedAt: storedStartedAt,
+                      endedAt: storedEndedAt,
+                      elapsed: Math.max(entry.endedAt - entry.startedAt, 1),
+                      repeatingSessionId: parsedGuide.ruleId,
+                      // originalTime must match the guide's time for suppression lookup to work
+                      // (confirmedKeySet uses formatLocalYmd(originalTime) to match guide's dayStart)
+                      originalTime: entry.startedAt,
+                      futureSession: false,
+                    }
                     updateHistory((current) => {
                       const next = [...current, newEntry]
                       next.sort((a, b) => a.startedAt - b.startedAt)
@@ -12211,13 +12217,17 @@ useEffect(() => {
                   className="history-timeline__action-button"
                   onClick={async () => {
                     if (!parsedGuide) return
-                    // Create a zero-duration entry to mark this occurrence as resolved without rendering
+                    // Create a zero-duration entry to mark this occurrence as resolved without rendering.
+                    // Guide timestamps represent intended LOCAL time, unadjust for storage.
+                    const storedTime = unadjustTimestampForTimezone(entry.startedAt)
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
-                      endedAt: entry.startedAt,
+                      startedAt: storedTime,
+                      endedAt: storedTime,
                       elapsed: 0,
                       repeatingSessionId: parsedGuide.ruleId,
+                      // originalTime must match the guide's time for suppression lookup to work
                       originalTime: entry.startedAt,
                     }
                     updateHistory((current) => {
@@ -12429,14 +12439,16 @@ useEffect(() => {
     return () => document.removeEventListener('keydown', onKeyDown as EventListener)
   }, [calendarEditorEntryId, handleCancelHistoryEdit])
 
-  // When opening the calendar editor, if this is a freshly created (pending) entry,
-  // focus the session name input and place the caret at the end.
+  // Fallback focus effect for desktop - the callback ref handles immediate focus for touch devices,
+  // but this useEffect serves as a backup for cases where the input is already mounted.
   useEffect(() => {
     if (!calendarEditorEntryId) return
     if (!pendingNewHistoryId || pendingNewHistoryId !== calendarEditorEntryId) return
+    // If the pending flag is still set, the callback ref hasn't fired yet - skip fallback
+    if (pendingNameInputFocusRef.current) return
     const focusLater = () => {
       const input = calendarEditorNameInputRef.current
-      if (input) {
+      if (input && document.activeElement !== input) {
         try {
           input.focus()
           const len = input.value?.length ?? 0
@@ -12460,9 +12472,14 @@ useEffect(() => {
       currentGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
       currentBucket === TIMEZONE_CHANGE_MARKER
     
-    // Resolve current values
-    const startBase = entry.startedAt
-    const endBase = entry.endedAt
+    // Guide entries (repeat:xxx IDs) display without timezone adjustment
+    // Real sessions are timezone-adjusted for display
+    const isGuideEntry = entry.id.startsWith('repeat:')
+    const adjustForDisplay = (ts: number) => isGuideEntry ? ts : adjustTimestampForTimezone(ts)
+    
+    // Resolve current values - adjust base times for display in the inputs
+    const startBase = adjustForDisplay(entry.startedAt)
+    const endBase = adjustForDisplay(entry.endedAt)
     const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
     const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
     const shiftStartAndPreserveDuration = (nextStart: number) => {
@@ -12518,7 +12535,7 @@ useEffect(() => {
               <input
                 className="history-timeline__field-input"
                 type="text"
-                ref={calendarEditorNameInputRef}
+                ref={calendarEditorNameInputCallbackRef}
                 value={historyDraft.taskName}
                 placeholder="Describe the focus block"
                 onChange={handleHistoryFieldChange('taskName')}
@@ -12722,6 +12739,7 @@ useEffect(() => {
       document.body,
     )
   }, [
+    adjustTimestampForTimezone,
     calendarEditorEntryId,
     history,
     historyDraft.bucketName,
@@ -12729,6 +12747,8 @@ useEffect(() => {
     historyDraft.taskName,
     historyDraft.notes,
     historyDraft.subtasks,
+    historyDraft.startedAt,
+    historyDraft.endedAt,
     availableBucketOptions.length,
     bucketDropdownId,
     bucketDropdownOptions,
@@ -12930,10 +12950,17 @@ useEffect(() => {
 
       const preview = dragPreviewRef.current
       if (state.hasMoved && preview) {
-        if (state.entryId === 'new-entry') {
-          const startedAt = Math.min(preview.startedAt, preview.endedAt)
-          const endedAt = Math.max(preview.startedAt, preview.endedAt)
-          const elapsed = Math.max(endedAt - startedAt, MIN_SESSION_DURATION_DRAG_MS)
+        // For NEW entries: preview is in display time, need to unadjust for storage
+        // For EXISTING entries: preview is already in system timezone space (dayStarts uses system local time)
+        const isNewEntry = state.entryId === 'new-entry'
+        const rawStartedAt = isNewEntry
+          ? unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
+          : Math.min(preview.startedAt, preview.endedAt)
+        const rawEndedAt = isNewEntry
+          ? unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
+          : Math.max(preview.startedAt, preview.endedAt)
+        if (isNewEntry) {
+          const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
           const newEntry: HistoryEntry = {
             id: makeHistoryId(),
             taskName: '',
@@ -12943,8 +12970,8 @@ useEffect(() => {
             bucketId: null,
             taskId: null,
             elapsed,
-            startedAt,
-            endedAt,
+            startedAt: rawStartedAt,
+            endedAt: rawEndedAt,
             goalSurface: LIFE_ROUTINES_SURFACE,
             bucketSurface: null,
             notes: '',
@@ -12958,9 +12985,19 @@ useEffect(() => {
             })
           })
           setPendingNewHistoryId(newEntry.id)
-          setTimeout(() => {
-            handleStartEditingHistoryEntry(newEntry)
-          }, 0)
+          // Open editor synchronously to maintain user gesture chain for touch keyboard
+          flushSync(() => {
+            openCalendarInspector(newEntry)
+          })
+          // Focus the input immediately after flushSync renders the modal
+          const input = calendarEditorNameInputRef.current
+          if (input) {
+            try {
+              input.focus()
+              const len = input.value?.length ?? 0
+              input.setSelectionRange(len, len)
+            } catch {}
+          }
         } else {
           flushSync(() => {
             updateHistory((current) => {
@@ -12969,15 +13006,15 @@ useEffect(() => {
                 return current
               }
               const target = current[index]
-              if (target.startedAt === preview.startedAt && target.endedAt === preview.endedAt) {
+              if (target.startedAt === rawStartedAt && target.endedAt === rawEndedAt) {
                 return current
               }
               const next = [...current]
               next[index] = {
                 ...target,
-                startedAt: preview.startedAt,
-                endedAt: preview.endedAt,
-                elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                startedAt: rawStartedAt,
+                endedAt: rawEndedAt,
+                elapsed: Math.max(rawEndedAt - rawStartedAt, 1),
               }
               return next
             })
@@ -12985,8 +13022,8 @@ useEffect(() => {
           if (selectedHistoryIdRef.current === state.entryId) {
             setHistoryDraft((draft) => ({
               ...draft,
-              startedAt: preview.startedAt,
-              endedAt: preview.endedAt,
+              startedAt: rawStartedAt,
+              endedAt: rawEndedAt,
             }))
           }
         }
@@ -13124,8 +13161,13 @@ useEffect(() => {
   let calendarInspectorPanel: ReactElement | null = null
   if (calendarInspectorEntryId !== null) {
     if (inspectorEntry) {
-      const startBase = inspectorEntry.startedAt
-      const endBase = inspectorEntry.endedAt
+      // Guide entries (repeat:xxx IDs) display without timezone adjustment
+      // Real sessions are timezone-adjusted for display
+      const isInspectorGuide = inspectorEntry.id.startsWith('repeat:')
+      const adjustForDisplay = (ts: number) => isInspectorGuide ? ts : adjustTimestampForTimezone(ts)
+      
+      const startBase = adjustForDisplay(inspectorEntry.startedAt)
+      const endBase = adjustForDisplay(inspectorEntry.endedAt)
       const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
       const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
       const shiftStartAndPreserveDuration = (nextStart: number) => {
