@@ -759,37 +759,73 @@ const isCityInEffectiveTimezone = (cityFullName: string, appTimezoneOverride: st
   return cityTimezone === effectiveTimezone
 }
 
+// ========== TIMEZONE OFFSET CACHE ==========
+// Cache timezone offset calculations to avoid repeated Intl.DateTimeFormat instantiation.
+// Offsets only change at DST boundaries, so we cache by hour-rounded timestamps.
+// Key format: "sourceTz|targetTz|hourTimestamp"
+const timezoneOffsetCache = new Map<string, number>()
+const HOUR_MS = 60 * 60 * 1000
+const MAX_TZ_CACHE_SIZE = 500 // Prevent unbounded growth
+
+// Reusable DateTimeFormat instances per timezone (much cheaper than creating new ones)
+const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>()
+const getDateTimeFormatter = (timeZone: string): Intl.DateTimeFormat => {
+  let formatter = dateTimeFormatCache.get(timeZone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+    dateTimeFormatCache.set(timeZone, formatter)
+  }
+  return formatter
+}
+
+// Clear timezone caches when timezone changes (called from updateAppTimezone)
+const clearTimezoneCaches = () => {
+  timezoneOffsetCache.clear()
+  // Keep dateTimeFormatCache - those are still valid
+  if (TIMEZONE_DEBUG) {
+    console.log('🧹 Cleared timezone offset cache')
+  }
+}
+
 // Get the offset in milliseconds between two timezones at a given timestamp
 // Returns (targetTz offset - sourceTz offset), so adding this to a sourceTz timestamp
 // gives the equivalent time in targetTz
 const getTimezoneOffsetMs = (timestamp: number, sourceTz: string, targetTz: string): number => {
   if (sourceTz === targetTz) return 0
   
-  // Get the local time components in each timezone
-  const dateInSource = new Date(timestamp)
-  const dateInTarget = new Date(timestamp)
+  // Round to nearest hour for cache key (offsets don't change within an hour)
+  const hourTs = Math.floor(timestamp / HOUR_MS) * HOUR_MS
+  const cacheKey = `${sourceTz}|${targetTz}|${hourTs}`
   
-  // Format to get the offset for each timezone
-  const sourceFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: sourceTz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const targetFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: targetTz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
+  // Check cache first
+  const cached = timezoneOffsetCache.get(cacheKey)
+  if (cached !== undefined) {
+    return cached
+  }
+  
+  // Prevent cache from growing unbounded
+  if (timezoneOffsetCache.size >= MAX_TZ_CACHE_SIZE) {
+    // Clear oldest entries (simple approach: clear all and let it rebuild)
+    timezoneOffsetCache.clear()
+    if (TIMEZONE_DEBUG) {
+      console.log('🧹 Timezone cache reached max size, cleared')
+    }
+  }
+  
+  // Get the local time components in each timezone using cached formatters
+  const sourceFormatter = getDateTimeFormatter(sourceTz)
+  const targetFormatter = getDateTimeFormatter(targetTz)
+  
+  const dateObj = new Date(timestamp)
   
   // Parse the formatted strings back to dates in UTC context
   const parseFormattedDate = (formatted: string): number => {
@@ -807,10 +843,15 @@ const getTimezoneOffsetMs = (timestamp: number, sourceTz: string, targetTz: stri
     )
   }
   
-  const sourceUtc = parseFormattedDate(sourceFormatter.format(dateInSource))
-  const targetUtc = parseFormattedDate(targetFormatter.format(dateInTarget))
+  const sourceUtc = parseFormattedDate(sourceFormatter.format(dateObj))
+  const targetUtc = parseFormattedDate(targetFormatter.format(dateObj))
   
-  return targetUtc - sourceUtc
+  const offset = targetUtc - sourceUtc
+  
+  // Cache the result
+  timezoneOffsetCache.set(cacheKey, offset)
+  
+  return offset
 }
 
 // Snapback virtual goal
@@ -3381,6 +3422,12 @@ const computeRangeOverview = (
   }
 }
 
+// ========== TIMEZONE DEBUG: Set to true to enable diagnostic logging ==========
+const TIMEZONE_DEBUG = true
+let tzDebugCallCount = 0
+let tzDebugTotalMs = 0
+let tzDebugLastReportTime = 0
+
 export default function ReflectionPage() {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
@@ -3390,11 +3437,49 @@ export default function ReflectionPage() {
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
   const updateAppTimezone = useCallback((timezone: string | null) => {
+    if (TIMEZONE_DEBUG) {
+      console.group('🕐 TIMEZONE CHANGE TRIGGERED')
+      console.log('From:', appTimezone || '(system default)')
+      console.log('To:', timezone || '(system default)')
+      console.log('System timezone:', getCurrentSystemTimezone())
+      // Reset counters for new measurement
+      tzDebugCallCount = 0
+      tzDebugTotalMs = 0
+      tzDebugLastReportTime = Date.now()
+      // Check localStorage size
+      try {
+        const historyRaw = localStorage.getItem('nc-taskwatch-history')
+        const historySize = historyRaw ? historyRaw.length : 0
+        const historyEntries = historyRaw ? JSON.parse(historyRaw) : []
+        const tzMarkerCount = historyEntries.filter((e: any) => 
+          e?.bucketName?.trim() === 'Timezone Change marker'
+        ).length
+        console.log('📊 localStorage history size:', (historySize / 1024).toFixed(2), 'KB')
+        console.log('📊 Total history entries:', historyEntries.length)
+        console.log('📊 Timezone marker entries:', tzMarkerCount)
+        // Check for potentially malformed entries
+        const malformed = historyEntries.filter((e: any) => {
+          if (!e) return true
+          if (!Number.isFinite(e.startedAt) || !Number.isFinite(e.endedAt)) return true
+          if (e.startedAt > e.endedAt && e.bucketName?.trim() !== 'Timezone Change marker') return true
+          return false
+        })
+        if (malformed.length > 0) {
+          console.warn('⚠️ Potentially malformed entries:', malformed.length)
+          console.log('Malformed samples:', malformed.slice(0, 3))
+        }
+      } catch (err) {
+        console.error('Failed to analyze localStorage:', err)
+      }
+      console.groupEnd()
+    }
+    // Clear timezone offset cache before changing timezone
+    clearTimezoneCaches()
     storeAppTimezone(timezone)
     startTransition(() => {
       setAppTimezone(timezone)
     })
-  }, [])
+  }, [appTimezone])
   
   // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
   const formatTime = useCallback((timestamp: number) => {
@@ -3425,7 +3510,23 @@ export default function ReflectionPage() {
     if (!deferredAppTimezone) return timestamp
     const systemTz = getCurrentSystemTimezone()
     if (systemTz === deferredAppTimezone) return timestamp
-    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
+    
+    // DEBUG: Track performance
+    const debugStart = TIMEZONE_DEBUG ? performance.now() : 0
+    const result = timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
+    if (TIMEZONE_DEBUG) {
+      const elapsed = performance.now() - debugStart
+      tzDebugCallCount++
+      tzDebugTotalMs += elapsed
+      // Report every 500ms or every 1000 calls
+      const now = Date.now()
+      if (now - tzDebugLastReportTime > 500 || tzDebugCallCount % 1000 === 0) {
+        const cacheSize = timezoneOffsetCache.size
+        console.log(`⏱️ adjustTimestampForTimezone: ${tzDebugCallCount} calls, ${tzDebugTotalMs.toFixed(2)}ms total, ${(tzDebugTotalMs / tzDebugCallCount).toFixed(4)}ms avg, cache size: ${cacheSize}`)
+        tzDebugLastReportTime = now
+      }
+    }
+    return result
   }, [deferredAppTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
@@ -3786,7 +3887,44 @@ export default function ReflectionPage() {
   const [activeRange, setActiveRange] = useState<ReflectionRangeKey>('24h')
   // Snapback overview uses its own range and defaults to All Time
   const [snapActiveRange] = useState<SnapRangeKey>('all')
-  const [history, setHistory] = useState<HistoryEntry[]>(() => readPersistedHistory())
+  const [history, setHistory] = useState<HistoryEntry[]>(() => {
+    const entries = readPersistedHistory()
+    // DEBUG: Log history stats on page load
+    if (TIMEZONE_DEBUG) {
+      console.group('📋 HISTORY LOAD DIAGNOSTICS')
+      console.log('Total entries loaded:', entries.length)
+      const tzMarkers = entries.filter(e => e.bucketName?.trim() === 'Timezone Change marker')
+      console.log('Timezone marker entries:', tzMarkers.length)
+      if (tzMarkers.length > 0) {
+        console.log('Timezone markers:', tzMarkers.map(m => ({
+          id: m.id,
+          task: m.taskName,
+          startedAt: new Date(m.startedAt).toISOString(),
+          timezoneFrom: m.timezoneFrom,
+          timezoneTo: m.timezoneTo,
+        })))
+      }
+      // Check for issues
+      const issues: string[] = []
+      entries.forEach((e, i) => {
+        if (!Number.isFinite(e.startedAt)) issues.push(`Entry ${i} (${e.id}): invalid startedAt`)
+        if (!Number.isFinite(e.endedAt)) issues.push(`Entry ${i} (${e.id}): invalid endedAt`)
+        if (e.startedAt > e.endedAt && e.bucketName?.trim() !== 'Timezone Change marker') {
+          issues.push(`Entry ${i} (${e.id}): startedAt > endedAt`)
+        }
+        if (e.elapsed < 0) issues.push(`Entry ${i} (${e.id}): negative elapsed`)
+      })
+      if (issues.length > 0) {
+        console.warn('⚠️ Data issues found:', issues.length)
+        issues.slice(0, 10).forEach(issue => console.warn('  -', issue))
+        if (issues.length > 10) console.warn(`  ... and ${issues.length - 10} more`)
+      } else {
+        console.log('✅ No data issues detected')
+      }
+      console.groupEnd()
+    }
+    return entries
+  })
   const [repeatingExceptions, setRepeatingExceptions] = useState<RepeatingException[]>(() => readRepeatingExceptions())
   const latestHistoryRef = useRef(history)
   const goalsSnapshotSignatureRef = useRef<string | null>(null)
