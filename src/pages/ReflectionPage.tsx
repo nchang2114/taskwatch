@@ -1955,6 +1955,16 @@ const isAllDayRangeTs = (start: number, end: number): boolean => {
 const DRAG_DETECTION_THRESHOLD_PX = 3
 const MIN_SESSION_DURATION_DRAG_MS = MINUTE_MS
 const DRAG_HOLD_DURATION_MS = 300 // Hold duration required to start dragging/extending sessions
+
+// Calendar interaction mode - single source of truth for pan vs create vs drag
+// This ensures only one interaction can be active at a time
+type CalendarInteractionMode =
+  | null           // No interaction active
+  | 'pending'      // Touch down, waiting to determine intent (hold timer running)
+  | 'panning'      // Horizontal pan in progress
+  | 'creating'     // Drag-to-create session in progress
+  | 'dragging'     // Moving/resizing existing event
+
 // Double-tap (touch) detection settings
 // Double-tap (touch) detection thresholds (tighter to reduce accidental triggers)
 const DOUBLE_TAP_DELAY_MS = 220
@@ -3346,6 +3356,10 @@ export default function ReflectionPage() {
   // Track for all-day events row so it pans in sync with days/headers
   const calendarAllDayRef = useRef<HTMLDivElement | null>(null)
   const calendarBaseTranslateRef = useRef<number>(0)
+  // Single source of truth for calendar interaction mode - prevents pan/create conflicts
+  const calendarInteractionModeRef = useRef<CalendarInteractionMode>(null)
+  // Timer ref for the hold-to-create delay
+  const calendarHoldTimerRef = useRef<number | null>(null)
   const calendarDragRef = useRef<{
     pointerId: number
     startX: number
@@ -3987,6 +4001,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     dragStateRef.current = null
     dragPreviewRef.current = null
     calendarEventDragRef.current = null
+    // Clear interaction mode and hold timer when day offset changes
+    calendarInteractionModeRef.current = null
+    if (calendarHoldTimerRef.current !== null) {
+      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+      calendarHoldTimerRef.current = null
+    }
   }, [historyDayOffset])
 
   useEffect(() => {
@@ -8716,6 +8736,8 @@ useEffect(() => {
       return
     }
     if (event.button !== 0) return
+    // If another interaction is already active, don't start a new one
+    if (calendarInteractionModeRef.current !== null) return
     let scrollLocked = false
     let prevTouchAction: string | null = null
     const target = event.target as HTMLElement | null
@@ -8755,9 +8777,13 @@ useEffect(() => {
       mode: 'pending',
       lastAppliedDx: 0,
     }
+    // Set interaction mode to pending - will transition to panning if horizontal movement detected
+    calendarInteractionModeRef.current = 'pending'
     // Don't capture or preventDefault yet; wait until we detect horizontal intent
     const handleMove = (e: PointerEvent) => {
-      // Don't pan if an event drag is active
+      // Don't pan if an event drag is active or we're in a different mode
+      const currentMode = calendarInteractionModeRef.current
+      if (currentMode === 'creating' || currentMode === 'dragging') return
       const eventDragState = calendarEventDragRef.current
       if (eventDragState && eventDragState.activated) return
       const state = calendarDragRef.current
@@ -8775,15 +8801,22 @@ useEffect(() => {
           window.removeEventListener('pointerup', handleUp)
           window.removeEventListener('pointercancel', handleUp)
           calendarDragRef.current = null
+          calendarInteractionModeRef.current = null
           return
         }
         if (intent !== 'horizontal') {
           return
         }
         // Horizontal drag confirmed: capture and prevent default
+        // Cancel any pending hold timer for create mode
+        if (calendarHoldTimerRef.current !== null) {
+          try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+          calendarHoldTimerRef.current = null
+        }
         try { e.preventDefault() } catch {}
         try { area.setPointerCapture?.(e.pointerId) } catch {}
         state.mode = 'hdrag'
+        calendarInteractionModeRef.current = 'panning'
         if (prevTouchAction === null) {
           prevTouchAction = area.style.touchAction
           area.style.touchAction = 'none'
@@ -8862,6 +8895,10 @@ useEffect(() => {
         }
       }
       calendarDragRef.current = null
+      // Only clear interaction mode if we were panning (not if column handler took over)
+      if (calendarInteractionModeRef.current === 'panning' || calendarInteractionModeRef.current === 'pending') {
+        calendarInteractionModeRef.current = null
+      }
       if (scrollLocked) {
         setPageScrollLock(false)
         scrollLocked = false
@@ -9748,6 +9785,11 @@ useEffect(() => {
       ) => (ev: ReactPointerEvent<HTMLDivElement>) => {
         if (entry.id === 'active-session') return
         if (ev.button !== 0) return
+        // Check if another interaction is already active
+        const currentMode = calendarInteractionModeRef.current
+        if (currentMode === 'panning' || currentMode === 'creating') return
+        // Stop propagation to prevent parent handlers from firing
+        ev.stopPropagation()
         const daysRoot = calendarDaysRef.current
         if (!daysRoot) return
         const columnEls = Array.from(daysRoot.querySelectorAll<HTMLDivElement>('.calendar-day-column'))
@@ -9772,6 +9814,8 @@ useEffect(() => {
   const targetEl = ev.currentTarget as HTMLDivElement
   if (kind === 'move') targetEl.dataset.dragKind = 'move'
   else targetEl.dataset.dragKind = 'resize'
+        // Set interaction mode to pending - will transition to dragging or panning
+        calendarInteractionModeRef.current = 'pending'
         // Compute time-of-day at drag start (use visible edge for resize)
         const clampedStart = Math.max(Math.min(entry.startedAt, entry.endedAt), entryDayStart)
         const clampedEnd = Math.min(Math.max(entry.startedAt, entry.endedAt), entryDayStart + DAY_DURATION_MS)
@@ -9803,7 +9847,11 @@ useEffect(() => {
         const activateDrag = () => {
           const s = calendarEventDragRef.current
           if (!s || s.activated) return
+          // Only activate if still in pending mode
+          if (calendarInteractionModeRef.current !== 'pending') return
           s.activated = true
+          // Set interaction mode to dragging
+          calendarInteractionModeRef.current = 'dragging'
           // Clear any calendar pan state to prevent panning while dragging
           calendarDragRef.current = null
           // Lock page scroll while dragging an event FIRST, before any DOM changes
@@ -9848,12 +9896,20 @@ useEffect(() => {
                 touchHoldTimer = null
                 holdCancelled = true
               }
+              // Also clear the global hold timer ref if it was set
+              if (calendarHoldTimerRef.current !== null) {
+                try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                calendarHoldTimerRef.current = null
+                holdCancelled = true
+              }
               // Only allow transitioning to pan if hold was cancelled (not completed)
               // If horizontal intent, treat this as a calendar pan for all input types
-              if (holdCancelled) {
+              if (holdCancelled && calendarInteractionModeRef.current === 'pending') {
                 const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                 if (intent === 'horizontal' && area) {
                   if (!panningFromEvent) {
+                    // Set interaction mode to panning
+                    calendarInteractionModeRef.current = 'panning'
                     const rect = area.getBoundingClientRect()
                     if (rect.width > 0) {
                       const dayCount = calendarView === '3d'
@@ -9908,6 +9964,7 @@ useEffect(() => {
                 } else {
                   // Not horizontal intent - release scroll lock since we're not dragging or panning
                   setPageScrollLock(false)
+                  calendarInteractionModeRef.current = null
                 }
               }
               return
@@ -10009,6 +10066,8 @@ useEffect(() => {
             }
             setPageScrollLock(false)
             calendarDragRef.current = null
+            // Clear interaction mode
+            calendarInteractionModeRef.current = null
             // Suppress click opening preview after a pan
             dragPreventClickRef.current = true
             return
@@ -10118,6 +10177,8 @@ useEffect(() => {
           delete targetEl.dataset.dragKind
           // Always release scroll lock at the end of a drag (noop if not locked)
           setPageScrollLock(false)
+          // Clear interaction mode
+          calendarInteractionModeRef.current = null
         }
         // Arm the hold timer to activate dragging for all input types (mouse/pen/touch)
         touchHoldTimer = window.setTimeout(() => {
@@ -10358,6 +10419,13 @@ useEffect(() => {
                 })()
                 const handleCalendarColumnPointerDown = (ev: ReactPointerEvent<HTMLDivElement>) => {
                   if (ev.button !== 0) return
+                  // Check if another interaction is already active - if so, don't interfere
+                  const currentMode = calendarInteractionModeRef.current
+                  if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
+                  
+                  // Stop propagation to prevent handleCalendarAreaPointerDown from also firing
+                  ev.stopPropagation()
+                  
                   const targetEl = ev.currentTarget as HTMLDivElement
                   // Ignore if starting on an existing event or timezone marker
                   const rawTarget = ev.target as HTMLElement | null
@@ -10377,17 +10445,18 @@ useEffect(() => {
                   const timeOfDayMs0 = Math.round(yRatio * DAY_DURATION_MS)
                   const initialStart = Math.round(col.dayStart + timeOfDayMs0)
 
+                  // Set interaction mode to pending - waiting for hold timer or pan detection
+                  calendarInteractionModeRef.current = 'pending'
+                  
                   // Intent detection: wait to decide between horizontal pan vs vertical create
                   const pointerId = ev.pointerId
                   const startX = ev.clientX
                   const startY = ev.clientY
-                  let startedCreate = false
-                  let startedPan = false
-                  let touchHoldTimer: number | null = null
 
                   const startCreate = () => {
-                    if (startedCreate) return
-                    startedCreate = true
+                    // Double-check we're still in pending mode (not cancelled by pan)
+                    if (calendarInteractionModeRef.current !== 'pending') return
+                    calendarInteractionModeRef.current = 'creating'
                     const state: CalendarEventDragState = {
                       pointerId,
                       entryId: 'new-entry',
@@ -10409,8 +10478,14 @@ useEffect(() => {
                   }
 
                   const startPan = () => {
-                    if (startedPan) return
-                    startedPan = true
+                    // Only transition to panning if we're still in pending mode
+                    if (calendarInteractionModeRef.current !== 'pending') return
+                    calendarInteractionModeRef.current = 'panning'
+                    // Clear the hold timer since we're panning now
+                    if (calendarHoldTimerRef.current !== null) {
+                      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                      calendarHoldTimerRef.current = null
+                    }
                     const rect = area.getBoundingClientRect()
                     if (rect.width <= 0) return
                     const dayCount = calendarView === '3d'
@@ -10445,11 +10520,12 @@ useEffect(() => {
                     if (e.pointerId !== pointerId) return
                     const dx = e.clientX - startX
                     const dy = e.clientY - startY
-                    const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
-                    if (!startedCreate && !startedPan) {
-                      // Require a hold before creating; allow horizontal pan if user slides before hold
+                    const currentInteraction = calendarInteractionModeRef.current
+                    
+                    if (currentInteraction === 'pending') {
+                      // Still waiting - check if we should transition to pan
+                      const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                       if (intent === 'horizontal') {
-                        if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
                         startPan()
                         try { e.preventDefault() } catch {}
                         return
@@ -10457,7 +10533,8 @@ useEffect(() => {
                       // Vertical movement before hold — do nothing (avoid accidental create)
                       return
                     }
-                    if (startedPan) {
+                    
+                    if (currentInteraction === 'panning') {
                       // Mirror handleCalendarAreaPointerDown's move behavior
                       const state = calendarDragRef.current
                       if (!state || e.pointerId !== state.pointerId) return
@@ -10475,7 +10552,8 @@ useEffect(() => {
                       if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
                       return
                     }
-                    if (startedCreate) {
+                    
+                    if (currentInteraction === 'creating') {
                       // Prevent page/area scrolling while dragging to create
                       try { e.preventDefault() } catch {}
                       const s = calendarEventDragRef.current
@@ -10516,9 +10594,15 @@ useEffect(() => {
                     window.removeEventListener('pointermove', onMove)
                     window.removeEventListener('pointerup', onUp)
                     window.removeEventListener('pointercancel', onUp)
-                    if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
+                    // Clear hold timer if still running
+                    if (calendarHoldTimerRef.current !== null) {
+                      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                      calendarHoldTimerRef.current = null
+                    }
+                    
+                    const finalMode = calendarInteractionModeRef.current
 
-                    if (startedPan) {
+                    if (finalMode === 'panning') {
                       const state = calendarDragRef.current
                       if (state && e.pointerId === state.pointerId) {
                         area.releasePointerCapture?.(state.pointerId)
@@ -10544,10 +10628,11 @@ useEffect(() => {
                       }
                       calendarDragRef.current = null
                       setPageScrollLock(false)
+                      calendarInteractionModeRef.current = null
                       return
                     }
 
-                    if (startedCreate) {
+                    if (finalMode === 'creating') {
                       // Release page scroll lock at the end of create drag (noop if not locked)
                       setPageScrollLock(false)
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
@@ -10586,16 +10671,20 @@ useEffect(() => {
                       calendarEventDragRef.current = null
                       dragPreviewRef.current = null
                       setDragPreview(null)
+                      calendarInteractionModeRef.current = null
                       return
                     }
-                    // No intent detected (tap) — do nothing
+                    
+                    // No intent detected (tap) or still pending — clean up
+                    calendarInteractionModeRef.current = null
                   }
                   window.addEventListener('pointermove', onMove)
                   window.addEventListener('pointerup', onUp)
                   window.addEventListener('pointercancel', onUp)
                   // Require a hold timer to start creation for all input types
-                  touchHoldTimer = window.setTimeout(() => {
-                    touchHoldTimer = null
+                  // Store in ref so it can be cancelled by pan detection
+                  calendarHoldTimerRef.current = window.setTimeout(() => {
+                    calendarHoldTimerRef.current = null
                     startCreate()
                   }, DRAG_HOLD_DURATION_MS)
                 }
