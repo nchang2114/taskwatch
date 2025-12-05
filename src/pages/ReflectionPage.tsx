@@ -3757,10 +3757,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   useEffect(() => {
     editorOpenRef.current = Boolean(calendarEditorEntryId || calendarInspectorEntryId)
   }, [calendarEditorEntryId, calendarInspectorEntryId])
-  const calendarTouchAction = useMemo(
-    () => (calendarView === '3d' ? 'pan-x pan-y' : 'pan-y'),
-    [calendarView],
-  )
+  // Use touch-action: none so JS has full control over gestures (no browser race condition)
+  const calendarTouchAction = 'none'
   // Ref to the session name input inside the calendar editor modal (for autofocus on new entries)
   const calendarEditorNameInputRef = useRef<HTMLInputElement | null>(null)
 
