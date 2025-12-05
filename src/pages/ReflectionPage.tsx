@@ -9276,6 +9276,8 @@ useEffect(() => {
         entry: HistoryEntry
         topPct: number
         heightPct: number
+        leftPct: number
+        widthPct: number
         color: string
         gradientCss?: string
         label: string
@@ -9520,6 +9522,40 @@ useEffect(() => {
           return []
         }
 
+        // Group events with similar timing (within 10 min on both start AND end) for side-by-side stacking
+        const STACK_TOLERANCE_MS = 10 * MINUTE_MS
+        const stackingGroups = new Map<string, { left: number; width: number }>()
+        
+        // Find groups of events with nearly identical timing
+        const processed = new Set<string>()
+        for (let i = 0; i < combined.length; i++) {
+          const ev = combined[i]
+          if (processed.has(ev.entry.id)) continue
+          
+          // Find all events with similar start AND end times
+          const group = [ev]
+          for (let j = i + 1; j < combined.length; j++) {
+            const other = combined[j]
+            if (processed.has(other.entry.id)) continue
+            const startDiff = Math.abs(ev.start - other.start)
+            const endDiff = Math.abs(ev.end - other.end)
+            if (startDiff <= STACK_TOLERANCE_MS && endDiff <= STACK_TOLERANCE_MS) {
+              group.push(other)
+            }
+          }
+          
+          // If multiple events in group, assign side-by-side positions
+          if (group.length > 1) {
+            const width = 1 / group.length
+            group.forEach((member, idx) => {
+              stackingGroups.set(member.entry.id, { left: idx * width, width })
+              processed.add(member.entry.id)
+            })
+          } else {
+            processed.add(ev.entry.id)
+          }
+        }
+
         const breakpointsSet = new Set<number>([startMs, endMs])
         combined.forEach(({ start, end }) => {
           breakpointsSet.add(start)
@@ -9722,6 +9758,12 @@ useEffect(() => {
 
           const segments = mergeSegments(eventSlices.get(info.entry.id) ?? [{ start: 0, end: 1, left: 0, right: 1 }])
           const clipPath = buildClipPath(segments)
+          
+          // Use stacking groups for events with similar timing (within 10 min tolerance)
+          // Otherwise, use full width and rely on clipPath for overlaps
+          const stackInfo = stackingGroups.get(info.entry.id)
+          const leftPct = stackInfo ? stackInfo.left * 100 : 0
+          const widthPct = stackInfo ? stackInfo.width * 100 : 100
 
           const topPct = ((info.start - startMs) / DAY_DURATION_MS) * 100
           const heightPct = Math.max(((info.end - info.start) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
@@ -9749,11 +9791,14 @@ useEffect(() => {
             entry: info.entry,
             topPct: Math.min(Math.max(topPct, 0), 100),
             heightPct: Math.min(Math.max(heightPct, 0.4), 100),
+            leftPct,
+            widthPct,
             color,
             gradientCss,
             label: fallbackLabel,
             rangeLabel,
-            clipPath,
+            // Only use clipPath for events NOT in a stacking group (they use full width and need clipping)
+            clipPath: stackInfo ? undefined : clipPath,
             zIndex,
             showLabel,
             showTime,
@@ -10747,8 +10792,9 @@ useEffect(() => {
                         style={{
                           top: `${ev.topPct}%`,
                           height: `${ev.heightPct}%`,
-                          left: '2px',
-                          width: 'calc(100% - 4px)',
+                          // When dragging, use full width; otherwise use stacking position
+                          left: isDragging ? '2px' : `calc(${ev.leftPct}% + 2px)`,
+                          width: isDragging ? 'calc(100% - 4px)' : `calc(${ev.widthPct}% - 4px)`,
                           zIndex: ev.zIndex,
                           ...(isOutline ? { color: ev.baseColor ?? ev.color, boxShadow: 'none' } : {}),
                         }}
