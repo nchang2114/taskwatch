@@ -2438,6 +2438,30 @@ html[data-theme='light'] .goals-layer :where(.bg-white\/10.text-xs, .bg-white\/1
   flex-wrap: wrap;
 }
 
+/* Sorting animation - shuffle effect */
+@keyframes task-sort-shuffle {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  30% {
+    opacity: 0.6;
+    transform: translateX(-8px) scale(0.97);
+  }
+  60% {
+    opacity: 0.6;
+    transform: translateX(8px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.goal-task-row--sorting {
+  animation: task-sort-shuffle 0.35s ease-in-out;
+}
+
 .goal-task-row::after {
   content: '';
   position: absolute;

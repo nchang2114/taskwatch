@@ -253,7 +253,7 @@ export async function fetchGoalsHierarchy(): Promise<
   const { data: tasks, error: tErr } = bucketIds.length
     ? await supabase
         .from('tasks')
-        .select('id, user_id, bucket_id, text, completed, difficulty, priority, sort_index, notes')
+        .select('id, user_id, bucket_id, text, completed, difficulty, priority, sort_index, notes, created_at')
         .in('bucket_id', bucketIds)
         .order('completed', { ascending: true })
         .order('priority', { ascending: false })
@@ -317,6 +317,7 @@ export async function fetchGoalsHierarchy(): Promise<
         difficulty: (t.difficulty as any) ?? 'none',
         priority: !!(t as any).priority,
         notes: typeof (t as any).notes === 'string' ? ((t as any).notes as string) : null,
+        createdAt: typeof (t as any).created_at === 'string' ? ((t as any).created_at as string) : undefined,
         subtasks: subtasks.map((subtask) => ({
           id: subtask.id,
           text: subtask.text ?? '',
@@ -1066,6 +1067,128 @@ export async function setTaskSortIndex(bucketId: string, section: 'active' | 'co
     newSort = STEP
   }
   await updateTaskWithGuard(taskId, bucketId, { sort_index: newSort }, 'id')
+}
+
+/** Sort all tasks in a bucket by created_at date (oldest first) and update their sort_index values.
+ * This sorts ALL tasks (both priority and non-priority) so that when tasks move between
+ * priority/non-priority status, they slot into the correct position.
+ * Returns the updated task IDs with their new sort_index values, or null on failure. */
+export async function sortBucketTasksByDate(bucketId: string, direction: 'oldest' | 'newest' = 'oldest'): Promise<{ id: string; sort_index: number }[] | null> {
+  if (!supabase) return null
+  const userId = await getActiveUserId()
+  if (!userId) return null
+  
+  const STEP = 1024
+  
+  // Fetch all tasks in the bucket with their created_at and priority
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id, created_at, priority')
+    .eq('bucket_id', bucketId)
+    .eq('user_id', userId)
+  
+  if (error || !tasks || tasks.length === 0) return null
+  
+  // Separate priority and non-priority tasks
+  const priorityTasks = tasks.filter(t => t.priority)
+  const nonPriorityTasks = tasks.filter(t => !t.priority)
+  
+  // Sort each group by created_at
+  const sortByDate = (a: typeof tasks[0], b: typeof tasks[0]) => {
+    const dateA = new Date(a.created_at || 0).getTime()
+    const dateB = new Date(b.created_at || 0).getTime()
+    return direction === 'oldest' ? dateA - dateB : dateB - dateA
+  }
+  
+  priorityTasks.sort(sortByDate)
+  nonPriorityTasks.sort(sortByDate)
+  
+  // Combine: priority tasks first, then non-priority
+  const sorted = [...priorityTasks, ...nonPriorityTasks]
+  
+  // Build batch updates with new sort_index values
+  const updates = sorted.map((task, index) => ({
+    id: task.id,
+    sort_index: (index + 1) * STEP,
+  }))
+  
+  // Update each task's sort_index
+  // Using individual updates since Supabase doesn't support batch updates with different values per row
+  await Promise.all(
+    updates.map(({ id, sort_index }) =>
+      supabase!
+        .from('tasks')
+        .update({ sort_index })
+        .eq('id', id)
+        .eq('user_id', userId)
+    )
+  )
+  
+  return updates
+}
+
+/** Sort all tasks in a bucket by priority (priority first) then by difficulty (green > yellow > red > none).
+ * Tasks with the same priority+difficulty combination maintain their relative order (stable sort).
+ * Returns the updated task IDs with their new sort_index values, or null on failure. */
+export async function sortBucketTasksByPriority(bucketId: string): Promise<{ id: string; sort_index: number }[] | null> {
+  if (!supabase) return null
+  const userId = await getActiveUserId()
+  if (!userId) return null
+  
+  const STEP = 1024
+  
+  // Fetch all tasks in the bucket with their priority, difficulty, and sort_index
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id, priority, difficulty, sort_index')
+    .eq('bucket_id', bucketId)
+    .eq('user_id', userId)
+    .order('sort_index', { ascending: true }) // Preserve relative order for stable sort
+  
+  if (error || !tasks || tasks.length === 0) return null
+  
+  // Difficulty weight: green=0, yellow=1, red=2, none/null=3
+  const difficultyWeight = (diff: string | null | undefined): number => {
+    if (diff === 'green') return 0
+    if (diff === 'yellow') return 1
+    if (diff === 'red') return 2
+    return 3 // 'none' or null
+  }
+  
+  // Stable sort: priority first (true before false), then difficulty
+  const sorted = [...tasks].sort((a, b) => {
+    // Priority: true (1) should come before false (0), so we want descending
+    const priorityA = a.priority ? 0 : 1
+    const priorityB = b.priority ? 0 : 1
+    if (priorityA !== priorityB) return priorityA - priorityB
+    
+    // Difficulty: green < yellow < red < none
+    const diffA = difficultyWeight(a.difficulty)
+    const diffB = difficultyWeight(b.difficulty)
+    if (diffA !== diffB) return diffA - diffB
+    
+    // Same priority+difficulty: keep original order (already sorted by sort_index)
+    return 0
+  })
+  
+  // Build batch updates with new sort_index values
+  const updates = sorted.map((task, index) => ({
+    id: task.id,
+    sort_index: (index + 1) * STEP,
+  }))
+  
+  // Update each task's sort_index
+  await Promise.all(
+    updates.map(({ id, sort_index }) =>
+      supabase!
+        .from('tasks')
+        .update({ sort_index })
+        .eq('id', id)
+        .eq('user_id', userId)
+    )
+  )
+  
+  return updates
 }
 
 /** Move a task to a different bucket while preserving completion/priority and assigning a sensible sort_index.

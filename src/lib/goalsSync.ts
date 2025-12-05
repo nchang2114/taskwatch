@@ -25,6 +25,8 @@ export type GoalTaskSnapshot = {
   difficulty: 'none' | 'green' | 'yellow' | 'red'
   // Notes are optional to distinguish "unknown/not loaded" from empty string
   notes?: string
+  // createdAt is optional for backwards compatibility with older snapshots
+  createdAt?: string
   subtasks: GoalTaskSubtaskSnapshot[]
 }
 
@@ -106,6 +108,7 @@ const coerceTasks = (value: unknown): GoalTaskSnapshot[] => {
       const priority = Boolean(candidate.priority)
       const difficulty = ensureDifficulty(candidate.difficulty)
       const rawNotes = typeof candidate.notes === 'string' ? candidate.notes : undefined
+      const createdAt = typeof candidate.createdAt === 'string' ? candidate.createdAt : undefined
       const subtasks = coerceTaskSubtasks(candidate.subtasks)
       const out: GoalTaskSnapshot = {
         id,
@@ -117,6 +120,9 @@ const coerceTasks = (value: unknown): GoalTaskSnapshot[] => {
       }
       if (typeof rawNotes === 'string') {
         out.notes = rawNotes
+      }
+      if (typeof createdAt === 'string') {
+        out.createdAt = createdAt
       }
       return out
     })
