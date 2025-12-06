@@ -2308,6 +2308,71 @@ const TIME_OPTIONS = buildTimeOptions()
 // Short-term suppression window to avoid accidental date-picker opens immediately after selecting a time
 let SUPPRESS_DATE_OPEN_UNTIL = 0
 
+/**
+ * Parses a user-typed time string into minutes since midnight.
+ * Supports formats like: "3:45pm", "3:45 PM", "15:45", "3pm", "3 pm", "345pm", "1545"
+ * Returns null if the string cannot be parsed.
+ */
+const parseTimeString = (input: string): number | null => {
+  const trimmed = input.trim().toLowerCase()
+  if (!trimmed) return null
+
+  // Check for AM/PM suffix
+  const isPm = /pm$/.test(trimmed) || /p\.?m\.?$/.test(trimmed)
+  const isAm = /am$/.test(trimmed) || /a\.?m\.?$/.test(trimmed)
+  const cleaned = trimmed.replace(/\s*(a\.?m\.?|p\.?m\.?)$/i, '').trim()
+
+  let hours = 0
+  let minutes = 0
+
+  // Try HH:MM or H:MM format
+  const colonMatch = cleaned.match(/^(\d{1,2}):(\d{2})$/)
+  if (colonMatch) {
+    hours = parseInt(colonMatch[1], 10)
+    minutes = parseInt(colonMatch[2], 10)
+  } else {
+    // Try HHMM format (e.g., "1545" or "345")
+    const numericMatch = cleaned.match(/^(\d{1,4})$/)
+    if (numericMatch) {
+      const num = numericMatch[1]
+      if (num.length <= 2) {
+        // Just hours (e.g., "3" or "15")
+        hours = parseInt(num, 10)
+        minutes = 0
+      } else if (num.length === 3) {
+        // H:MM (e.g., "345" -> 3:45)
+        hours = parseInt(num[0], 10)
+        minutes = parseInt(num.slice(1), 10)
+      } else if (num.length === 4) {
+        // HH:MM (e.g., "1545" -> 15:45)
+        hours = parseInt(num.slice(0, 2), 10)
+        minutes = parseInt(num.slice(2), 10)
+      }
+    } else {
+      return null
+    }
+  }
+
+  // Validate ranges
+  if (minutes < 0 || minutes > 59) return null
+  if (hours < 0 || hours > 23) {
+    // Allow 12-hour format hours (1-12)
+    if (hours < 1 || hours > 12) return null
+  }
+
+  // Convert 12-hour to 24-hour if AM/PM specified
+  if (isPm || isAm) {
+    if (hours > 12) return null // Invalid: "15pm" doesn't make sense
+    if (isPm && hours !== 12) hours += 12
+    if (isAm && hours === 12) hours = 0
+  }
+
+  // Final validation
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return hours * 60 + minutes
+}
+
 const InspectorTimeInput = ({
   value,
   onChange,
@@ -2320,9 +2385,12 @@ const InspectorTimeInput = ({
   use24HourTime = false,
 }: InspectorTimeInputProps) => {
   const [open, setOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const selectedRef = useRef<HTMLButtonElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -2429,6 +2497,80 @@ const InspectorTimeInput = ({
     return Math.max(0, Math.min(maxSpanMinutes, snapped))
   })()
 
+  // Double-click to edit time
+  const handleDoubleClick = () => {
+    setEditValue(label)
+    setIsEditing(true)
+  }
+
+  // Ref callback to focus and select when input mounts (only on first mount)
+  const hasSelectedRef = useRef(false)
+  const handleInputRef = (el: HTMLInputElement | null) => {
+    inputRef.current = el
+    if (el && !hasSelectedRef.current) {
+      hasSelectedRef.current = true
+      // Focus immediately
+      el.focus()
+      // Select all text - try multiple times to handle touch keyboard delays
+      el.setSelectionRange(0, el.value.length)
+      requestAnimationFrame(() => {
+        el.setSelectionRange(0, el.value.length)
+      })
+    }
+  }
+
+  // Reset the selection flag when editing ends
+  useEffect(() => {
+    if (!isEditing) {
+      hasSelectedRef.current = false
+    }
+  }, [isEditing])
+
+  const commitEditRef = useRef<() => void>(() => {})
+  commitEditRef.current = () => {
+    const parsed = parseTimeString(editValue)
+    if (parsed !== null) {
+      // Apply the parsed time to the current day
+      const dayStart = new Date(value)
+      dayStart.setHours(0, 0, 0, 0)
+      const nextTs = dayStart.getTime() + parsed * 60000
+      onChange(nextTs)
+    }
+    setIsEditing(false)
+  }
+
+  const commitEdit = () => commitEditRef.current()
+
+  // Handle clicking outside when editing - commit the edit
+  useEffect(() => {
+    if (!isEditing) return
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (inputRef.current?.contains(target)) return
+      // Click was outside - commit the edit
+      commitEditRef.current()
+    }
+    window.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+    }
+  }, [isEditing])
+
+  const cancelEdit = () => {
+    setIsEditing(false)
+  }
+
+  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitEdit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit()
+    }
+  }
+
   const handleSelect = (option: { minutes: number; offsetMinutes: number }) => {
     const { minutes, offsetMinutes } = option
     // For aligned lists, respect day rollover by using the anchor timestamp plus offset minutes
@@ -2454,25 +2596,50 @@ const InspectorTimeInput = ({
 
   return (
     <div className="inspector-picker">
-      <button
-        type="button"
-        ref={triggerRef}
-        className="inspector-picker__button history-timeline__field-input history-timeline__field-input--button"
-        onClick={(e) => {
-          const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
-          if (now < SUPPRESS_DATE_OPEN_UNTIL) {
-            try { e.preventDefault() } catch {}
-            try { e.stopPropagation() } catch {}
-            return
-          }
-          setOpen((prev) => !prev)
-        }}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-      >
-        {label}
-      </button>
+      {isEditing ? (
+        <input
+          ref={handleInputRef}
+          type="text"
+          inputMode="text"
+          enterKeyHint="done"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          autoFocus
+          className="inspector-picker__button history-timeline__field-input history-timeline__field-input--editing"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleEditKeyDown}
+          style={{ width: '100%', textAlign: 'center' }}
+        />
+      ) : (
+        <button
+          type="button"
+          ref={triggerRef}
+          className="inspector-picker__button history-timeline__field-input history-timeline__field-input--button"
+          onClick={(e) => {
+            const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+            if (now < SUPPRESS_DATE_OPEN_UNTIL) {
+              try { e.preventDefault() } catch {}
+              try { e.stopPropagation() } catch {}
+              return
+            }
+            setOpen((prev) => !prev)
+          }}
+          onDoubleClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setOpen(false)
+            handleDoubleClick()
+          }}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={ariaLabel}
+        >
+          {label}
+        </button>
+      )}
       {open ? (
         <div className="inspector-picker__popover inspector-picker__popover--time" ref={popoverRef} role="listbox">
           <ul className="inspector-time-picker">
