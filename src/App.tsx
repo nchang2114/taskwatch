@@ -2876,7 +2876,7 @@ function AuthCallbackScreen(): React.ReactElement {
   return (
     <div className="auth-callback-screen">
       <div className="auth-callback-panel">
-        <p className="auth-callback-title">Signing you in…</p>
+        <p className="auth-callback-title">Signing you in<span className="auth-dots"><span>.</span><span>.</span><span>.</span></span></p>
         <p className="auth-callback-text">Hang tight while we finish connecting your account.</p>
       </div>
     </div>
@@ -2887,7 +2887,7 @@ function SignOutScreen(): React.ReactElement {
   return (
     <div className="auth-callback-screen">
       <div className="auth-callback-panel">
-        <p className="auth-callback-title">Signing you out…</p>
+        <p className="auth-callback-title">Signing you out<span className="auth-dots"><span>.</span><span>.</span><span>.</span></span></p>
         <p className="auth-callback-text">Hang tight while we wrap things up.</p>
       </div>
     </div>
