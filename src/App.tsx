@@ -2135,10 +2135,34 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             </div>
             <div className="settings-panel__row">
               <div>
-                <p className="settings-panel__row-title">Delete account &amp; data</p>
-                <p className="settings-panel__row-subtitle">Permanently remove your account.</p>
+                <p className="settings-panel__row-title">Sign out of all devices</p>
+                <p className="settings-panel__row-subtitle">Sign out everywhere, including this device.</p>
               </div>
-              <button type="button" className="settings-panel__chip settings-panel__chip--danger">Delete</button>
+              <button
+                type="button"
+                className="settings-panel__chip settings-panel__chip--warning"
+                onClick={async () => {
+                  if (!supabase) return
+                  setIsSigningOut(true)
+                  setSettingsOpen(false)
+                  try {
+                    window.sessionStorage.setItem('nc-taskwatch-signing-out', 'true')
+                  } catch {}
+                  try {
+                    await supabase.auth.signOut({ scope: 'global' })
+                  } catch (err) {
+                    console.warn('[global-signout] Error:', err)
+                  }
+                  // Clear local storage and reload
+                  try {
+                    window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
+                    window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
+                  } catch {}
+                  window.location.reload()
+                }}
+              >
+                Sign out
+              </button>
             </div>
           </div>
         </>
