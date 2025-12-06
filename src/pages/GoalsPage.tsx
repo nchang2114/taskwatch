@@ -5862,6 +5862,7 @@ export default function GoalsPage(): ReactElement {
   const [renamingLifeRoutineId, setRenamingLifeRoutineId] = useState<string | null>(null)
   const [lifeRoutineRenameDraft, setLifeRoutineRenameDraft] = useState('')
   const lifeRoutineRenameInputRef = useRef<HTMLInputElement | null>(null)
+  const lifeRoutineRenameJustFocusedRef = useRef(false)
 
   // Gate pushes to Supabase until after the initial remote pull completes
   const lifeRoutinesSyncedRef = useRef(false)
@@ -6822,8 +6823,10 @@ export default function GoalsPage(): ReactElement {
   }, [lifeRoutineTasks, activeLifeRoutineCustomizerId])
   useEffect(() => {
     if (!lifeRoutinesSyncedRef.current) return
+    // Don't save to storage while actively renaming - it can cause re-renders that lose focus
+    if (renamingLifeRoutineId) return
     writeStoredLifeRoutines(lifeRoutineTasks)
-  }, [lifeRoutineTasks])
+  }, [lifeRoutineTasks, renamingLifeRoutineId])
   useEffect(() => {
     if (typeof window === 'undefined') {
       return
@@ -6923,9 +6926,10 @@ export default function GoalsPage(): ReactElement {
   useEffect(() => {
     if (renamingLifeRoutineId && lifeRoutineRenameInputRef.current) {
       const el = lifeRoutineRenameInputRef.current
-      const len = el.value.length
+      // Set the flag to prevent immediate blur from closing
+      lifeRoutineRenameJustFocusedRef.current = true
       el.focus()
-      el.setSelectionRange(len, len)
+      el.select()
     }
   }, [renamingLifeRoutineId])
 
@@ -8615,9 +8619,6 @@ export default function GoalsPage(): ReactElement {
     setLifeRoutineRenameDraft(title)
     setEditingLifeRoutineDescriptionId(null)
     setLifeRoutineDescriptionDraft('')
-    requestAnimationFrame(() => {
-      lifeRoutineRenameInputRef.current?.focus()
-    })
   }
 
   const reorderLifeRoutines = (routineId: string, targetIndex: number) => {
@@ -12398,8 +12399,13 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                   <input
                                     ref={lifeRoutineRenameInputRef}
                                     value={lifeRoutineRenameDraft}
-                                    onChange={(event) => handleLifeRoutineRenameChange(event.target.value)}
+                                    autoFocus
+                                    onChange={(event) => {
+                                      lifeRoutineRenameJustFocusedRef.current = false
+                                      handleLifeRoutineRenameChange(event.target.value)
+                                    }}
                                     onKeyDown={(event) => {
+                                      lifeRoutineRenameJustFocusedRef.current = false
                                       if (event.key === 'Enter') {
                                         event.preventDefault()
                                         submitLifeRoutineRename()
@@ -12408,7 +12414,17 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                         cancelLifeRoutineRename()
                                       }
                                     }}
-                                    onBlur={() => submitLifeRoutineRename()}
+                                    onBlur={() => {
+                                      // Skip blur if we just focused (new routine being created)
+                                      if (lifeRoutineRenameJustFocusedRef.current) {
+                                        // Re-focus the input
+                                        requestAnimationFrame(() => {
+                                          lifeRoutineRenameInputRef.current?.focus()
+                                        })
+                                        return
+                                      }
+                                      submitLifeRoutineRename()
+                                    }}
                                     className="life-routines-card__task-rename"
                                     placeholder="Rename routine"
                                   />
