@@ -4582,7 +4582,7 @@ useEffect(() => {
     sessionGoalId,
     sessionBucketId,
     sessionTaskId,
-  ])
+  ]) 
 
   useEffect(() => {
     if (activeGoalSnapshots.length === 0) {
