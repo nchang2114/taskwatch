@@ -328,6 +328,7 @@ function MainApp() {
   const [shortcutsSearch, setShortcutsSearch] = useState('')
   const [showMilliseconds, setShowMilliseconds] = useState(true)
   const [use24HourTime, setUse24HourTime] = useState(false)
+  const [weekStartDay, setWeekStartDay] = useState<0 | 1>(0) // 0 = Sunday, 1 = Monday
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -1958,7 +1959,14 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Week start</p>
                 <p className="settings-panel__row-subtitle">First day of the week.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Sunday ▾</button>
+              <select
+                className="settings-panel__select"
+                value={weekStartDay}
+                onChange={(e) => setWeekStartDay(Number(e.target.value) as 0 | 1)}
+              >
+                <option value={0}>Sunday</option>
+                <option value={1}>Monday</option>
+              </select>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -2078,13 +2086,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-subtitle">View or change your current plan.</p>
               </div>
               <button type="button" className="settings-panel__chip">Free plan ▾</button>
-            </div>
-            <div className="settings-panel__row">
-              <div>
-                <p className="settings-panel__row-title">Upgrade plan</p>
-                <p className="settings-panel__row-subtitle">Unlock more features with Pro.</p>
-              </div>
-              <button type="button" className="settings-panel__chip">Upgrade</button>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -2520,7 +2521,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} />}
+          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} />}
         </section>
       </main>
       {settingsOpen ? (

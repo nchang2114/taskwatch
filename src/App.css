@@ -2045,6 +2045,39 @@ html[data-theme='light'] .settings-panel__chip--warning:hover {
   border-color: rgba(255, 100, 100, 0.7);
 }
 
+.settings-panel__select {
+  border: 1px solid rgba(148, 164, 255, 0.5);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.35rem 0.75rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a4ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  padding-right: 1.8rem;
+}
+
+.settings-panel__select:hover {
+  background-color: rgba(148, 164, 255, 0.15);
+  border-color: rgba(148, 164, 255, 0.7);
+}
+
+.settings-panel__select:focus {
+  outline: none;
+  border-color: rgba(148, 164, 255, 0.8);
+  box-shadow: 0 0 0 2px rgba(148, 164, 255, 0.2);
+}
+
+.settings-panel__select option {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
 .settings-panel__toggle-wrapper {
   display: flex;
   align-items: center;
@@ -2652,7 +2685,7 @@ html[data-theme='light'] .settings-panel__chip--warning:hover {
     border-right: none;
     border-bottom: 1px solid rgba(148, 164, 255, 0.2);
   }
-  
+
     .settings-panel__sidebar-header {
     display: none;
   }

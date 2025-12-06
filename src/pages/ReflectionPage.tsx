@@ -3454,9 +3454,10 @@ const computeRangeOverview = (
 
 type ReflectionPageProps = {
   use24HourTime?: boolean
+  weekStartDay?: 0 | 1 // 0 = Sunday, 1 = Monday
 }
 
-export default function ReflectionPage({ use24HourTime = false }: ReflectionPageProps) {
+export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0 }: ReflectionPageProps) {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
@@ -9286,8 +9287,10 @@ useEffect(() => {
       // Determine range start (shifted by buffer)
       const windowStart = new Date(anchorDate)
       if (calendarView === 'week') {
-        const dow = windowStart.getDay() // 0=Sun
-        windowStart.setDate(windowStart.getDate() - dow)
+        const dow = windowStart.getDay() // 0=Sun, 1=Mon, etc.
+        // Calculate days to go back to reach weekStartDay (0=Sunday, 1=Monday)
+        const daysBack = (dow - weekStartDay + 7) % 7
+        windowStart.setDate(windowStart.getDate() - daysBack)
       }
       windowStart.setDate(windowStart.getDate() - bufferDays)
       const dayStarts: number[] = []
@@ -11337,18 +11340,21 @@ useEffect(() => {
     }
 
     if (calendarView === 'month') {
-      const headers = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      // Rotate headers based on weekStartDay (0=Sunday first, 1=Monday first)
+      const baseHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      const headers = [...baseHeaders.slice(weekStartDay), ...baseHeaders.slice(0, weekStartDay)]
       const buildMonthPanel = (baseDate: Date) => {
         const firstOfMonth = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1)
         const lastOfMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0)
-        // Start from the Sunday on/before the first of the month
+        // Start from the weekStartDay on/before the first of the month
         const gridStart = new Date(firstOfMonth)
-        const offset = gridStart.getDay()
+        const offset = (gridStart.getDay() - weekStartDay + 7) % 7
         gridStart.setDate(gridStart.getDate() - offset)
-        // Extend to Saturday on/after the end of the month
+        // Extend to the day before next weekStartDay on/after the end of the month
         const gridEnd = new Date(lastOfMonth)
         const gridEndDow = gridEnd.getDay()
-        gridEnd.setDate(gridEnd.getDate() + (6 - gridEndDow))
+        const daysToWeekEnd = (6 - gridEndDow + weekStartDay) % 7
+        gridEnd.setDate(gridEnd.getDate() + daysToWeekEnd)
 
         // Build day cells
         const dayCells: ReactElement[] = []
@@ -11514,13 +11520,17 @@ useEffect(() => {
       })()
 
       const buildYearPanel = (yr: number) => {
+        // Rotate weekday headers for mini month grids based on weekStartDay
+        const baseMiniHeaders = ['S','M','T','W','T','F','S']
+        const miniHeaders = [...baseMiniHeaders.slice(weekStartDay), ...baseMiniHeaders.slice(0, weekStartDay)]
         const months = Array.from({ length: 12 }).map((_, idx) => {
           const firstOfMonth = new Date(yr, idx, 1)
           const label = firstOfMonth.toLocaleDateString(undefined, { month: 'short' })
           // Build a 6x7 grid of days for consistent height
           const start = new Date(firstOfMonth)
           const startDow = start.getDay() // 0=Sun
-          start.setDate(start.getDate() - startDow)
+          const offset = (startDow - weekStartDay + 7) % 7
+          start.setDate(start.getDate() - offset)
           const cells: ReactElement[] = []
           for (let i = 0; i < 42; i += 1) {
             const d = new Date(start)
@@ -11564,8 +11574,8 @@ useEffect(() => {
               </div>
               {/* Mini month weekday headers for clarity */}
               <div className="calendar-month-headers" aria-hidden>
-                {['S','M','T','W','T','F','S'].map((ch) => (
-                  <div key={`hdr-${label}-${ch}`} className="calendar-month-header">{ch}</div>
+                {miniHeaders.map((ch, i) => (
+                  <div key={`hdr-${label}-${i}`} className="calendar-month-header">{ch}</div>
                 ))}
               </div>
               <div className="calendar-month-grid" role="grid" aria-label={`Calendar for ${label} ${yr}`}>
@@ -11713,6 +11723,7 @@ useEffect(() => {
     stepSizeByView,
     adjustTimestampForTimezone,
     formatTime,
+    weekStartDay,
   ])
 
   // Simple inline icons for popover actions
