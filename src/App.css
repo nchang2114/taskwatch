@@ -2672,33 +2672,50 @@ html[data-theme='light'] .settings-panel__chip--warning:hover {
   font-size: 0.92rem;
 }
 
+/* Container controls the "all disappear" phase */
+.auth-dots {
+  animation: auth-dots-hide 1.8s infinite;
+}
+
 .auth-dots span {
   opacity: 0;
-  animation: auth-dot-typing 1.4s infinite;
 }
 
 .auth-dots span:nth-child(1) {
-  animation-delay: 0s;
+  animation: auth-dot-1 1.8s infinite;
 }
 
 .auth-dots span:nth-child(2) {
-  animation-delay: 0.2s;
+  animation: auth-dot-2 1.8s infinite;
 }
 
 .auth-dots span:nth-child(3) {
-  animation-delay: 0.4s;
+  animation: auth-dot-3 1.8s infinite;
 }
 
-@keyframes auth-dot-typing {
-  0%, 20% {
-    opacity: 0;
-  }
-  30%, 70% {
-    opacity: 1;
-  }
-  80%, 100% {
-    opacity: 0;
-  }
+/* Each dot appears at its time and stays visible */
+@keyframes auth-dot-1 {
+  0% { opacity: 0; }
+  11% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+@keyframes auth-dot-2 {
+  0%, 16% { opacity: 0; }
+  27% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+@keyframes auth-dot-3 {
+  0%, 32% { opacity: 0; }
+  43% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+/* Container hides all dots at once at the end */
+@keyframes auth-dots-hide {
+  0%, 70% { opacity: 1; }
+  80%, 100% { opacity: 0; }
 }
 
 @media (max-width: 750px) {
