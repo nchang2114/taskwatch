@@ -738,14 +738,18 @@ const formatTime = (milliseconds: number, showMs: boolean = true) => {
   return timeCore
 }
 
-const formatClockTime = (timestamp: number) => {
+const formatClockTime = (timestamp: number, use24Hour: boolean = false) => {
   const date = new Date(timestamp)
   const hours24 = date.getHours()
   const minutes = date.getMinutes().toString().padStart(2, '0')
   const seconds = date.getSeconds().toString().padStart(2, '0')
+
+  if (use24Hour) {
+    return `${hours24.toString().padStart(2, '0')}:${minutes}:${seconds}`
+  }
+
   const period = hours24 >= 12 ? 'PM' : 'AM'
   const hours12 = hours24 % 12 || 12
-
   return `${hours12.toString().padStart(2, '0')}:${minutes}:${seconds} ${period}`
 }
 
@@ -754,9 +758,10 @@ const formatClockTime = (timestamp: number) => {
 export type FocusPageProps = {
   viewportWidth: number
   showMilliseconds?: boolean
+  use24HourTime?: boolean
 }
 
-export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = true }: FocusPageProps) {
+export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = true, use24HourTime = false }: FocusPageProps) {
   // Re-autosize notebook subtask inputs on viewport resize so wrapping updates container height
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -5994,7 +5999,7 @@ useEffect(() => {
   }, [isRunning, sessionStart, normalizedCurrentTask, registerNewHistoryEntry])
 
   const formattedTime = useMemo(() => formatTime(elapsed, showMilliseconds), [elapsed, showMilliseconds])
-  const formattedClock = useMemo(() => formatClockTime(currentTime), [currentTime])
+  const formattedClock = useMemo(() => formatClockTime(currentTime, use24HourTime), [currentTime, use24HourTime])
   const clockDateTime = useMemo(() => new Date(currentTime).toISOString(), [currentTime])
   const baseTimeClass = elapsed >= 3600000 ? 'time-value--long' : ''
   const charCount = formattedTime.length

@@ -1917,14 +1917,14 @@ const computePieValueFontSize = (label: string): string => {
   return `clamp(${min}rem, ${vwScale}vw, ${maxAfterLength}rem)`
 }
 
-const formatTimeOfDay = (timestamp: number, timezone?: string | null) => {
+const formatTimeOfDay = (timestamp: number, timezone?: string | null, use24Hour: boolean = false) => {
   const date = new Date(timestamp)
   if (timezone) {
     // Use Intl.DateTimeFormat for timezone-aware formatting
     const formatter = new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
       minute: '2-digit',
-      hour12: true,
+      hour12: !use24Hour,
       timeZone: timezone,
     })
     return formatter.format(date).replace(' ', '') // Remove space before AM/PM to match original format
@@ -1932,13 +1932,23 @@ const formatTimeOfDay = (timestamp: number, timezone?: string | null) => {
   // Fallback to local time if no timezone specified
   const hours24 = date.getHours()
   const minutes = date.getMinutes().toString().padStart(2, '0')
+  
+  if (use24Hour) {
+    return `${hours24.toString().padStart(2, '0')}:${minutes}`
+  }
+  
   const period = hours24 >= 12 ? 'PM' : 'AM'
   const hours12 = hours24 % 12 || 12
   return `${hours12}:${minutes}${period}`
 }
 
-const formatHourLabel = (hour24: number) => {
+const formatHourLabel = (hour24: number, use24Hour: boolean = false) => {
   const normalized = ((hour24 % 24) + 24) % 24
+  
+  if (use24Hour) {
+    return `${normalized.toString().padStart(2, '0')}:00`
+  }
+  
   if (normalized === 0) {
     return '12 AM'
   }
@@ -2269,6 +2279,8 @@ type InspectorTimeInputProps = {
   maxSpanMinutes?: number
   // Optional: append a relative duration label compared to this time-of-day (in minutes, modulo 24h)
   relativeToMinutes?: number
+  // Optional: use 24-hour time format
+  use24HourTime?: boolean
 }
 
 const buildTimeOptions = () => {
@@ -2298,6 +2310,7 @@ const InspectorTimeInput = ({
   alignAnchorTimestamp,
   maxSpanMinutes = 24 * 60,
   relativeToMinutes,
+  use24HourTime = false,
 }: InspectorTimeInputProps) => {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -2345,7 +2358,7 @@ const InspectorTimeInput = ({
   const date = new Date(value)
   const hours = date.getHours()
   const minutes = date.getMinutes()
-  const label = formatTimeOfDay(value)
+  const label = formatTimeOfDay(value, undefined, use24HourTime)
   const currentMinutes = hours * 60 + minutes
   const highlightedMinutes = Math.min(23 * 60 + 45, Math.max(0, Math.round(currentMinutes / 15) * 15))
 
@@ -2376,7 +2389,13 @@ const InspectorTimeInput = ({
 
   const orderedOptions = (() => {
     if (alignMinutes === null) {
-      return TIME_OPTIONS.map((opt) => ({ ...opt, offsetMinutes: opt.minutes, dayOffset: 0 }))
+      // Generate labels dynamically based on use24HourTime setting
+      return TIME_OPTIONS.map((opt) => {
+        const sample = new Date(2020, 0, 1, 0, 0)
+        sample.setMinutes(opt.minutes)
+        const label = formatTimeOfDay(sample.getTime(), undefined, use24HourTime)
+        return { ...opt, label, offsetMinutes: opt.minutes, dayOffset: 0 }
+      })
     }
     const span = Math.max(0, Math.min(24 * 60, Math.round(maxSpanMinutes / 15) * 15))
     const steps = Math.round(span / 15)
@@ -2388,7 +2407,7 @@ const InspectorTimeInput = ({
       const dayOffset = Math.floor(totalMinutes / 1440)
       const sample = new Date(2020, 0, 1, 0, 0)
       sample.setMinutes(minutesOfDay)
-      const label = formatTimeOfDay(sample.getTime())
+      const label = formatTimeOfDay(sample.getTime(), undefined, use24HourTime)
       result.push({ label, minutes: minutesOfDay, offsetMinutes, dayOffset })
     }
     return result
@@ -2668,13 +2687,21 @@ const buildArcLoopSlices = (arc: PieArc): LoopSlice[] => {
   return slices
 }
 
-const formatDatePart = (timestamp: number) => {
+const formatDatePart = (timestamp: number, use24Hour: boolean = false) => {
   const date = new Date(timestamp)
   const day = date.getDate()
   const month = date.toLocaleString(undefined, { month: 'short' })
   const year = date.getFullYear()
   const hours24 = date.getHours()
   const minutes = date.getMinutes().toString().padStart(2, '0')
+  
+  if (use24Hour) {
+    return {
+      dateLabel: `${day}/${month}/${year}`,
+      timeLabel: `${hours24.toString().padStart(2, '0')}:${minutes}`,
+    }
+  }
+  
   const period = hours24 >= 12 ? 'PM' : 'AM'
   const hours12 = hours24 % 12 || 12
   return {
@@ -2683,9 +2710,9 @@ const formatDatePart = (timestamp: number) => {
   }
 }
 
-const formatDateRange = (start: number, end: number) => {
-  const startPart = formatDatePart(start)
-  const endPart = formatDatePart(end)
+const formatDateRange = (start: number, end: number, use24Hour: boolean = false) => {
+  const startPart = formatDatePart(start, use24Hour)
+  const endPart = formatDatePart(end, use24Hour)
 
   if (startPart.dateLabel === endPart.dateLabel) {
     return `${startPart.dateLabel} ${startPart.timeLabel}-${endPart.timeLabel}`
@@ -3425,7 +3452,11 @@ const computeRangeOverview = (
   }
 }
 
-export default function ReflectionPage() {
+type ReflectionPageProps = {
+  use24HourTime?: boolean
+}
+
+export default function ReflectionPage({ use24HourTime = false }: ReflectionPageProps) {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
@@ -3484,14 +3515,14 @@ export default function ReflectionPage() {
   // Timezone-aware time formatter for RAW UTC timestamps
   // This applies timezone conversion during display formatting
   const formatTime = useCallback((timestamp: number) => {
-    return formatTimeOfDay(timestamp, deferredAppTimezone)
-  }, [deferredAppTimezone])
+    return formatTimeOfDay(timestamp, deferredAppTimezone, use24HourTime)
+  }, [deferredAppTimezone, use24HourTime])
   
   // Format an already-adjusted timestamp (no timezone conversion needed)
   // Use this for previewStart/previewEnd values which are already timezone-shifted
   const formatAdjustedTime = useCallback((adjustedTimestamp: number) => {
-    return formatTimeOfDay(adjustedTimestamp) // No timezone - just format as local time
-  }, [])
+    return formatTimeOfDay(adjustedTimestamp, undefined, use24HourTime) // No timezone - just format as local time
+  }, [use24HourTime])
   
   // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
@@ -7907,7 +7938,7 @@ useEffect(() => {
         gradientCss ?? solidColor ?? getPaletteColorForLabel(fallbackLabel && fallbackLabel.trim().length > 0 ? fallbackLabel : 'Session')
       const goalLabel = metadata.label
       const bucketLabel = entry.bucketName && entry.bucketName.trim().length > 0 ? entry.bucketName : ''
-      const originalRangeLabel = formatDateRange(entry.startedAt, entry.endedAt)
+      const originalRangeLabel = formatDateRange(entry.startedAt, entry.endedAt, use24HourTime)
       const tooltipTask =
         entry.taskName.trim().length > 0 ? entry.taskName : goalLabel !== UNCATEGORISED_LABEL ? goalLabel : 'Focus Session'
       return {
@@ -7928,7 +7959,7 @@ useEffect(() => {
         tooltipTask,
       }
     })
-  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone])
+  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone, use24HourTime])
   
   // Separate timezone markers from regular segments
   const { regularSegments, timezoneMarkers } = useMemo(() => {
@@ -10685,7 +10716,7 @@ useEffect(() => {
           <div className="calendar-time-axis" aria-hidden>
             {hours.map((h) => (
               <div key={`t-${h}`} className="calendar-time-label" style={{ top: `${(h / 24) * 100}%` }}>
-                {h > 0 && h < 24 ? formatHourLabel(h) : ''}
+                {h > 0 && h < 24 ? formatHourLabel(h, use24HourTime) : ''}
               </div>
             ))}
           </div>
@@ -11740,7 +11771,7 @@ useEffect(() => {
         const dateFmt = startD.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
         return `${dateFmt} · ${formatTime(entry.startedAt)} — ${formatTime(entry.endedAt)}`
       }
-      return formatDateRange(entry.startedAt, entry.endedAt)
+      return formatDateRange(entry.startedAt, entry.endedAt, use24HourTime)
     })()
     const durationLabel = formatDuration(Math.max(entry.endedAt - entry.startedAt, 0))
     const title = deriveEntryTaskName(entry)
@@ -12641,6 +12672,7 @@ useEffect(() => {
                     value={resolvedStart}
                     onChange={shiftStartAndPreserveDuration}
                     ariaLabel="Select start time"
+                    use24HourTime={use24HourTime}
                   />
                 )}
               </div>
@@ -12677,6 +12709,7 @@ useEffect(() => {
                     alignAnchorTimestamp={resolvedStart}
                     relativeToMinutes={startMinutesOfDay}
                     maxSpanMinutes={24 * 60}
+                    use24HourTime={use24HourTime}
                   />
                 )}
               </div>
@@ -13233,7 +13266,7 @@ useEffect(() => {
           const dateFmt = startD.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
           return `${dateFmt} · ${formatTime(resolvedStart)} — ${formatTime(resolvedEnd)}`
         }
-        return formatDateRange(resolvedStart, resolvedEnd)
+        return formatDateRange(resolvedStart, resolvedEnd, use24HourTime)
       })()
       const inspectorDurationLabel = formatDuration(Math.max(resolvedEnd - resolvedStart, 0))
 
@@ -13435,6 +13468,7 @@ useEffect(() => {
                             value={resolvedStart}
                             onChange={shiftStartAndPreserveDuration}
                             ariaLabel="Select start time"
+                            use24HourTime={use24HourTime}
                           />
                         </div>
                       </label>
@@ -13469,6 +13503,7 @@ useEffect(() => {
                             alignAnchorTimestamp={resolvedStart}
                             relativeToMinutes={startMinutesOfDay}
                             maxSpanMinutes={24 * 60}
+                            use24HourTime={use24HourTime}
                           />
                         </div>
                       </label>
@@ -13641,6 +13676,7 @@ useEffect(() => {
                         value={resolvedStart}
                         onChange={shiftStartAndPreserveDuration}
                         ariaLabel="Select start time"
+                        use24HourTime={use24HourTime}
                       />
                     </div>
                   </label>
@@ -13675,6 +13711,7 @@ useEffect(() => {
                         alignAnchorTimestamp={resolvedStart}
                         relativeToMinutes={startMinutesOfDay}
                         maxSpanMinutes={24 * 60}
+                        use24HourTime={use24HourTime}
                       />
                     </div>
                   </label>
@@ -14500,7 +14537,7 @@ useEffect(() => {
                 if (sameDay) {
                   return `${formatTime(resolvedStartedAt)} — ${formatTime(resolvedEndedAt)}`
                 }
-                return formatDateRange(resolvedStartedAt, resolvedEndedAt)
+                return formatDateRange(resolvedStartedAt, resolvedEndedAt, use24HourTime)
               })()
               const durationLabel = formatDuration(resolvedDurationMs)
               const overlayTitleId = !isEditing ? `history-tooltip-title-${segment.id}` : undefined
@@ -14675,6 +14712,7 @@ useEffect(() => {
                                     })
                                   }}
                                   ariaLabel="Select start time"
+                                  use24HourTime={use24HourTime}
                                 />
                               </div>
                             </label>
@@ -14714,6 +14752,7 @@ useEffect(() => {
                                   alignAnchorTimestamp={resolvedStartedAt}
                                   relativeToMinutes={new Date(resolvedStartedAt).getHours() * 60 + new Date(resolvedStartedAt).getMinutes()}
                                   maxSpanMinutes={24 * 60}
+                                  use24HourTime={use24HourTime}
                                 />
                               </div>
                             </label>
@@ -15012,7 +15051,7 @@ useEffect(() => {
                     className={`history-timeline__tick-label${showLabel ? '' : ' history-timeline__tick-label--hidden'}`}
                     aria-hidden={!showLabel}
                   >
-                    {formatHourLabel(hour)}
+                    {formatHourLabel(hour, use24HourTime)}
                   </span>
                 </div>
               )

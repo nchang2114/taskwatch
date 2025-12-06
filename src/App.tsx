@@ -327,6 +327,7 @@ function MainApp() {
   const [shortcutsPanelOpen, setShortcutsPanelOpen] = useState(false)
   const [shortcutsSearch, setShortcutsSearch] = useState('')
   const [showMilliseconds, setShowMilliseconds] = useState(true)
+  const [use24HourTime, setUse24HourTime] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -1882,7 +1883,13 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Time format</p>
                 <p className="settings-panel__row-subtitle">Choose 12-hour or 24-hour clock.</p>
               </div>
-              <button type="button" className="settings-panel__text-toggle">12h</button>
+              <button
+                type="button"
+                className="settings-panel__text-toggle"
+                onClick={() => setUse24HourTime(!use24HourTime)}
+              >
+                {use24HourTime ? '24h' : '12h'}
+              </button>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -2502,7 +2509,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} />}
+          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} use24HourTime={use24HourTime} />}
         </section>
 
         <section
@@ -2513,7 +2520,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          {!isSigningIn && <ReflectionPage />}
+          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} />}
         </section>
       </main>
       {settingsOpen ? (
