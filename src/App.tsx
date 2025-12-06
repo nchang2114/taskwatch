@@ -52,7 +52,7 @@ const TAB_PANEL_IDS: Record<TabKey, string> = {
   goals: 'tab-panel-goals',
   focus: 'tab-panel-focus',
   reflection: 'tab-panel-reflection',
-}
+} 
 
 const ENABLE_TAB_SWIPE = false
 
