@@ -329,6 +329,8 @@ function MainApp() {
   const [showMilliseconds, setShowMilliseconds] = useState(true)
   const [use24HourTime, setUse24HourTime] = useState(false)
   const [weekStartDay, setWeekStartDay] = useState<0 | 1>(0) // 0 = Sunday, 1 = Monday
+  const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(6)
+  const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(0) // 0 = none, or 5/10/15 minutes
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -1973,14 +1975,37 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Default calendar view</p>
                 <p className="settings-panel__row-subtitle">Initial view when opening calendar.</p>
               </div>
-              <button type="button" className="settings-panel__chip">5-Day ▾</button>
+              <select
+                className="settings-panel__select"
+                value={defaultCalendarView}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setDefaultCalendarView(val === 'week' ? 'week' : Number(val) as 2 | 3 | 4 | 5 | 6)
+                }}
+              >
+                <option value={2}>2 Days</option>
+                <option value={3}>3 Days</option>
+                <option value={4}>4 Days</option>
+                <option value={5}>5 Days</option>
+                <option value={6}>6 Days</option>
+                <option value="week">Week</option>
+              </select>
             </div>
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Snap to interval</p>
                 <p className="settings-panel__row-subtitle">Round times when dragging events.</p>
               </div>
-              <button type="button" className="settings-panel__chip">15 min ▾</button>
+              <select
+                className="settings-panel__select"
+                value={snapToInterval}
+                onChange={(e) => setSnapToInterval(Number(e.target.value) as 0 | 5 | 10 | 15)}
+              >
+                <option value={0}>None</option>
+                <option value={5}>5 min</option>
+                <option value={10}>10 min</option>
+                <option value={15}>15 min</option>
+              </select>
             </div>
           </div>
         </>
@@ -2521,7 +2546,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} />}
+          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} defaultCalendarView={defaultCalendarView} snapToInterval={snapToInterval} />}
         </section>
       </main>
       {settingsOpen ? (

@@ -1964,6 +1964,13 @@ const formatHourLabel = (hour24: number, use24Hour: boolean = false) => {
 const MINUTE_MS = 60 * 1000
 const DAY_DURATION_MS = 24 * 60 * 60 * 1000
 
+// Snap a timestamp to the nearest interval (in minutes). 0 = no snapping.
+const snapToNearestInterval = (timestamp: number, intervalMinutes: number): number => {
+  if (intervalMinutes <= 0) return timestamp
+  const intervalMs = intervalMinutes * MINUTE_MS
+  return Math.round(timestamp / intervalMs) * intervalMs
+}
+
 // All‑day helpers (shared across calendar + popover/editor)
 const toLocalMidnightTs = (ms: number): number => {
   const d = new Date(ms)
@@ -3455,9 +3462,11 @@ const computeRangeOverview = (
 type ReflectionPageProps = {
   use24HourTime?: boolean
   weekStartDay?: 0 | 1 // 0 = Sunday, 1 = Monday
+  defaultCalendarView?: 2 | 3 | 4 | 5 | 6 | 'week'
+  snapToInterval?: 0 | 5 | 10 | 15 // 0 = none, or minutes
 }
 
-export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0 }: ReflectionPageProps) {
+export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0, defaultCalendarView = 6, snapToInterval = 0 }: ReflectionPageProps) {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
@@ -3565,14 +3574,18 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   }, [appTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
-  const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
+  const [calendarView, setCalendarView] = useState<CalendarViewMode>(() => 
+    defaultCalendarView === 'week' ? 'week' : '3d'
+  )
   const calendarViewRef = useRef<CalendarViewMode>(calendarView)
   
   useEffect(() => {
     calendarViewRef.current = calendarView
   }, [calendarView])
   // No explicit visibility gating; transforms are guarded until measured
-  const [multiDayCount, setMultiDayCount] = useState<number>(6)
+  const [multiDayCount, setMultiDayCount] = useState<number>(() => 
+    typeof defaultCalendarView === 'number' ? defaultCalendarView : 6
+  )
   const [showMultiDayChooser, setShowMultiDayChooser] = useState(false)
   const [historyDayOffset, setHistoryDayOffset] = useState(0)
   const historyDayOffsetRef = useRef(historyDayOffset)
@@ -10329,15 +10342,15 @@ useEffect(() => {
             let newStart = s.initialStart
             let newEnd = s.initialEnd
             if (s.kind === 'move') {
-              newStart = Math.round(target.dayStart + timeOfDay)
+              newStart = snapToNearestInterval(Math.round(target.dayStart + timeOfDay), snapToInterval)
               newEnd = Math.round(newStart + s.durationMs)
             } else if (s.kind === 'resize-start') {
-              newStart = Math.round(target.dayStart + timeOfDay)
+              newStart = snapToNearestInterval(Math.round(target.dayStart + timeOfDay), snapToInterval)
               if (newStart > newEnd - MIN_SESSION_DURATION_DRAG_MS) {
                 newStart = newEnd - MIN_SESSION_DURATION_DRAG_MS
               }
             } else {
-              newEnd = Math.round(target.dayStart + timeOfDay)
+              newEnd = snapToNearestInterval(Math.round(target.dayStart + timeOfDay), snapToInterval)
               if (newEnd < newStart + MIN_SESSION_DURATION_DRAG_MS) {
                 newEnd = newStart + MIN_SESSION_DURATION_DRAG_MS
               }
@@ -10907,7 +10920,7 @@ useEffect(() => {
                       const timeOfDay = Math.min(Math.max(desiredTimeOfDay, 0), DAY_DURATION_MS)
                       const newStart = s.initialStart
                       let newEnd = s.initialEnd
-                      newEnd = Math.round(target.dayStart + timeOfDay)
+                      newEnd = snapToNearestInterval(Math.round(target.dayStart + timeOfDay), snapToInterval)
                       if (newEnd < newStart + MIN_SESSION_DURATION_DRAG_MS) {
                         newEnd = newStart + MIN_SESSION_DURATION_DRAG_MS
                       }
@@ -11724,6 +11737,7 @@ useEffect(() => {
     adjustTimestampForTimezone,
     formatTime,
     weekStartDay,
+    snapToInterval,
   ])
 
   // Simple inline icons for popover actions
