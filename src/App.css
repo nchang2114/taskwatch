@@ -1009,7 +1009,7 @@ html[data-theme='light'] .nav-links--drawer {
   width: min(360px, 82vw);
   display: flex;
   flex-direction: column;
-  gap: clamp(0.6rem, 2vw, 0.9rem);
+  gap: 0.5rem;
   padding: clamp(0.85rem, 3vw, 1.2rem);
   background: var(--profile-menu-bg);
   border: 1px solid var(--panel-border);
@@ -1140,6 +1140,60 @@ html[data-theme='light'] .nav-links--drawer {
   font-size: 1rem;
 }
 
+/* Simple link-style sync status */
+.profile-menu__link-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.6rem 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.profile-menu__link-status-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.profile-menu__link-status--synced {
+  color: #22c55e;
+}
+
+html[data-theme='light'] .profile-menu__link-status--synced {
+  color: #16a34a;
+}
+
+.profile-menu__link-status--syncing {
+  color: #45adff;
+}
+
+html[data-theme='light'] .profile-menu__link-status--syncing {
+  color: #2563eb;
+}
+
+.profile-menu__link-status--offline {
+  color: #ff9e5c;
+}
+
+html[data-theme='light'] .profile-menu__link-status--offline {
+  color: #ea580c;
+}
+
+.profile-menu__link-status--pending {
+  color: #ffd65c;
+}
+
+html[data-theme='light'] .profile-menu__link-status--pending {
+  color: #ca8a04;
+}
+
 .profile-menu__actions {
   display: flex;
   flex-direction: column;
@@ -1243,6 +1297,59 @@ html[data-theme='light'] .nav-links--drawer {
   outline-offset: 2px;
 }
 
+.profile-menu__section--links {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.profile-menu__link-action {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.6rem 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.profile-menu__link-action:hover,
+.profile-menu__link-action:focus-visible {
+  background: rgba(148, 164, 255, 0.14);
+}
+
+.profile-menu__link-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.profile-menu__link-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.profile-menu__link-action--danger {
+  color: #ff6b6b;
+}
+
+.profile-menu__link-action--danger:hover,
+.profile-menu__link-action--danger:focus-visible {
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.profile-menu__link-help-wrapper {
+  position: relative;
+}
+
 .profile-help {
   position: relative;
 }
@@ -1311,15 +1418,15 @@ html[data-theme='light'] .nav-links--drawer {
   top: 0;
   right: calc(100% + clamp(0.5rem, 2vw, 0.8rem));
   left: auto;
-  min-width: clamp(200px, 38vw, 240px);
-  padding: 0.65rem;
-  border-radius: 0.9rem;
+  min-width: clamp(190px, 36vw, 220px);
+  padding: 0.55rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--panel-border);
   background: var(--profile-menu-bg);
   box-shadow: 0 18px 30px rgba(8, 12, 32, 0.35);
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.2rem;
   z-index: 10;
 }
 
@@ -1330,12 +1437,13 @@ html[data-theme='light'] .profile-help-menu {
 .profile-help-menu__item {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
   border: none;
   background: transparent;
-  padding: 0.45rem 0.4rem;
-  border-radius: 0.65rem;
+  padding: 0.5rem 0.45rem;
+  border-radius: 0.5rem;
   color: var(--text-primary);
+  font-size: 0.925rem;
   cursor: pointer;
   transition: background 140ms ease;
 }
@@ -1351,8 +1459,8 @@ html[data-theme='light'] .profile-help-menu {
 }
 
 .profile-help-menu__item-icon {
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.35rem;
+  height: 1.35rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1373,6 +1481,26 @@ html[data-theme='light'] .profile-help-menu {
     left: 0;
     right: 0;
     top: calc(100% + clamp(0.45rem, 2vw, 0.65rem));
+    min-width: 100%;
+  }
+}
+
+.profile-menu__link-help-wrapper {
+  position: relative;
+}
+
+.profile-help-menu--guest {
+  top: 0;
+  bottom: auto;
+  right: calc(100% + 0.5rem);
+  left: auto;
+}
+
+@media (max-width: 720px) {
+  .profile-help-menu--guest {
+    left: 0;
+    right: 0;
+    top: calc(100% + 0.45rem);
     min-width: 100%;
   }
 }

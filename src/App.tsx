@@ -141,21 +141,22 @@ const createHelpIcon = (children: ReactNode): ReactNode => (
   </svg>
 )
 
-const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode }> = [
+const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode; url?: string }> = [
   {
     id: 'help-center',
     label: 'Help center',
     icon: createHelpIcon(
       <>
         <circle cx="12" cy="12" r="8.5" />
-        <path d="M12 7.6a3 3 0 0 1 3 3c0 2-2.7 2.1-2.7 4v0.4" />
-        <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none" />
+        <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+        <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
       </>,
     ),
   },
   {
     id: 'release-notes',
     label: 'Release notes',
+    url: 'https://genzero.vercel.app/taskwatch/release-notes',
     icon: createHelpIcon(
       <>
         <path d="M8 4.5h8l3 3.2v11.3a1.5 1.5 0 0 1-1.5 1.5H8.5A1.5 1.5 0 0 1 7 18.5V6a1.5 1.5 0 0 1 1.5-1.5Z" />
@@ -168,6 +169,7 @@ const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode }> = [
   {
     id: 'terms',
     label: 'Terms & policies',
+    url: 'https://genzero.vercel.app/taskwatch/policies',
     icon: createHelpIcon(
       <>
         <rect x="7" y="5.5" width="10" height="13" rx="1.6" />
@@ -212,15 +214,41 @@ const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode }> = [
   },
 ]
 
+// Guest help menu - excludes release notes and terms & policies (shown separately in guest menu)
+const GUEST_HELP_MENU_ITEMS = HELP_MENU_ITEMS.filter(
+  (item) => item.id !== 'release-notes' && item.id !== 'terms'
+)
+
 const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string; icon: ReactNode }> = [
   {
     id: 'general',
     label: 'General',
     icon: createHelpIcon(
       <>
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="M12 9.5v5" />
-        <circle cx="12" cy="7" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+      </>,
+    ),
+  },
+  {
+    id: 'focus-timers',
+    label: 'Focus & Timers',
+    icon: createHelpIcon(
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 6v6l4 2" />
+      </>,
+    ),
+  },
+  {
+    id: 'calendar',
+    label: 'Calendar',
+    icon: createHelpIcon(
+      <>
+        <rect x="5" y="6" width="14" height="13" rx="1.4" />
+        <path d="M8 4v4" />
+        <path d="M16 4v4" />
+        <path d="M5 10h14" />
       </>,
     ),
   },
@@ -235,42 +263,18 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
     ),
   },
   {
-    id: 'personalization',
-    label: 'Personalization',
+    id: 'account',
+    label: 'Account',
     icon: createHelpIcon(
       <>
-        <circle cx="12" cy="12" r="6" />
-        <path d="M12 6v12M6 12h12" />
-      </>,
-    ),
-  },
-  {
-    id: 'apps',
-    label: 'Apps & Connectors',
-    icon: createHelpIcon(
-      <>
-        <rect x="6.5" y="6" width="5" height="5" rx="1" />
-        <rect x="12.5" y="6" width="5" height="5" rx="1" />
-        <rect x="6.5" y="12" width="5" height="5" rx="1" />
-        <rect x="12.5" y="12" width="5" height="5" rx="1" />
-      </>,
-    ),
-  },
-  {
-    id: 'schedules',
-    label: 'Schedules',
-    icon: createHelpIcon(
-      <>
-        <rect x="6" y="7" width="12" height="11" rx="1.4" />
-        <path d="M9 5v4" />
-        <path d="M15 5v4" />
-        <path d="M6 10h12" />
+        <circle cx="12" cy="9" r="3.4" />
+        <path d="M6 18c.8-3.1 3.4-4.5 6-4.5s5.2 1.4 6 4.5" />
       </>,
     ),
   },
   {
     id: 'data',
-    label: 'Data controls',
+    label: 'Data',
     icon: createHelpIcon(
       <>
         <path d="M6 8c0-2.5 3-4 6-4s6 1.5 6 4-3 4-6 4-6-1.5-6-4Z" />
@@ -280,32 +284,14 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
     ),
   },
   {
-    id: 'security',
-    label: 'Security',
+    id: 'about-me',
+    label: 'About Me',
     icon: createHelpIcon(
       <>
-        <path d="M12 4 5.5 6.5v6.6c0 4.6 3.7 6.9 6.5 8.4 2.8-1.5 6.5-3.8 6.5-8.4V6.5Z" />
-        <path d="M9.5 12.5 11 14l3.5-3.5" />
-      </>,
-    ),
-  },
-  {
-    id: 'parental',
-    label: 'Parental controls',
-    icon: createHelpIcon(
-      <>
-        <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 0v7" />
-        <path d="M8 22h8" />
-      </>,
-    ),
-  },
-  {
-    id: 'account',
-    label: 'Account',
-    icon: createHelpIcon(
-      <>
-        <circle cx="12" cy="9" r="3.4" />
-        <path d="M6 18c.8-3.1 3.4-4.5 6-4.5s5.2 1.4 6 4.5" />
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+        <path d="M8 14c1 2 3 3 4 3s3-1 4-3" />
       </>,
     ),
   },
@@ -1351,13 +1337,11 @@ function MainApp() {
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
 
-  const handleContinueGuest = useCallback(() => {
-    setUserProfile(null)
-    closeProfileMenu()
-  }, [closeProfileMenu])
-
-  const handleHelpMenuItemSelect = useCallback(() => {
+  const handleHelpMenuItemSelect = useCallback((url?: string) => {
     setProfileHelpMenuOpen(false)
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
   }, [])
 
   const openSettingsPanel = useCallback((sectionId?: string) => {
@@ -1886,72 +1870,44 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
         <hr className="profile-menu__divider" />
-        <div className="profile-menu__section profile-menu__section--sync">
-          <div className="profile-menu__section-label">Sync status</div>
-          <div className={`profile-menu__status profile-menu__status--${syncStatus}`} role="status" aria-live="polite">
-            <span className="profile-menu__status-icon" aria-hidden="true">
+        <div className="profile-menu__section profile-menu__section--links">
+          <div className={`profile-menu__link-status profile-menu__link-status--${syncStatus}`} role="status" aria-live="polite">
+            <span className="profile-menu__link-status-icon" aria-hidden="true">
               {syncStatusCopy.icon}
             </span>
-            <span className="profile-menu__status-text">{syncStatusCopy.label}</span>
+            <span>{syncStatusCopy.label}</span>
           </div>
         </div>
         <hr className="profile-menu__divider" />
-        <div className="profile-menu__section profile-menu__section--settings">
-          <div className="profile-menu__section-label">Settings</div>
-          <div className="profile-menu__actions">
-            <button type="button" className="profile-menu__action" role="menuitem" onClick={() => openSettingsPanel()}>
-              <span className="profile-menu__action-title">Settings</span>
-              <span className="profile-menu__action-subtitle">Theme, focus tools, and surfaces</span>
-            </button>
-            <button type="button" className="profile-menu__action" role="menuitem" onClick={() => openSettingsPanel('account')}>
-              <span className="profile-menu__action-title">Account</span>
-              <span className="profile-menu__action-subtitle">
-                Email, Subscription, Notifications, Apps &amp; Connectors, Data Controls
-              </span>
-            </button>
-            <button
-              type="button"
-              className="profile-menu__action profile-menu__action--accent"
-              role="menuitem"
-              onClick={closeProfileMenu}
-            >
-              <span className="profile-menu__action-title">Upgrade your plan…</span>
-            </button>
-          </div>
-        </div>
-        <hr className="profile-menu__divider" />
-        <div className="profile-menu__section profile-menu__section--help">
-          <div className="profile-menu__section-label">Help</div>
-          <div className="profile-help">
-            <button
-              type="button"
-              className="profile-help-button"
-              aria-haspopup="menu"
-              aria-expanded={profileHelpMenuOpen}
-              aria-controls={profileHelpMenuId}
-              onClick={() => setProfileHelpMenuOpen((open) => !open)}
-              ref={profileHelpButtonRef}
-            >
-              <span className="profile-help-button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="8" />
-                  <path d="M12 8a2.3 2.3 0 0 1 2.3 2.3c0 1.6-2.2 1.7-2.2 3.2v0.3" />
-                  <circle cx="12" cy="16.9" r="0.8" fill="currentColor" stroke="none" />
-                </svg>
-              </span>
-              <span className="profile-help-button__label">Help</span>
-              <svg
-                className="profile-help-button__chevron"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M10 8l4 4-4 4" />
+        <div className="profile-menu__section profile-menu__section--links">
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel()}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            </svg>
+            <span>Settings</span>
+          </button>
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel('account')}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="9" r="3.4" />
+              <path d="M6 18c.8-3.1 3.4-4.5 6-4.5s5.2 1.4 6 4.5" />
+            </svg>
+            <span>Account</span>
+          </button>
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/pricing', '_blank', 'noopener,noreferrer')}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 4l8 7h-5v9h-6v-9h-5l8-7z" />
+            </svg>
+            <span>Upgrade your plan</span>
+          </button>
+          <div className="profile-menu__link-help-wrapper">
+            <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => setProfileHelpMenuOpen((open) => !open)} ref={profileHelpButtonRef}>
+              <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="8" />
+                <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+                <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
               </svg>
+              <span>Help</span>
             </button>
             {profileHelpMenuOpen ? (
               <div className="profile-help-menu" role="menu" id={profileHelpMenuId} ref={profileHelpMenuRef}>
@@ -1961,7 +1917,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                     type="button"
                     role="menuitem"
                     className="profile-help-menu__item"
-                    onClick={handleHelpMenuItemSelect}
+                    onClick={() => handleHelpMenuItemSelect(item.url)}
                   >
                     <span className="profile-help-menu__item-icon" aria-hidden="true">
                       {item.icon}
@@ -1972,16 +1928,22 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               </div>
             ) : null}
           </div>
-          <div className="profile-menu__actions">
-            <button
-              type="button"
-              className="profile-menu__action profile-menu__action--danger"
-              role="menuitem"
-              onClick={handleLogOut}
-            >
-              <span className="profile-menu__action-title">Log out…</span>
-            </button>
-          </div>
+        </div>
+        <hr className="profile-menu__divider" />
+        <div className="profile-menu__section profile-menu__section--links">
+          <button
+            type="button"
+            className="profile-menu__link-action profile-menu__link-action--danger"
+            role="menuitem"
+            onClick={handleLogOut}
+          >
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            <span>Log out</span>
+          </button>
         </div>
       </>
     )
@@ -2025,14 +1987,70 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
         </button>
       </div>
       <hr className="profile-menu__divider" />
-      <button
-        type="button"
-        className="profile-menu__ghost-action"
-        onClick={handleContinueGuest}
-        role="menuitem"
-      >
-        Continue as guest
-      </button>
+      <div className="profile-menu__section profile-menu__section--links">
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/pricing', '_blank', 'noopener,noreferrer')}>
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 4l8 7h-5v9h-6v-9h-5l8-7z" />
+          </svg>
+          <span>See plans and pricing</span>
+        </button>
+      </div>
+      <hr className="profile-menu__divider" />
+      <div className="profile-menu__section profile-menu__section--links">
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel()}>
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <span>Settings</span>
+        </button>
+        <div className="profile-menu__link-help-wrapper">
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => setProfileHelpMenuOpen((open) => !open)} ref={profileHelpButtonRef}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+              <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
+            </svg>
+            <span>Help</span>
+          </button>
+          {profileHelpMenuOpen ? (
+            <div className="profile-help-menu profile-help-menu--guest" role="menu" id={profileHelpMenuId} ref={profileHelpMenuRef}>
+              {GUEST_HELP_MENU_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitem"
+                  className="profile-help-menu__item"
+                  onClick={() => handleHelpMenuItemSelect(item.url)}
+                >
+                  <span className="profile-help-menu__item-icon" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                  <span className="profile-help-menu__item-label">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/release-notes', '_blank', 'noopener,noreferrer')}>
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
+            <path d="M14 3v6h6" />
+            <path d="M8 13h8M8 17h5" />
+          </svg>
+          <span>Release notes</span>
+        </button>
+      </div>
+      <hr className="profile-menu__divider" />
+      <div className="profile-menu__section profile-menu__section--links">
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/policies', '_blank', 'noopener,noreferrer')}>
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5" y="4" width="14" height="17" rx="2" />
+            <path d="M9 9h6M9 13h6M9 17h4" />
+          </svg>
+          <span>Terms &amp; policies</span>
+        </button>
+      </div>
     </>
   )
 
