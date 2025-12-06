@@ -708,7 +708,7 @@ const sanitizeStoredModeSnapshot = (
   }
 }
 
-const formatTime = (milliseconds: number) => {
+const formatTime = (milliseconds: number, showMs: boolean = true) => {
   const totalMs = Math.max(0, Math.floor(milliseconds))
   const days = Math.floor(totalMs / 86_400_000)
   const hours = Math.floor((totalMs % 86_400_000) / 3_600_000)
@@ -729,9 +729,13 @@ const formatTime = (milliseconds: number) => {
   segments.push(seconds.toString().padStart(2, '0'))
 
   const timeCore = segments.join(':')
-  const fraction = centiseconds.toString().padStart(2, '0')
-
-  return `${timeCore}.${fraction}`
+  
+  if (showMs) {
+    const fraction = centiseconds.toString().padStart(2, '0')
+    return `${timeCore}.${fraction}`
+  }
+  
+  return timeCore
 }
 
 const formatClockTime = (timestamp: number) => {
@@ -749,9 +753,10 @@ const formatClockTime = (timestamp: number) => {
 
 export type FocusPageProps = {
   viewportWidth: number
+  showMilliseconds?: boolean
 }
 
-export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
+export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = true }: FocusPageProps) {
   // Re-autosize notebook subtask inputs on viewport resize so wrapping updates container height
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -886,7 +891,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const updateTimeDisplay = useCallback(
     (elapsedMs: number) => {
       if (!timeDisplayRef.current) return
-      const text = formatTime(elapsedMs)
+      const text = formatTime(elapsedMs, showMilliseconds)
       const isLong = elapsedMs >= 3_600_000
       const charCount = text.length
       let lenClass = ''
@@ -898,7 +903,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       timeDisplayRef.current.textContent = text
       timeDisplayRef.current.className = `time-value ${longClass} ${lenClass} ${hiddenClass}`
     },
-    [isTimeHidden],
+    [isTimeHidden, showMilliseconds],
   )
 
   const resetStopwatchDisplay = useCallback(() => {
@@ -5988,7 +5993,7 @@ useEffect(() => {
     }
   }, [isRunning, sessionStart, normalizedCurrentTask, registerNewHistoryEntry])
 
-  const formattedTime = useMemo(() => formatTime(elapsed), [elapsed])
+  const formattedTime = useMemo(() => formatTime(elapsed, showMilliseconds), [elapsed, showMilliseconds])
   const formattedClock = useMemo(() => formatClockTime(currentTime), [currentTime])
   const clockDateTime = useMemo(() => new Date(currentTime).toISOString(), [currentTime])
   const baseTimeClass = elapsed >= 3600000 ? 'time-value--long' : ''

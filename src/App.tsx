@@ -326,6 +326,7 @@ function MainApp() {
   const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [shortcutsPanelOpen, setShortcutsPanelOpen] = useState(false)
   const [shortcutsSearch, setShortcutsSearch] = useState('')
+  const [showMilliseconds, setShowMilliseconds] = useState(true)
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -1859,24 +1860,279 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Appearance</p>
-                <p className="settings-panel__row-subtitle">Match Taskwatch with your OS preference.</p>
+                <p className="settings-panel__row-subtitle">Choose between light and dark mode.</p>
               </div>
-              <button type="button" className="settings-panel__chip">System ▾</button>
+              <button
+                type="button"
+                className="settings-panel__text-toggle"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              >
+                {theme === 'dark' ? '☾ Dark' : '☀ Light'}
+              </button>
             </div>
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Accent color</p>
                 <p className="settings-panel__row-subtitle">Pick the highlight tone for panels.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Default ▾</button>
+              <button type="button" className="settings-panel__chip">Blue ▾</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Time format</p>
+                <p className="settings-panel__row-subtitle">Choose 12-hour or 24-hour clock.</p>
+              </div>
+              <button type="button" className="settings-panel__text-toggle">12h</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Timezone</p>
+                <p className="settings-panel__row-subtitle">Your current timezone.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Auto-detect ▾</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Default landing page</p>
+                <p className="settings-panel__row-subtitle">Page shown when you open Taskwatch.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Focus ▾</button>
             </div>
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Language</p>
-                <p className="settings-panel__row-subtitle">Auto-detect</p>
+                <p className="settings-panel__row-subtitle">Display language for the app.</p>
               </div>
               <button type="button" className="settings-panel__chip">Auto-detect ▾</button>
             </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'focus-timers') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">Focus &amp; Timers</p>
+              <p className="settings-panel__content-subtitle">Configure timer behavior and display.</p>
+            </div>
+          </header>
+          <div className="settings-panel__group">
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Show milliseconds on timers</p>
+                <p className="settings-panel__row-subtitle">Display milliseconds for precision timing.</p>
+              </div>
+              <button
+                type="button"
+                className="settings-panel__text-toggle"
+                onClick={() => setShowMilliseconds(!showMilliseconds)}
+              >
+                {showMilliseconds ? 'On' : 'Off'}
+              </button>
+            </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'calendar') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">Calendar &amp; Routines</p>
+              <p className="settings-panel__content-subtitle">Customize your calendar view and scheduling.</p>
+            </div>
+          </header>
+          <div className="settings-panel__group">
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Week start</p>
+                <p className="settings-panel__row-subtitle">First day of the week.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Sunday ▾</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Default calendar view</p>
+                <p className="settings-panel__row-subtitle">Initial view when opening calendar.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">5-Day ▾</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Snap to interval</p>
+                <p className="settings-panel__row-subtitle">Round times when dragging events.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">15 min ▾</button>
+            </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'notifications') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">Notifications</p>
+              <p className="settings-panel__content-subtitle">Manage alerts and reminders.</p>
+            </div>
+          </header>
+          <div className="settings-panel__group">
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Session reminders</p>
+                <p className="settings-panel__row-subtitle">Get notified before scheduled sessions.</p>
+              </div>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Daily reflection reminder</p>
+                <p className="settings-panel__row-subtitle">Reminder to review your day.</p>
+              </div>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Return to focus reminder</p>
+                <p className="settings-panel__row-subtitle">Nudge to get back on track after breaks.</p>
+              </div>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
+            </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'data') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">Data</p>
+              <p className="settings-panel__content-subtitle">Import, export, and manage your data.</p>
+            </div>
+          </header>
+          <div className="settings-panel__group">
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Import data</p>
+                <p className="settings-panel__row-subtitle">Restore from a backup file.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Import</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Export data</p>
+                <p className="settings-panel__row-subtitle">Download all your data as a file.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Export</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Clear local cache</p>
+                <p className="settings-panel__row-subtitle">Remove temporary data stored on this device.</p>
+              </div>
+              <button type="button" className="settings-panel__chip settings-panel__chip--warning">Clear cache</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Reset to guest data</p>
+                <p className="settings-panel__row-subtitle">Restore default settings and sample data.</p>
+              </div>
+              <button type="button" className="settings-panel__chip settings-panel__chip--danger">Reset</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Delete account &amp; data</p>
+                <p className="settings-panel__row-subtitle">Permanently remove all your data.</p>
+              </div>
+              <button type="button" className="settings-panel__chip settings-panel__chip--danger">Delete</button>
+            </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'account') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">Account</p>
+              <p className="settings-panel__content-subtitle">Manage your account and subscription.</p>
+            </div>
+          </header>
+          <div className="settings-panel__group">
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Subscription</p>
+                <p className="settings-panel__row-subtitle">View or change your current plan.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Free plan ▾</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Upgrade plan</p>
+                <p className="settings-panel__row-subtitle">Unlock more features with Pro.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Upgrade</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Email / Login</p>
+                <p className="settings-panel__row-subtitle">{userProfile?.email || 'Not signed in'}</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Manage</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Manage authentication</p>
+                <p className="settings-panel__row-subtitle">Connected sign-in methods.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Manage</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Restore purchases</p>
+                <p className="settings-panel__row-subtitle">Recover previous subscriptions.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Restore</button>
+            </div>
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Delete account &amp; data</p>
+                <p className="settings-panel__row-subtitle">Permanently remove your account.</p>
+              </div>
+              <button type="button" className="settings-panel__chip settings-panel__chip--danger">Delete</button>
+            </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'about-me') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">About Me</p>
+              <p className="settings-panel__content-subtitle">A note from the creator.</p>
+            </div>
+          </header>
+          <div className="settings-panel__about-me">
+            <p>Hey everyone! <br></br> &nbsp; Thank you all so much for giving my app a try – <br></br> &nbsp; &nbsp; I really appreciate it a lot :D</p>
+            <p>I've spent the last 8 weeks building this thing nonstop and finally... <br></br> &nbsp; it's ready to test!</p>
+            <p>There are a lot of features (and prolly a few bugs :/ ) so pls Whatsapp me if you are confused or have any issues.</p>
+            <p>I'll be back at the start of Feb but down below are some things I'll fix up when I'm back.</p>
+            <ul>
+              <li>Notifications</li>
+              <li>Payments (DW y'alls wont have to pay)</li>
+              <li>GCAL imports</li>
+            </ul>
+            <p>If you have suggestions or anything you’d like to see added, definitely let me know and I'll add them to the list!</p>
+            <p>And on the off chance the app feels super slow or glitchy, try clearing your cookies & site data — and please tell me so I can squish some more bugs 😭.</p>
+            <p>Once again, thanks everyone!!!</p>
           </div>
         </>
       )
@@ -2246,7 +2502,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} />}
+          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} />}
         </section>
 
         <section

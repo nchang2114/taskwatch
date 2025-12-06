@@ -1833,6 +1833,8 @@ html[data-theme='light'] .shortcuts-panel__footer {
 
 .settings-panel__sidebar {
   width: clamp(180px, 24vw, 220px);
+  min-width: 180px;
+  flex-shrink: 0;
   background: rgba(12, 18, 42, 0.5);
   border-right: 1px solid rgba(148, 164, 255, 0.15);
   display: flex;
@@ -1840,7 +1842,7 @@ html[data-theme='light'] .shortcuts-panel__footer {
 }
 
 html[data-theme='light'] .settings-panel__sidebar {
-  background: rgba(248, 250, 255, 0.92);
+  background: rgba(245, 247, 252, 0.96);
 }
 
 .settings-panel__sidebar-header {
@@ -2005,6 +2007,69 @@ html[data-theme='light'] .settings-panel__group {
   color: var(--text-primary);
   font-size: 0.9rem;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-panel__chip:hover {
+  background: rgba(148, 164, 255, 0.15);
+  border-color: rgba(148, 164, 255, 0.7);
+}
+
+.settings-panel__chip--warning {
+  border-color: rgba(255, 180, 100, 0.5);
+  color: #ffb464;
+}
+
+.settings-panel__chip--warning:hover {
+  background: rgba(255, 180, 100, 0.15);
+  border-color: rgba(255, 180, 100, 0.7);
+}
+
+html[data-theme='light'] .settings-panel__chip--warning {
+  border-color: rgba(245, 140, 40, 0.6);
+  color: #e88020;
+}
+
+html[data-theme='light'] .settings-panel__chip--warning:hover {
+  background: rgba(245, 140, 40, 0.12);
+  border-color: rgba(245, 140, 40, 0.8);
+}
+
+.settings-panel__chip--danger {
+  border-color: rgba(255, 100, 100, 0.5);
+  color: #ff6464;
+}
+
+.settings-panel__chip--danger:hover {
+  background: rgba(255, 100, 100, 0.15);
+  border-color: rgba(255, 100, 100, 0.7);
+}
+
+.settings-panel__toggle-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.settings-panel__toggle-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.settings-panel__text-toggle {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(148, 164, 255, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-panel__text-toggle:hover {
+  background: rgba(148, 164, 255, 0.15);
+  border-color: rgba(148, 164, 255, 0.6);
 }
 
 .settings-panel__row--actions .settings-panel__row-actions {
@@ -2064,6 +2129,30 @@ html[data-theme='light'] .settings-panel__group {
   border: 1px dashed rgba(148, 164, 255, 0.35);
   padding: 1.5rem;
   text-align: left;
+}
+
+.settings-panel__about-me {
+  padding: 0.5rem 0;
+  line-height: 1.5;
+}
+
+.settings-panel__about-me p {
+  margin: 0 0 0.75rem;
+  color: var(--settings-text);
+  font-size: 0.85rem;
+}
+
+.settings-panel__about-me ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  color: var(--settings-text);
+  font-size: 0.85rem;
+  list-style-type: disc;
+}
+
+.settings-panel__about-me li {
+  margin: 0.25rem 0;
+  display: list-item;
 }
 
 .auth-modal-overlay {
