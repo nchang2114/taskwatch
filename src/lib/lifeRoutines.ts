@@ -58,7 +58,7 @@ const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle
   return match ? match[0] : DEFAULT_SURFACE_STYLE
 }
 
-export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines-v1'
+export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines'
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
 export const LIFE_ROUTINE_USER_STORAGE_KEY = 'nc-taskwatch-life-routines-user'
 export const LIFE_ROUTINE_GUEST_USER_ID = '__guest__'
@@ -370,9 +370,10 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
 
 export const pushLifeRoutinesToSupabase = async (
   routines: LifeRoutineConfig[],
-  options?: { strict?: boolean },
+  options?: { strict?: boolean; skipOrphanDelete?: boolean },
 ): Promise<void> => {
   const strict = Boolean(options?.strict)
+  const skipOrphanDelete = Boolean(options?.skipOrphanDelete)
   const fail = (message: string, err?: unknown) => {
     if (strict) {
       throw err instanceof Error ? err : new Error(message)
@@ -421,6 +422,11 @@ export const pushLifeRoutinesToSupabase = async (
       fail('Failed to upsert life routines', upsertError)
       return
     }
+  }
+
+  // Skip orphan deletion during bootstrap (no remote data exists yet)
+  if (skipOrphanDelete) {
+    return
   }
 
   const remoteIds = new Set((remoteIdsData ?? []).map((row) => row.id))
@@ -521,6 +527,14 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   if (!session) {
     return null
   }
+  
+  // Set user ID marker only if it's different (avoid triggering storage events unnecessarily)
+  // (important after localStorage.clear() during bootstrap)
+  const currentUserId = readStoredLifeRoutineUserId()
+  if (currentUserId !== session.user.id) {
+    setStoredLifeRoutineUserId(session.user.id)
+  }
+  
   // Default to preferring the remote snapshot. You can opt out by setting
   // VITE_PREFER_REMOTE_LIFE_ROUTINES=false in .env.local.
   const preferRemoteEnv = String((import.meta as any)?.env?.VITE_PREFER_REMOTE_LIFE_ROUTINES ?? 'true')

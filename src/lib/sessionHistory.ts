@@ -7,9 +7,9 @@ import {
   type SurfaceStyle,
 } from './surfaceStyles'
 
-export const HISTORY_STORAGE_KEY = 'nc-taskwatch-history'
+export const HISTORY_STORAGE_KEY = 'nc-taskwatch-session-history'
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
-export const HISTORY_USER_KEY = 'nc-taskwatch-history-user'
+export const HISTORY_USER_KEY = 'nc-taskwatch-session-history-user'
 export const HISTORY_GUEST_USER_ID = '__guest__'
 export const HISTORY_USER_EVENT = 'nc-taskwatch-history-user-updated'
 export const CURRENT_SESSION_STORAGE_KEY = 'nc-taskwatch-current-session'
@@ -125,6 +125,13 @@ const getStoredHistoryUserId = (): string | null => {
     return null
   }
 }
+
+const normalizeHistoryUserId = (userId: string | null | undefined): string =>
+  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
+
+const storageKeyForUser = (userId: string | null | undefined): string =>
+  `${HISTORY_STORAGE_KEY}::${normalizeHistoryUserId(userId)}`
+
 export const readHistoryOwnerId = (): string | null => getStoredHistoryUserId()
 const setStoredHistoryUserId = (userId: string | null): void => {
   if (typeof window === 'undefined') return
@@ -935,7 +942,7 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
     .filter((entry): entry is HistoryEntry => Boolean(entry))
 }
 
-const sanitizeHistoryRecords = (value: unknown): HistoryRecord[] => {
+export const sanitizeHistoryRecords = (value: unknown): HistoryRecord[] => {
   const entries = sanitizeHistoryEntries(value)
   const array = Array.isArray(value) ? (value as HistoryRecordCandidate[]) : []
   const now = Date.now()
@@ -974,8 +981,8 @@ const readHistoryRecords = (): HistoryRecord[] => {
     return []
   }
   try {
-    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY)
     const currentUserId = getStoredHistoryUserId()
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUserId))
     const guestContext = !currentUserId || currentUserId === HISTORY_GUEST_USER_ID
     if (!raw) {
       if (guestContext) {
@@ -1014,7 +1021,8 @@ const writeHistoryRecords = (records: HistoryRecord[]): void => {
     return
   }
   try {
-    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records))
+    const currentUserId = getStoredHistoryUserId()
+    window.localStorage.setItem(storageKeyForUser(currentUserId), JSON.stringify(records))
   } catch {}
 }
 
@@ -1114,8 +1122,7 @@ const persistRecords = (records: HistoryRecord[]): HistoryEntry[] => {
 
 export const ensureHistoryUser = (userId: string | null): void => {
   if (typeof window === 'undefined') return
-  const normalized =
-    typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
+  const normalized = normalizeHistoryUserId(userId)
   const current = getStoredHistoryUserId()
   if (current === normalized) {
     return
@@ -1640,10 +1647,21 @@ export const hasRemoteHistory = async (): Promise<boolean> => {
 export const pushAllHistoryToSupabase = async (
   ruleIdMap?: Record<string, string>,
   seedTimestamp?: number,
-  options?: { skipRemoteCheck?: boolean; strict?: boolean },
+  options?: {
+    skipRemoteCheck?: boolean
+    strict?: boolean
+    goalIdMap?: Record<string, string>
+    bucketIdMap?: Record<string, string>
+    taskIdMap?: Record<string, string>
+    sourceRecords?: HistoryRecord[]
+  },
 ): Promise<void> => {
   const skipRemoteCheck = Boolean(options?.skipRemoteCheck)
   const strict = Boolean(options?.strict)
+  const goalIdMap = options?.goalIdMap ?? {}
+  const bucketIdMap = options?.bucketIdMap ?? {}
+  const taskIdMap = options?.taskIdMap ?? {}
+  const sourceRecords = options?.sourceRecords
   const fail = (message: string, err?: unknown) => {
     if (strict) {
       throw err instanceof Error ? err : new Error(message)
@@ -1665,7 +1683,8 @@ export const pushAllHistoryToSupabase = async (
       return
     }
   }
-  let records = readHistoryRecords()
+  // Use provided sourceRecords (for migration) or read from current user's key
+  let records = sourceRecords ?? readHistoryRecords()
   if (!records || records.length === 0) {
     records = []
   }
@@ -1676,9 +1695,12 @@ export const pushAllHistoryToSupabase = async (
     const id = generateUuid()
     return { ...record, id }
   })
-  if (uuidNormalized.some((record, index) => record.id !== records[index]?.id)) {
+  // Only write back if we're not using sourceRecords (don't overwrite guest data)
+  if (!sourceRecords && uuidNormalized.some((record, index) => record.id !== records[index]?.id)) {
     records = uuidNormalized
     writeHistoryRecords(records)
+  } else {
+    records = uuidNormalized
   }
   const { records: lifeRoutineAligned, changed: alignedChanged } = applyLifeRoutineSurfaces(records)
   if (alignedChanged) {
@@ -1686,9 +1708,30 @@ export const pushAllHistoryToSupabase = async (
     writeHistoryRecords(records)
   }
   const normalizedRecords = sortRecordsForStorage(records).map((record, index) => {
-    let mappedRepeatingId = record.repeatingSessionId
-    if (ruleIdMap && record.repeatingSessionId && ruleIdMap[record.repeatingSessionId]) {
-      mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+    // Remap IDs from guest demo IDs to real UUIDs
+    // If repeatingSessionId exists but isn't in the ruleIdMap, set to null
+    // (the rule doesn't exist in the database, so we can't reference it)
+    let mappedRepeatingId: string | null = null
+    if (record.repeatingSessionId) {
+      if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
+        mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+      } else if (!ruleIdMap) {
+        // No ruleIdMap provided, keep original (for non-migration syncs)
+        mappedRepeatingId = record.repeatingSessionId
+      }
+      // else: ruleIdMap exists but doesn't contain this ID -> null (rule doesn't exist)
+    }
+    let mappedGoalId = record.goalId
+    if (record.goalId && goalIdMap[record.goalId]) {
+      mappedGoalId = goalIdMap[record.goalId]
+    }
+    let mappedBucketId = record.bucketId
+    if (record.bucketId && bucketIdMap[record.bucketId]) {
+      mappedBucketId = bucketIdMap[record.bucketId]
+    }
+    let mappedTaskId = record.taskId
+    if (record.taskId && taskIdMap[record.taskId]) {
+      mappedTaskId = taskIdMap[record.taskId]
     }
     const createdAt =
       typeof record.createdAt === 'number'
@@ -1700,6 +1743,9 @@ export const pushAllHistoryToSupabase = async (
       ...record,
       createdAt,
       repeatingSessionId: mappedRepeatingId,
+      goalId: mappedGoalId,
+      bucketId: mappedBucketId,
+      taskId: mappedTaskId,
       pendingAction: null,
     }
   })

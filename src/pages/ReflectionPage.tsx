@@ -9849,19 +9849,21 @@ useEffect(() => {
 
         // Group events with similar timing (within 15 min on both start AND end) for side-by-side stacking
         // This includes dragged events at their preview position so the preview shows accurate stacking
+        // NOTE: Only group REAL events (from raw), not guides. Guides should render at full width
+        // and overlay real events rather than sharing horizontal space with other guides.
         const STACK_TOLERANCE_MS = 15 * MINUTE_MS
         const stackingGroups = new Map<string, { left: number; width: number }>()
         
-        // Find groups of events with nearly identical timing
+        // Find groups of events with nearly identical timing (real events only)
         const processed = new Set<string>()
-        for (let i = 0; i < combined.length; i++) {
-          const ev = combined[i]
+        for (let i = 0; i < raw.length; i++) {
+          const ev = raw[i]
           if (processed.has(ev.entry.id)) continue
           
-          // Find all events with similar start AND end times
+          // Find all real events with similar start AND end times
           const group = [ev]
-          for (let j = i + 1; j < combined.length; j++) {
-            const other = combined[j]
+          for (let j = i + 1; j < raw.length; j++) {
+            const other = raw[j]
             if (processed.has(other.entry.id)) continue
             const startDiff = Math.abs(ev.start - other.start)
             const endDiff = Math.abs(ev.end - other.end)

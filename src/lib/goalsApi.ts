@@ -105,6 +105,8 @@ export type DbGoalMilestone = {
 
 export async function fetchGoalCreatedAt(goalId: string): Promise<string | null> {
   if (!supabase) return null
+  // Skip fetching for non-UUID goal IDs (e.g., demo goal IDs)
+  if (!isUuid(goalId)) return null
   const userId = await getActiveUserId()
   if (!userId) return null
   const { data, error } = await supabase
@@ -371,6 +373,8 @@ export async function fetchGoalMilestones(goalId: string): Promise<
   Array<{ id: string; name: string; date: string; completed: boolean; role: 'start' | 'end' | 'normal'; hidden?: boolean }>
 > {
   if (!supabase) return []
+  // Skip fetching for non-UUID goal IDs (e.g., demo goal IDs like "g_1234_xyz")
+  if (!isUuid(goalId)) return []
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) return []
   let data: any[] | null = null
@@ -416,6 +420,8 @@ export async function upsertGoalMilestone(
   milestone: { id: string; name: string; date: string; completed: boolean; role: 'start' | 'end' | 'normal'; hidden?: boolean },
 ) {
   if (!supabase) return
+  // Skip upserting for non-UUID goal IDs (e.g., demo goal IDs)
+  if (!isUuid(goalId)) return
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
     return

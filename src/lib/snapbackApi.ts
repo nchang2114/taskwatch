@@ -39,14 +39,14 @@ export async function getOrCreateTriggerByName(trigger_name: string): Promise<Db
   }
   
   // First try to find existing trigger
-  const { data: existing, error: findError } = await supabase
+  const { data: existing } = await supabase
     .from('snapback_overview')
     .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .eq('user_id', session.user.id)
     .eq('trigger_name', trigger_name)
-    .single()
+    .maybeSingle()
   
-  if (existing && !findError) {
+  if (existing) {
     return existing as DbSnapbackOverview
   }
   
@@ -174,33 +174,39 @@ export type SnapbackTriggerPayload = {
 }
 
 /**
- * Bulk insert multiple snapback triggers (used during bootstrap migration).
- * Skips duplicates based on trigger_name.
+ * Push multiple snapback triggers to Supabase (used during bootstrap migration).
+ * Skips duplicates based on trigger_name unless skipDuplicateCheck is true.
  */
-export async function bulkInsertSnapbackTriggers(
-  triggers: SnapbackTriggerPayload[]
+export async function pushSnapbackTriggersToSupabase(
+  triggers: SnapbackTriggerPayload[],
+  options?: { skipDuplicateCheck?: boolean }
 ): Promise<DbSnapbackOverview[]> {
+  const skipDuplicateCheck = Boolean(options?.skipDuplicateCheck)
   if (!supabase || triggers.length === 0) return []
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) return []
   
   const userId = session.user.id
   
-  // Check for existing triggers to avoid duplicates
-  const { data: existing } = await supabase
-    .from('snapback_overview')
-    .select('trigger_name')
-    .eq('user_id', userId)
+  // Skip duplicate check during bootstrap (no remote data exists yet)
+  let triggersToInsert = triggers
+  if (!skipDuplicateCheck) {
+    // Check for existing triggers to avoid duplicates
+    const { data: existing } = await supabase
+      .from('snapback_overview')
+      .select('trigger_name')
+      .eq('user_id', userId)
+    
+    const existingNames = new Set((existing ?? []).map((r) => r.trigger_name?.toLowerCase()))
+    
+    triggersToInsert = triggers.filter(
+      (t) => t.trigger_name && !existingNames.has(t.trigger_name.toLowerCase())
+    )
+  }
   
-  const existingNames = new Set((existing ?? []).map((r) => r.trigger_name?.toLowerCase()))
+  if (triggersToInsert.length === 0) return []
   
-  const newTriggers = triggers.filter(
-    (t) => t.trigger_name && !existingNames.has(t.trigger_name.toLowerCase())
-  )
-  
-  if (newTriggers.length === 0) return []
-  
-  const rows = newTriggers.map((t) => ({
+  const rows = triggersToInsert.map((t) => ({
     user_id: userId,
     trigger_name: t.trigger_name.trim(),
     cue_text: t.cue_text ?? '',
@@ -214,10 +220,28 @@ export async function bulkInsertSnapbackTriggers(
     .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
   
   if (error) {
-    console.error('[snapbackApi] bulkInsertSnapbackTriggers error:', error)
+    console.error('[snapbackApi] pushSnapbackTriggersToSupabase error:', error)
     return []
   }
   
   console.log('[snapbackApi] Bulk inserted', data?.length ?? 0, 'snapback triggers')
   return Array.isArray(data) ? (data as DbSnapbackOverview[]) : []
+}
+
+/**
+ * Sync snapback triggers from Supabase.
+ * Fetches all triggers for the current user and returns them.
+ */
+export async function syncSnapbackTriggersFromSupabase(): Promise<DbSnapbackOverview[] | null> {
+  if (!supabase) return null
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) return null
+  
+  try {
+    const rows = await fetchSnapbackOverviewRows()
+    return rows
+  } catch (err) {
+    console.error('[snapbackApi] syncSnapbackTriggersFromSupabase error:', err)
+    return null
+  }
 }

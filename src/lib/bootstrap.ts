@@ -1,6 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import type { QuickItem } from './quickList'
-import { ensureQuickListRemoteStructures, generateUuid } from './quickListRemote'
+import { ensureQuickListRemoteStructures, generateUuid, syncQuickListFromSupabase } from './quickListRemote'
 import {
   createTask,
   updateTaskNotes,
@@ -10,12 +10,84 @@ import {
   upsertTaskSubtask,
   normalizeGoalColour,
   FALLBACK_GOAL_COLOR,
+  upsertGoalMilestone,
 } from './goalsApi'
-import { pushLifeRoutinesToSupabase, type LifeRoutineConfig } from './lifeRoutines'
-import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
+import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
+import { GOALS_GUEST_USER_ID, GOALS_SNAPSHOT_STORAGE_KEY, createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
-import { bulkInsertSnapbackTriggers, type SnapbackTriggerPayload } from './snapbackApi'
+import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
+import { pushRepeatingRulesToSupabase, readLocalRepeatingRules, syncRepeatingRulesFromSupabase } from './repeatingSessions'
+import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_STORAGE_KEY, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
+
+// Type for ID mappings returned from migrations
+export type IdMaps = {
+  goalIdMap: Map<string, string>
+  bucketIdMap: Map<string, string>
+  taskIdMap: Map<string, string>
+}
+
+/**
+ * Runs all 5 sync functions in parallel to pull user data from Supabase into localStorage.
+ * Called after localStorage.clear() during bootstrap to populate the app with user data.
+ */
+export const runAllSyncs = async (): Promise<void> => {
+  console.log('[bootstrap] Running all syncs...')
+  await Promise.all([
+    syncGoalsSnapshotFromSupabase(),
+    syncHistoryWithSupabase(),
+    syncLifeRoutinesWithSupabase(),
+    syncRepeatingRulesFromSupabase(),
+    syncSnapbackTriggersFromSupabase(),
+    syncQuickListFromSupabase(),
+  ])
+  console.log('[bootstrap] All syncs complete')
+}
+
+/**
+ * Clears only app data from localStorage, preserving auth tokens.
+ * All app keys start with 'nc-taskwatch-' prefix, but we exclude auth keys.
+ * Called during new user bootstrap to wipe guest/demo data before syncing.
+ */
+export const clearAppDataFromLocalStorage = (): void => {
+  if (typeof window === 'undefined') return
+  // Keys to preserve (auth-related)
+  const AUTH_KEYS_TO_PRESERVE = [
+    'nc-taskwatch-supabase-session-v1',
+    'nc-taskwatch-last-auth-user-id',
+  ]
+  try {
+    console.log('[bootstrap] Clearing app data from localStorage (preserving auth)')
+    const keysToRemove: string[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)
+      if (key && key.startsWith('nc-taskwatch-') && !AUTH_KEYS_TO_PRESERVE.includes(key)) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach((key) => {
+      window.localStorage.removeItem(key)
+    })
+    console.log(`[bootstrap] Cleared ${keysToRemove.length} app data keys`)
+  } catch (e) {
+    console.warn('[bootstrap] Failed to clear app data:', e)
+  }
+}
+
+/**
+ * Clears ALL localStorage data including auth tokens.
+ * Use this ONLY for sign-out (when you want to fully clear everything).
+ * For bootstrap/sync operations, use clearAppDataFromLocalStorage() instead.
+ */
+export const clearAllLocalStorage = (): void => {
+  if (typeof window === 'undefined') return
+  try {
+    console.log('[bootstrap] Clearing all localStorage')
+    window.localStorage.clear()
+  } catch (e) {
+    console.warn('[bootstrap] Failed to clear localStorage:', e)
+  }
+}
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
 const BOOTSTRAP_LOCK_TTL_MS = 2 * 60 * 1000
@@ -89,7 +161,7 @@ const sortByIndex = (a: { sortIndex?: number }, b: { sortIndex?: number }) => {
   return left - right
 }
 
-const uploadQuickListItems = async (items: QuickItem[]): Promise<void> => {
+const pushQuickListToSupabase = async (items: QuickItem[]): Promise<void> => {
   if (!supabase || items.length === 0) {
     return
   }
@@ -102,15 +174,6 @@ const uploadQuickListItems = async (items: QuickItem[]): Promise<void> => {
     throw new Error('Missing Supabase session for Quick List migration')
   }
   const { bucketId } = remote
-  // Start from a clean slate so we don't duplicate default content
-  const { error: deleteError } = await supabase
-    .from('tasks')
-    .delete()
-    .eq('bucket_id', bucketId)
-    .eq('user_id', session.user.id)
-  if (deleteError) {
-    throw deleteError
-  }
 
   const ordered = [
     ...items.filter((item) => !item.completed).sort(sortByIndex),
@@ -157,16 +220,35 @@ const uploadQuickListItems = async (items: QuickItem[]): Promise<void> => {
   }
 }
 
-const migrateGoalsSnapshot = async (): Promise<void> => {
-  const owner = readGoalsSnapshotOwner()
-  if (owner && owner !== GOALS_GUEST_USER_ID) {
-    return
+const pushGoalsToSupabase = async (): Promise<IdMaps> => {
+  const emptyMaps: IdMaps = {
+    goalIdMap: new Map<string, string>(),
+    bucketIdMap: new Map<string, string>(),
+    taskIdMap: new Map<string, string>(),
   }
-  const snapshot = readStoredGoalsSnapshot().filter(
-    (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
-  )
+  
+  // Read directly from the guest key (not the current user's key)
+  const guestGoalsKey = `${GOALS_SNAPSHOT_STORAGE_KEY}::${GOALS_GUEST_USER_ID}`
+  const guestGoalsRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem(guestGoalsKey)
+    : null
+  
+  if (!guestGoalsRaw) {
+    return emptyMaps
+  }
+  
+  let snapshot: ReturnType<typeof createGoalsSnapshot> = []
+  try {
+    const parsed = JSON.parse(guestGoalsRaw)
+    snapshot = createGoalsSnapshot(parsed).filter(
+      (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
+    )
+  } catch {
+    return emptyMaps
+  }
+  
   if (snapshot.length === 0) {
-    return
+    return emptyMaps
   }
   if (!supabase) {
     throw new Error('Supabase client unavailable for goals migration')
@@ -176,17 +258,6 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
     throw new Error('Missing Supabase session for goals migration')
   }
   const userId = session.user.id
-  const { data: existingGoals, error: existingError } = await supabase
-    .from('goals')
-    .select('id')
-    .eq('user_id', userId)
-    .limit(1)
-  if (existingError) {
-    throw existingError
-  }
-  if (existingGoals && existingGoals.length > 0) {
-    return
-  }
 
   const goalIdMap = new Map<string, string>()
   const bucketIdMap = new Map<string, string>()
@@ -318,6 +389,50 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
       throw error
     }
   }
+  
+  return { goalIdMap, bucketIdMap, taskIdMap }
+}
+
+// Push milestones from localStorage to DB, remapping goal IDs
+const pushMilestonesToSupabase = async (goalIdMap: Map<string, string>): Promise<void> => {
+  if (typeof window === 'undefined' || !supabase) return
+  
+  const MILESTONE_DATA_KEY = 'nc-taskwatch-milestones-state-v1'
+  const raw = window.localStorage.getItem(MILESTONE_DATA_KEY)
+  if (!raw) return
+  
+  try {
+    const map = JSON.parse(raw) as Record<string, Array<{
+      id: string
+      name: string
+      date: string
+      completed: boolean
+      role: 'start' | 'end' | 'normal'
+      hidden?: boolean
+    }>>
+    
+    for (const [oldGoalId, milestones] of Object.entries(map)) {
+      // Remap the goal ID
+      const newGoalId = goalIdMap.get(oldGoalId) ?? oldGoalId
+      // Skip if goal wasn't migrated (no mapping exists and ID isn't a valid UUID)
+      if (!isUuid(newGoalId)) continue
+      
+      for (const milestone of milestones) {
+        await upsertGoalMilestone(newGoalId, {
+          id: ensureUuid(milestone.id),
+          name: milestone.name,
+          date: milestone.date,
+          completed: milestone.completed,
+          role: milestone.role,
+          hidden: milestone.hidden,
+        })
+      }
+    }
+    
+    console.log('[bootstrap] Migrated milestones for', Object.keys(map).length, 'goals')
+  } catch (e) {
+    console.warn('[bootstrap] Could not migrate milestones:', e)
+  }
 }
 
 /**
@@ -332,14 +447,14 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
  * Multi-tab: Only the tab doing sign-up bootstraps. Other tabs skip (bootstrap_completed=true)
  */
 const migrateGuestData = async (): Promise<void> => {
-  // Skip repeating rules - they have stale references like session history
-  // const rules = readLocalRepeatingRules()
-  // if (rules.length > 0) {
-  //   await pushRepeatingRulesToSupabase(rules, { strict: true })
-  // }
+  // 1. Push goals/buckets/tasks to Supabase and get ID mappings
+  const { goalIdMap, bucketIdMap, taskIdMap } = await pushGoalsToSupabase()
+  console.log('[bootstrap] Goals migration complete. ID maps:', {
+    goals: goalIdMap.size,
+    buckets: bucketIdMap.size,
+    tasks: taskIdMap.size,
+  })
 
-  await migrateGoalsSnapshot()
-  
   // CRITICAL: Clear goals snapshot immediately after migration
   // The snapshot has demo IDs that will cause 400 errors if used
   if (typeof window !== 'undefined') {
@@ -350,12 +465,54 @@ const migrateGuestData = async (): Promise<void> => {
     } catch {}
   }
 
-  // Skip migrating session history - it has stale goal/bucket/task IDs
-  // that would need complex remapping. Fresh account = fresh history.
-  // const history = readStoredHistory()
-  // if (history.length > 0) {
-  //   await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
-  // }
+  // 2. Push milestones to Supabase (using goal ID map)
+  await pushMilestonesToSupabase(goalIdMap)
+
+  // 3. Migrate repeating rules and get rule ID map
+  const rules = readLocalRepeatingRules()
+  let ruleIdMap: Record<string, string> = {}
+  if (rules.length > 0) {
+    console.log('[bootstrap] Migrating', rules.length, 'repeating rules')
+    ruleIdMap = await pushRepeatingRulesToSupabase(rules, { strict: true })
+    console.log('[bootstrap] Repeating rules migrated. ID remaps:', Object.keys(ruleIdMap).length)
+  }
+
+  // 4. Migrate session history with all ID mappings
+  // Read directly from the guest key (not the current user's key)
+  const guestHistoryKey = `${HISTORY_STORAGE_KEY}::${HISTORY_GUEST_USER_ID}`
+  const guestHistoryRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem(guestHistoryKey)
+    : null
+  
+  let guestHistoryRecords: ReturnType<typeof sanitizeHistoryRecords> = []
+  if (guestHistoryRaw) {
+    try {
+      const parsed = JSON.parse(guestHistoryRaw)
+      guestHistoryRecords = sanitizeHistoryRecords(parsed)
+      console.log('[bootstrap] Found', guestHistoryRecords.length, 'guest history records to migrate')
+    } catch {
+      console.warn('[bootstrap] Could not parse guest history records')
+    }
+  }
+  
+  // Convert Maps to Records for the history function
+  const goalIdRecord: Record<string, string> = Object.fromEntries(goalIdMap)
+  const bucketIdRecord: Record<string, string> = Object.fromEntries(bucketIdMap)
+  const taskIdRecord: Record<string, string> = Object.fromEntries(taskIdMap)
+  
+  await pushAllHistoryToSupabase(
+    ruleIdMap,
+    undefined,
+    { 
+      skipRemoteCheck: true, 
+      strict: true,
+      goalIdMap: goalIdRecord,
+      bucketIdMap: bucketIdRecord,
+      taskIdMap: taskIdRecord,
+      sourceRecords: guestHistoryRecords.length > 0 ? guestHistoryRecords : undefined,
+    }
+  )
+  console.log('[bootstrap] Session history migration complete')
 
   // Read from snapshot first (created at sign-up), fall back to guest key
   const snapshotRoutinesRaw = typeof window !== 'undefined'
@@ -398,7 +555,7 @@ const migrateGuestData = async (): Promise<void> => {
   }
   
   if (routines.length > 0) {
-    await pushLifeRoutinesToSupabase(routines, { strict: true })
+    await pushLifeRoutinesToSupabase(routines, { strict: true, skipOrphanDelete: true })
   }
 
   // Read quick list from snapshot first (created at sign-up), fall back to guest key
@@ -430,7 +587,7 @@ const migrateGuestData = async (): Promise<void> => {
   }
   
   if (quickItems.length > 0) {
-    await uploadQuickListItems(quickItems)
+    await pushQuickListToSupabase(quickItems)
   }
   
   // Migrate Snapback triggers and plans
@@ -501,19 +658,9 @@ const migrateGuestData = async (): Promise<void> => {
     }
   })
   
-  // Also ensure "Doomscrolling" default trigger exists (from sample history)
-  if (!triggersToMigrate.some((t) => t.trigger_name.toLowerCase() === 'doomscrolling')) {
-    triggersToMigrate.push({
-      trigger_name: 'Doomscrolling',
-      cue_text: '',
-      deconstruction_text: '',
-      plan_text: '',
-    })
-  }
-  
   if (triggersToMigrate.length > 0) {
     console.log('[bootstrap] Migrating', triggersToMigrate.length, 'snapback triggers to DB')
-    await bulkInsertSnapbackTriggers(triggersToMigrate)
+    await pushSnapbackTriggersToSupabase(triggersToMigrate, { skipDuplicateCheck: true })
   }
   
   // Clear all guest data after successful migration
@@ -548,29 +695,52 @@ export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefin
     if (error) {
       throw error
     }
-    if (data?.bootstrap_completed) {
+    
+    const alreadyBootstrapped = Boolean(data?.bootstrap_completed)
+    
+    if (alreadyBootstrapped) {
+      // User already bootstrapped (returning user on page refresh)
+      // Just sync to pick up any changes from other devices - don't clear anything
+      console.log('[bootstrap] User already bootstrapped, syncing from DB')
+      await runAllSyncs()
       return false
     }
+    
+    // New user: migrate guest data first
     if (!acquireBootstrapLock(userId)) {
+      // Another tab is handling bootstrap, just sync
+      console.log('[bootstrap] Another tab is bootstrapping, syncing from DB')
+      await runAllSyncs()
       return false
     }
-    await migrateGuestData()
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ bootstrap_completed: true })
-      .eq('id', userId)
-    if (updateError) {
+    
+    try {
+      // Migrate guest data to DB
+      await migrateGuestData()
+      
+      // Mark bootstrap as complete
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ bootstrap_completed: true })
+        .eq('id', userId)
+      if (updateError) {
+        throw updateError
+      }
+      
+      // Clear app data (not auth!) and sync fresh data from DB
+      console.log('[bootstrap] Migration complete, clearing app data and syncing from DB')
+      clearAppDataFromLocalStorage()
+      await runAllSyncs()
+      
+      return true
+    } finally {
       releaseBootstrapLock(userId)
-      throw updateError
     }
-    releaseBootstrapLock(userId)
-    return true
   })()
   bootstrapPromises.set(userId, task)
   try {
     return await task
   } finally {
     bootstrapPromises.delete(userId)
-    releaseBootstrapLock(userId)
   }
 }

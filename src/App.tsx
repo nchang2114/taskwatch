@@ -13,10 +13,10 @@ import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser, syncHistoryWithSupabase } from './lib/sessionHistory'
+import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
-import { bootstrapGuestDataIfNeeded } from './lib/bootstrap'
-import { ensureGoalsUser, syncGoalsSnapshotFromSupabase } from './lib/goalsSync'
+import { bootstrapGuestDataIfNeeded, clearAllLocalStorage } from './lib/bootstrap'
+import { ensureGoalsUser } from './lib/goalsSync'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -332,15 +332,6 @@ function MainApp() {
   const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(6)
   const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(0) // 0 = none, or 5/10/15 minutes
   const [isSigningOut, setIsSigningOut] = useState(false)
-  // Only show "Signing you in..." screen when returning from OAuth redirect
-  const [isSigningIn, setIsSigningIn] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const hasAuthCallback = window.location.hash.includes('access_token') || 
-                              window.location.search.includes('code=')
-      return hasAuthCallback
-    }
-    return false
-  })
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -929,7 +920,7 @@ function MainApp() {
         return
       }
 
-      // If user hasn't changed and no migration needed, skip alignment
+      // If user hasn't changed, skip alignment
       if (!userChanged) {
         return
       }
@@ -945,64 +936,16 @@ function MainApp() {
         // Another tab is handling alignment
         // Just update tracking - the winning tab will sync data via storage events
         lastAlignedUserIdRef.current = userId
-        
-        // Still need to set the user ID in each module so they know which user to track
-        // but DON'T trigger syncs (they'll get data via storage events from the winning tab)
-        if (typeof window !== 'undefined') {
-          try {
-            window.localStorage.setItem('nc-taskwatch-quicklist-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-life-routine-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-session-history-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-goals-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-repeating-rules-user-id', userId)
-          } catch {}
-        }
         return
       }
 
       try {
-        let migrated = false
-        try {
-          migrated = await bootstrapGuestDataIfNeeded(userId)
-        } catch (error) {
-          console.error('[bootstrap] failed during alignLocalStoresForUser', error)
-        }
-
         if (userId) {
-          if (migrated) {
-            // Bootstrap cleared guest data, now initialize user data from DB
-            // Clear history/repeating first to prevent stale guest data from syncing
-            if (typeof window !== 'undefined') {
-              try {
-                window.localStorage.removeItem('nc-taskwatch-history')
-                window.localStorage.removeItem('nc-taskwatch-current-session')
-                window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
-                window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
-              } catch {}
-            }
-            ensureQuickListUser(userId)
-            ensureLifeRoutineUser(userId)
-            ensureHistoryUser(userId)
-            ensureGoalsUser(userId)
-            await ensureRepeatingRulesUser(userId)
-            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
-            await Promise.all([
-              syncGoalsSnapshotFromSupabase(),
-              syncHistoryWithSupabase(),
-            ])
-          } else {
-            // User already bootstrapped, just fetch from DB
-            // Don't reset - just ensure user data is loaded
-            ensureQuickListUser(userId)
-            ensureLifeRoutineUser(userId)
-            ensureHistoryUser(userId)
-            ensureGoalsUser(userId)
-            await ensureRepeatingRulesUser(userId)
-            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
-            await Promise.all([
-              syncGoalsSnapshotFromSupabase(),
-              syncHistoryWithSupabase(),
-            ])
+          // Signed-in user: bootstrap handles everything (migrate if needed, clear, sync)
+          try {
+            await bootstrapGuestDataIfNeeded(userId)
+          } catch (error) {
+            console.error('[bootstrap] failed during alignLocalStoresForUser', error)
           }
         } else {
           // Guest mode - just ensure defaults exist if no data
@@ -1134,11 +1077,6 @@ function MainApp() {
         const resolvedUser = data?.user ?? session?.user ?? null
         await applySessionUser(resolvedUser)
       } catch {}
-      
-      // Bootstrap complete - all data is loaded, ready to show the app
-      if (mounted) {
-        setIsSigningIn(false)
-      }
     }
 
     // Track last session check to debounce rapid auth changes
@@ -1288,75 +1226,8 @@ function MainApp() {
         window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
       
-      // Clear all user/guest data before reload for fresh defaults
-      try {
-        // Clear user ID tracking keys (forces guest mode on reload)
-        window.localStorage.removeItem('nc-taskwatch-life-routine-user-id')
-        window.localStorage.removeItem('nc-taskwatch-life-routines-user') // Alternative key
-        window.localStorage.removeItem('nc-taskwatch-quicklist-user-id')
-        window.localStorage.removeItem('nc-taskwatch-quick-list-user') // Alternative key
-        window.localStorage.removeItem('nc-taskwatch-history-user') // Correct key for history user
-        window.localStorage.removeItem('nc-taskwatch-goals-user-id')
-        window.localStorage.removeItem('nc-taskwatch-repeating-user') // Correct key for repeating rules user
-        
-        // Clear guest keys (both old and new format)
-        window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-life-routines-v1::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
-        
-        // Clear snapback guest data
-        window.localStorage.removeItem('nc-taskwatch-local-snapback-triggers')
-        window.localStorage.removeItem('nc-taskwatch-local-snap-plans')
-        
-        // Clear non-suffixed data keys (goals, tasks, history, etc.)
-        window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
-        window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
-        window.localStorage.removeItem('nc-taskwatch-history')
-        window.localStorage.removeItem('nc-taskwatch-repeating-rules')
-        window.localStorage.removeItem('nc-taskwatch-current-session')
-        window.localStorage.removeItem('nc-taskwatch-task-details-v1')
-        window.localStorage.removeItem('nc-taskwatch-flags')
-        
-        // Clear focus task state so defaults are shown on reload
-        window.localStorage.removeItem('nc-taskwatch-current-task')
-        window.localStorage.removeItem('nc-taskwatch-current-task-source')
-        window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
-        
-        // Clear app timezone override so it resets to system default on next load
-        window.localStorage.removeItem('taskwatch_app_timezone')
-        
-        // Clear last auth user tracking (used to detect sign-in/sign-out across page loads)
-        window.localStorage.removeItem('nc-taskwatch-last-auth-user-id')
-        
-        // Clear alignment tracking so next sign-in runs fresh alignment
-        window.localStorage.removeItem('nc-taskwatch-align-complete')
-        window.localStorage.removeItem('nc-taskwatch-align-lock')
-        
-        // Clear ALL goals-related keys (for any user)
-        const allKeys = Object.keys(window.localStorage)
-        allKeys.forEach(key => {
-          if (key.includes('goals-snapshot') || key.includes('task-details')) {
-            try { window.localStorage.removeItem(key) } catch {}
-          }
-        })
-        
-        // Clear ALL user-specific life routine keys (both formats)
-        const keysToRemove: string[] = []
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i)
-          if (key && (
-            (key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') ||
-            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__') ||
-            (key.startsWith('nc-taskwatch-repeating-rules::') && key !== 'nc-taskwatch-repeating-rules::__guest__')
-          )) {
-            keysToRemove.push(key)
-          }
-        }
-        keysToRemove.forEach(key => window.localStorage.removeItem(key))
-      } catch {}
+      // Clear all localStorage data for a fresh guest experience
+      clearAllLocalStorage()
       
       // Immediately reload - fresh page will have clean guest defaults
       window.location.reload()
@@ -2418,16 +2289,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
-  if (isSigningIn) {
-    return (
-      <div className="app-loading">
-        <div className="app-loading__content">
-          <p className="app-loading__title">Signing you in...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2548,7 +2409,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
-          {!isSigningIn && <GoalsPage />}
+          <GoalsPage />
         </section>
 
         <section
@@ -2559,7 +2420,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} use24HourTime={use24HourTime} />}
+          <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} use24HourTime={use24HourTime} />
         </section>
 
         <section
@@ -2570,7 +2431,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} defaultCalendarView={defaultCalendarView} snapToInterval={snapToInterval} />}
+          <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} defaultCalendarView={defaultCalendarView} snapToInterval={snapToInterval} />
         </section>
       </main>
       {settingsOpen ? (
@@ -2986,22 +2847,14 @@ function AuthCallbackScreen(): React.ReactElement {
         session = data?.session
       }
       
-      // Now that we're authenticated, pre-fetch all the user's data before redirecting
+      // Now that we're authenticated, run full bootstrap (migrate guest data + sync from Supabase)
+      // This ensures all data is ready before redirecting to the main app
       if (session?.user?.id && !cancelled) {
-        const userId = session.user.id
-        
-        // Set up user in all the stores
-        ensureQuickListUser(userId)
-        ensureLifeRoutineUser(userId)
-        ensureHistoryUser(userId)
-        ensureGoalsUser(userId)
-        await ensureRepeatingRulesUser(userId)
-        
-        // Fetch goals and history from Supabase so they're in localStorage
-        await Promise.all([
-          syncGoalsSnapshotFromSupabase(),
-          syncHistoryWithSupabase(),
-        ])
+        try {
+          await bootstrapGuestDataIfNeeded(session.user.id)
+        } catch (error) {
+          console.error('[AuthCallback] Bootstrap failed:', error)
+        }
       }
       
       if (!cancelled) {

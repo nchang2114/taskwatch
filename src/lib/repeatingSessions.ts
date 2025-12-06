@@ -424,6 +424,12 @@ export const syncRepeatingRulesFromSupabase = async (): Promise<RepeatingSession
   }
   
   const rules = data.map(mapRowToRule).filter(Boolean) as RepeatingSessionRule[]
+  // Set user ID marker only if different (avoid triggering storage events unnecessarily)
+  // (important after localStorage.clear() during bootstrap)
+  const currentUserId = readStoredRepeatingRuleUserId()
+  if (currentUserId !== session.user.id) {
+    setStoredRepeatingRuleUserId(session.user.id)
+  }
   writeLocalRules(rules)
   return rules
 }

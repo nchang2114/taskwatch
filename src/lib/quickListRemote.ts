@@ -1,6 +1,7 @@
 import { ensureSingleUserSession, supabase } from './supabaseClient'
 import { ensureServerBucketStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
 import type { QuickItem, QuickSubtask } from './quickList'
+import { writeStoredQuickList } from './quickList'
 
 export const QUICK_LIST_GOAL_NAME = 'Quick List (Hidden)'
 const QUICK_LIST_BUCKET_NAME = 'Quick List'
@@ -100,6 +101,7 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
           sort_index: 10_000_000,
           starred: false,
           goal_archive: true,
+          milestones_shown: false,
         }
         const { error: goalInsertError } = await supabase.from('goals').insert(goalPayload)
         if (goalInsertError) {
@@ -220,4 +222,26 @@ export async function fetchQuickListRemoteItems(): Promise<{
   } catch {
     return null
   }
+}
+
+/**
+ * Syncs quick list from Supabase to localStorage.
+ * Called during bootstrap to populate the user's quick list after sign-in.
+ */
+export async function syncQuickListFromSupabase(): Promise<QuickItem[] | null> {
+  // Use authenticated session directly (localStorage may be stale during bootstrap)
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) {
+    return null
+  }
+  
+  const remote = await fetchQuickListRemoteItems()
+  if (!remote?.items) {
+    return null
+  }
+  
+  // Write to localStorage and broadcast update
+  const stored = writeStoredQuickList(remote.items)
+  console.log('[quickListRemote] Synced', stored.length, 'quick list items from Supabase')
+  return stored
 }

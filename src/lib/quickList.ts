@@ -23,9 +23,9 @@ export type QuickItem = {
   priority?: boolean
 }
 
-export const QUICK_LIST_STORAGE_KEY = 'nc-taskwatch-quick-list-v1'
+export const QUICK_LIST_STORAGE_KEY = 'nc-taskwatch-quicklist'
 export const QUICK_LIST_UPDATE_EVENT = 'nc-quick-list:updated'
-export const QUICK_LIST_USER_STORAGE_KEY = 'nc-taskwatch-quick-list-user'
+export const QUICK_LIST_USER_STORAGE_KEY = 'nc-taskwatch-quicklist-user'
 export const QUICK_LIST_GUEST_USER_ID = '__guest__'
 export const QUICK_LIST_USER_EVENT = 'nc-quick-list:user-updated'
 
@@ -125,6 +125,9 @@ const normalizeQuickListUserId = (userId: string | null | undefined): string =>
 const isGuestQuickListUser = (userId: string | null): boolean =>
   !userId || userId === QUICK_LIST_GUEST_USER_ID
 
+const storageKeyForUser = (userId: string | null | undefined): string =>
+  `${QUICK_LIST_STORAGE_KEY}::${normalizeQuickListUserId(userId)}`
+
 export const readQuickListOwnerId = (): string | null => readStoredQuickListUserId()
 
 const sanitizeSubtask = (value: unknown, index: number): QuickSubtask | null => {
@@ -209,8 +212,8 @@ export const sanitizeQuickList = (value: unknown): QuickItem[] => {
 export const readStoredQuickList = (): QuickItem[] => {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(QUICK_LIST_STORAGE_KEY)
     const currentUser = readStoredQuickListUserId()
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUser))
     const guestContext = isGuestQuickListUser(currentUser)
     if (!raw) {
       if (guestContext) {
@@ -243,7 +246,8 @@ export const writeStoredQuickList = (items: QuickItem[]): QuickItem[] => {
   const normalized = sanitizeQuickList(items)
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.setItem(QUICK_LIST_STORAGE_KEY, JSON.stringify(normalized))
+      const currentUser = readStoredQuickListUserId()
+      window.localStorage.setItem(storageKeyForUser(currentUser), JSON.stringify(normalized))
       window.dispatchEvent(new CustomEvent<QuickItem[]>(QUICK_LIST_UPDATE_EVENT, { detail: normalized }))
     } catch {}
   }
@@ -255,13 +259,14 @@ export const ensureQuickListUser = (userId: string | null): void => {
   const normalized = normalizeQuickListUserId(userId)
   const current = readStoredQuickListUserId()
   if (current === normalized) return
-  const migratingFromGuest = current === QUICK_LIST_GUEST_USER_ID && normalized !== QUICK_LIST_GUEST_USER_ID
   setStoredQuickListUserId(normalized)
   if (normalized === QUICK_LIST_GUEST_USER_ID) {
     if (current !== QUICK_LIST_GUEST_USER_ID) {
       writeStoredQuickList(getDefaultQuickList())
     }
-  } else if (!migratingFromGuest) {
+  } else {
+    // Always clear when switching to a real user
+    // Bootstrap reads directly from ::__guest__ key, so this is safe
     writeStoredQuickList([])
   }
 }
@@ -280,7 +285,8 @@ export const subscribeQuickList = (cb: (items: QuickItem[]) => void): (() => voi
 // Set up cross-tab sync via storage events
 if (typeof window !== 'undefined') {
   const handleStorageChange = (event: StorageEvent) => {
-    if (event.key === QUICK_LIST_STORAGE_KEY) {
+    // Check if the change is for a quicklist key (any user)
+    if (event.key && event.key.startsWith(QUICK_LIST_STORAGE_KEY + '::')) {
       try {
         const newValue = event.newValue
         if (newValue) {
