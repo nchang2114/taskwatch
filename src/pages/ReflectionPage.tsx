@@ -92,6 +92,8 @@ import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbac
 import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
+import { ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
+import { readStoredQuickList, subscribeQuickList, type QuickItem } from '../lib/quickList'
 
 type ReflectionRangeKey = '24h' | '48h' | '7d' | 'all'
 
@@ -868,6 +870,23 @@ const SNAPBACK_COLOR_INFO: GoalColorInfo = {
     ],
   },
   solidColor: '#fe5f75',
+}
+
+// Quick List virtual goal
+const QUICK_LIST_NAME = 'Quick List'
+const QUICK_LIST_BUCKET_NAME = 'Quick List'
+const QUICK_LIST_COLOR_INFO: GoalColorInfo = {
+  gradient: {
+    css: 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)',
+    start: '#38bdf8',
+    end: '#6366f1',
+    angle: 135,
+    stops: [
+      { color: '#38bdf8', position: 0 },
+      { color: '#6366f1', position: 1 },
+    ],
+  },
+  solidColor: '#6366f1',
 }
 // Removed default surface lookup; life routine surfaces are derived only from user data.
 
@@ -4121,6 +4140,10 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const taskNoteOverlayCacheRef = useRef<Map<string, { note: string; entry: HistoryEntry }>>(new Map())
   const [lifeRoutineTasks, setLifeRoutineTasks] = useState<LifeRoutineConfig[]>(() => readStoredLifeRoutines())
   const initialLifeRoutineCountRef = useRef(lifeRoutineTasks.length)
+  // Quick List state
+  const [quickListItems, setQuickListItems] = useState<QuickItem[]>(() => readStoredQuickList())
+  // Quick List remote IDs (goalId, bucketId) for Supabase - fetched on mount
+  const [_quickListRemoteIds, setQuickListRemoteIds] = useState<{ goalId: string; bucketId: string } | null>(null)
   const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(() => readStoredActiveSession())
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null)
@@ -4411,6 +4434,28 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     })()
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  // Fetch Quick List remote IDs on mount
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const ids = await ensureQuickListRemoteStructures()
+      if (!cancelled && ids) {
+        setQuickListRemoteIds(ids)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Subscribe to Quick List updates
+  useEffect(() => {
+    const unsubscribe = subscribeQuickList((items) => setQuickListItems(items))
+    return () => {
+      unsubscribe?.()
     }
   }, [])
 
@@ -4882,7 +4927,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [historyOwnerSignal])
 
   const goalLookup = useMemo(() => createGoalTaskMap(goalsSnapshot), [goalsSnapshot])
-  const goalColorLookup = useMemo(() => createGoalColorMap(goalsSnapshot), [goalsSnapshot])
+  const goalColorLookup = useMemo(() => {
+    const map = createGoalColorMap(goalsSnapshot)
+    // Add Quick List color
+    map.set(QUICK_LIST_NAME.toLowerCase(), QUICK_LIST_COLOR_INFO)
+    return map
+  }, [goalsSnapshot])
   const goalSurfaceLookup = useMemo(() => {
     const map = new Map<string, SurfaceStyle>()
     goalsSnapshot.forEach((goal) => {
@@ -5043,6 +5093,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const goalOptions = useMemo(() => {
     const normalizedLifeRoutines = LIFE_ROUTINES_NAME.toLowerCase()
     const normalizedSnapback = SNAPBACK_NAME.toLowerCase()
+    const normalizedQuickList = QUICK_LIST_NAME.toLowerCase()
+    const normalizedQuickListHidden = QUICK_LIST_GOAL_NAME.toLowerCase()
     const seen = new Set<string>()
     const ordered: string[] = []
     goalsSnapshot.forEach((goal) => {
@@ -5051,7 +5103,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         return
       }
       const normalized = trimmed.toLowerCase()
-      if (normalized === normalizedLifeRoutines || normalized === normalizedSnapback) {
+      // Skip special goals
+      if (normalized === normalizedLifeRoutines || normalized === normalizedSnapback || normalized === normalizedQuickList || normalized === normalizedQuickListHidden) {
         return
       }
       if (seen.has(normalized)) {
@@ -5060,8 +5113,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       seen.add(normalized)
       ordered.push(trimmed)
     })
-    // Insert Snapback option right after Life Routines
-    return [LIFE_ROUTINES_NAME, SNAPBACK_NAME, ...ordered]
+    // Insert special options: Daily Life, Quick List, Snapback, then regular goals
+    return [LIFE_ROUTINES_NAME, QUICK_LIST_NAME, SNAPBACK_NAME, ...ordered]
   }, [goalsSnapshot])
 
   const bucketOptionsByGoal = useMemo(() => {
@@ -5084,6 +5137,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       map.set(LIFE_ROUTINES_NAME, lifeRoutineBucketOptions)
     }
     map.set(SNAPBACK_NAME, snapbackTriggerOptions)
+    // Quick List has a single bucket
+    map.set(QUICK_LIST_NAME, [QUICK_LIST_BUCKET_NAME])
     return map
   }, [goalsSnapshot, lifeRoutineBucketOptions, snapbackTriggerOptions])
 
@@ -5264,6 +5319,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const trimmedDraftBucket = historyDraft.bucketName.trim()
   const isSnapbackGoalSelected = trimmedDraftGoal.toLowerCase() === SNAPBACK_NAME.toLowerCase()
   const isLifeRoutineGoalSelected = trimmedDraftGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
+  const isQuickListGoalSelected = trimmedDraftGoal.toLowerCase() === QUICK_LIST_NAME.toLowerCase()
 
   const availableBucketOptions = useMemo(() => {
     const normalizedGoal = trimmedDraftGoal.toLowerCase()
@@ -5292,6 +5348,13 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [availableBucketOptions, trimmedDraftBucket])
 
   const availableTaskOptions = useMemo(() => {
+    // For Quick List: show quick list items as task options
+    if (isQuickListGoalSelected) {
+      return quickListItems
+        .filter((item) => !item.completed)
+        .map((item) => item.text)
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    }
     // Prefer bucket -> goal -> all
     if (trimmedDraftGoal.length > 0 && trimmedDraftBucket.length > 0) {
       const tasks = tasksByGoalBucket.get(trimmedDraftGoal)?.get(trimmedDraftBucket)
@@ -5306,7 +5369,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       }
     }
     return allTaskOptions
-  }, [trimmedDraftGoal, trimmedDraftBucket, tasksByGoalBucket, allTaskOptions])
+  }, [trimmedDraftGoal, trimmedDraftBucket, tasksByGoalBucket, allTaskOptions, isQuickListGoalSelected, quickListItems])
 
   const taskDropdownOptions = useMemo<HistoryDropdownOption[]>(() => {
     const options: HistoryDropdownOption[] = [{ value: '', label: 'No task' }]
@@ -5348,22 +5411,31 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const goalDropdownOptions = useMemo<HistoryDropdownOption[]>(() => {
     const normalizedLifeRoutines = LIFE_ROUTINES_NAME.toLowerCase()
     const normalizedSnapback = SNAPBACK_NAME.toLowerCase()
+    const normalizedQuickList = QUICK_LIST_NAME.toLowerCase()
     const optionsWithoutSpecial = resolvedGoalOptions.filter((option) => {
       const lower = option.trim().toLowerCase()
-      return lower !== normalizedLifeRoutines && lower !== normalizedSnapback
+      return lower !== normalizedLifeRoutines && lower !== normalizedSnapback && lower !== normalizedQuickList
     })
     const hasLifeOption =
       resolvedGoalOptions.some((option) => option.trim().toLowerCase() === normalizedLifeRoutines) ||
       lifeRoutineBucketOptions.length > 0
     const next: HistoryDropdownOption[] = [{ value: '', label: 'No goal' }]
+    // System Layers section
+    next.push({ value: '__hdr_system_layers__', label: 'System Layers', disabled: true })
     if (hasLifeOption) {
       next.push({ value: LIFE_ROUTINES_NAME, label: LIFE_ROUTINES_NAME })
     }
-    // Include Snapback once, under Life Routines
+    // Include Quick List after Daily Life, before Snapback
+    next.push({ value: QUICK_LIST_NAME, label: QUICK_LIST_NAME })
+    // Include Snapback
     next.push({ value: SNAPBACK_NAME, label: SNAPBACK_NAME })
-    optionsWithoutSpecial.forEach((option) => {
-      next.push({ value: option, label: option })
-    })
+    // Your Goals section
+    if (optionsWithoutSpecial.length > 0) {
+      next.push({ value: '__hdr_your_goals__', label: 'Your Goals', disabled: true })
+      optionsWithoutSpecial.forEach((option) => {
+        next.push({ value: option, label: option })
+      })
+    }
     return next
   }, [lifeRoutineBucketOptions, resolvedGoalOptions])
 
@@ -5371,7 +5443,13 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     () => {
       const emptyLabel =
         isSnapbackGoalSelected && snapbackTriggerOptions.length === 0 ? 'No triggers yet' : 'No bucket'
-      const options: HistoryDropdownOption[] = isSnapbackGoalSelected || isLifeRoutineGoalSelected ? [] : [{ value: '', label: emptyLabel }]
+      const options: HistoryDropdownOption[] = isSnapbackGoalSelected || isLifeRoutineGoalSelected || isQuickListGoalSelected ? [] : [{ value: '', label: emptyLabel }]
+      
+      // For Quick List: bucket is locked to "Quick List"
+      if (isQuickListGoalSelected) {
+        options.push({ value: QUICK_LIST_BUCKET_NAME, label: QUICK_LIST_BUCKET_NAME })
+        return options
+      }
       
       // For Daily Life: show existing routines section and other options
       if (isLifeRoutineGoalSelected) {
@@ -5403,7 +5481,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       options.push(...resolvedBucketOptions.map((option) => ({ value: option, label: option })))
       return options
     },
-    [resolvedBucketOptions, isSnapbackGoalSelected, isLifeRoutineGoalSelected, snapbackTriggerOptions, historyDraft.taskName],
+    [resolvedBucketOptions, isSnapbackGoalSelected, isLifeRoutineGoalSelected, isQuickListGoalSelected, snapbackTriggerOptions, historyDraft.taskName],
   )
 
   const bucketDropdownPlaceholder = useMemo(() => {
@@ -5413,13 +5491,18 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (isLifeRoutineGoalSelected) {
       return availableBucketOptions.length > 0 ? 'Select routine' : 'Select an option'
     }
+    if (isQuickListGoalSelected) {
+      return QUICK_LIST_BUCKET_NAME
+    }
     return availableBucketOptions.length > 0 ? 'Select bucket' : 'No buckets available'
-  }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, availableBucketOptions.length, snapbackTriggerOptions.length])
+  }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, isQuickListGoalSelected, availableBucketOptions.length, snapbackTriggerOptions.length])
   const bucketDropdownDisabled = useMemo(() => {
+    // Quick List bucket is locked and cannot be changed
+    if (isQuickListGoalSelected) return true
     // Daily Life and Snapback always have options (at minimum, the special actions)
     if (isLifeRoutineGoalSelected || isSnapbackGoalSelected) return false
     return availableBucketOptions.length === 0
-  }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, availableBucketOptions.length])
+  }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, isQuickListGoalSelected, availableBucketOptions.length])
 
   const historyWithTaskNotes = useMemo(() => {
     if (editorOpenRef.current) {
@@ -5755,6 +5838,24 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     (field: 'taskName' | 'goalName' | 'bucketName', nextValue: string) => {
       setHistoryDraft((draft) => {
         let base = { ...draft, [field]: nextValue }
+        
+        // Handle goal changes
+        if (field === 'goalName') {
+          const nextGoal = nextValue.trim().toLowerCase()
+          const prevGoal = draft.goalName.trim().toLowerCase()
+          const wasQuickList = prevGoal === QUICK_LIST_NAME.toLowerCase()
+          const isQuickList = nextGoal === QUICK_LIST_NAME.toLowerCase()
+          
+          // When selecting Quick List, auto-set the bucket
+          if (isQuickList && !wasQuickList) {
+            base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME }
+          }
+          // When changing away from Quick List, reset bucket and task
+          if (wasQuickList && !isQuickList) {
+            base = { ...base, bucketName: '', taskName: '' }
+          }
+        }
+        
         if (field === 'taskName') {
           const chosenTask = nextValue.trim()
           if (chosenTask.length > 0) {
