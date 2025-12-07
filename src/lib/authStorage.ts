@@ -150,3 +150,185 @@ export const readCachedSessionTokens = (): CachedSessionTokens | null => {
 export const clearCachedSupabaseSession = (): void => {
   removeRawValue(AUTH_SESSION_STORAGE_KEY)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Migration Lock: Coordinates sign-in across multiple tabs
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const MIGRATION_LOCK_STORAGE_KEY = 'nc-taskwatch-migration-lock'
+const MIGRATION_LOCK_STALE_MS = 60_000 // 60 seconds
+
+export type MigrationLockStatus = 'in-progress' | 'complete'
+
+export type MigrationLock = {
+  tabId: string
+  timestamp: number
+  status: MigrationLockStatus
+  completedAt?: number
+}
+
+// Generate a unique tab ID (persists for the lifetime of the tab via sessionStorage)
+const TAB_ID_STORAGE_KEY = 'nc-taskwatch-tab-id'
+let cachedTabId: string | null = null
+
+export const getTabId = (): string => {
+  if (cachedTabId) {
+    return cachedTabId
+  }
+  
+  // Try to read from sessionStorage first (survives page navigations within same tab)
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      const stored = window.sessionStorage.getItem(TAB_ID_STORAGE_KEY)
+      if (stored) {
+        cachedTabId = stored
+        return cachedTabId
+      }
+    } catch {}
+  }
+  
+  // Generate new tab ID
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    cachedTabId = crypto.randomUUID()
+  } else {
+    // Fallback to timestamp + random
+    cachedTabId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
+  }
+  
+  // Persist to sessionStorage
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.setItem(TAB_ID_STORAGE_KEY, cachedTabId)
+    } catch {}
+  }
+  
+  return cachedTabId
+}
+
+export const setMigrationLock = (status: MigrationLockStatus = 'in-progress'): void => {
+  const now = Date.now()
+  const lock: MigrationLock = {
+    tabId: getTabId(),
+    timestamp: now,
+    status,
+    ...(status === 'complete' ? { completedAt: now } : {}),
+  }
+  const storage = getBrowserLocalStorage()
+  if (storage) {
+    try {
+      storage.setItem(MIGRATION_LOCK_STORAGE_KEY, JSON.stringify(lock))
+    } catch {}
+  }
+}
+
+export const clearMigrationLock = (): void => {
+  const storage = getBrowserLocalStorage()
+  if (storage) {
+    try {
+      storage.removeItem(MIGRATION_LOCK_STORAGE_KEY)
+    } catch {}
+  }
+}
+
+export const readMigrationLock = (): MigrationLock | null => {
+  const storage = getBrowserLocalStorage()
+  if (!storage) {
+    return null
+  }
+  try {
+    const raw = storage.getItem(MIGRATION_LOCK_STORAGE_KEY)
+    if (!raw) {
+      return null
+    }
+    const parsed = JSON.parse(raw)
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.tabId === 'string' &&
+      typeof parsed.timestamp === 'number'
+    ) {
+      // Default status to 'in-progress' for backwards compatibility
+      if (!parsed.status) {
+        parsed.status = 'in-progress'
+      }
+      return parsed as MigrationLock
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * Check if another tab holds the migration lock.
+ * Returns true if:
+ * - A lock exists
+ * - The lock is NOT owned by this tab
+ * - The lock is NOT stale (less than 60 seconds old)
+ */
+export const isLockedByAnotherTab = (): boolean => {
+  const lock = readMigrationLock()
+  if (!lock) {
+    return false
+  }
+  // Check if we own the lock
+  if (lock.tabId === getTabId()) {
+    return false
+  }
+  // Check if lock is stale
+  const age = Date.now() - lock.timestamp
+  if (age > MIGRATION_LOCK_STALE_MS) {
+    return false
+  }
+  return true
+}
+
+/**
+ * Check if this tab owns the migration lock.
+ */
+export const isLockOwnedByThisTab = (): boolean => {
+  const lock = readMigrationLock()
+  if (!lock) {
+    return false
+  }
+  return lock.tabId === getTabId()
+}
+
+/**
+ * Mark the migration as complete (don't clear the lock yet).
+ * This signals other tabs that they can reload soon.
+ */
+export const markMigrationComplete = (): void => {
+  const lock = readMigrationLock()
+  // Only mark complete if this tab owns the lock
+  if (lock && lock.tabId === getTabId()) {
+    setMigrationLock('complete')
+  }
+}
+
+/**
+ * Check if migration is complete (by any tab).
+ */
+export const isMigrationComplete = (): boolean => {
+  const lock = readMigrationLock()
+  if (!lock) {
+    return false
+  }
+  // Check if stale
+  const age = Date.now() - lock.timestamp
+  if (age > MIGRATION_LOCK_STALE_MS) {
+    return false
+  }
+  return lock.status === 'complete'
+}
+
+/**
+ * Clear the lock only if this tab owns it.
+ * Returns true if cleared, false otherwise.
+ */
+export const clearMigrationLockIfOwned = (): boolean => {
+  const lock = readMigrationLock()
+  if (!lock || lock.tabId !== getTabId()) {
+    return false
+  }
+  clearMigrationLock()
+  return true
+}

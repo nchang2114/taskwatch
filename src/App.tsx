@@ -9,7 +9,7 @@ import FocusPage from './pages/FocusPage'
 import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
 import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
-import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
+import { AUTH_SESSION_STORAGE_KEY, MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab, markMigrationComplete, clearMigrationLockIfOwned, isMigrationComplete } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
@@ -299,6 +299,51 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
 
 
 function MainApp() {
+  // Check if another tab is signing in - if so, show waiting screen and poll
+  const [waitingForMigration] = useState(() => isLockedByAnotherTab())
+  
+  // Poll for migration lock status when waiting
+  useEffect(() => {
+    if (!waitingForMigration) {
+      return
+    }
+    
+    const checkLock = () => {
+      if (!isLockedByAnotherTab()) {
+        // Lock cleared, reload to get fresh state
+        window.location.reload()
+      }
+    }
+    
+    // Check every 2 seconds
+    const interval = setInterval(checkLock, 2000)
+    
+    // Also listen for storage events for immediate response
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === MIGRATION_LOCK_STORAGE_KEY) {
+        checkLock()
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [waitingForMigration])
+  
+  // Show waiting screen if another tab is signing in
+  if (waitingForMigration) {
+    return (
+      <div className="auth-callback-screen">
+        <div className="auth-callback-panel">
+          <p className="auth-callback-title">Signing in on another tab<span className="auth-dots"><span>.</span><span>.</span><span>.</span></span></p>
+          <p className="auth-callback-text">This tab will refresh automatically when ready.</p>
+        </div>
+      </div>
+    )
+  }
+  
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [activeTab, setActiveTab] = useState<TabKey>('focus')
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -501,6 +546,9 @@ function MainApp() {
       return false
     }
     try {
+      // Set migration lock BEFORE OAuth redirect so other tabs know to wait
+      setMigrationLock()
+      
       const queryParams: Record<string, string> = {}
       const trimmedHint = emailHint?.trim()
       if (trimmedHint) {
@@ -517,10 +565,12 @@ function MainApp() {
         },
       })
       if (error) {
+        clearMigrationLock()
         return false
       }
       return true
     } catch {
+      clearMigrationLock()
       return false
     }
   }, [])
@@ -530,6 +580,9 @@ function MainApp() {
       return
     }
     try {
+      // Set migration lock BEFORE OAuth redirect so other tabs know to wait
+      setMigrationLock()
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'azure',
         options: {
@@ -537,9 +590,12 @@ function MainApp() {
         },
       })
       if (error) {
+        clearMigrationLock()
         return
       }
-    } catch {}
+    } catch {
+      clearMigrationLock()
+    }
   }, [])
 
   const isAuthEmailValid = useMemo(() => EMAIL_PATTERN.test(authEmailValue.trim()), [authEmailValue])
@@ -966,6 +1022,9 @@ function MainApp() {
       } finally {
         if (userId) {
           releaseAlignLock()
+          // Mark migration complete (don't clear lock yet - will clear after full page load)
+          // This signals other tabs to reload and get fresh state
+          markMigrationComplete()
         }
       }
     }
@@ -1107,6 +1166,8 @@ function MainApp() {
     void (async () => {
       await bootstrapSession()
       bootstrapComplete = true
+      // Clear migration lock if this tab owns it (sign-in flow completed)
+      clearMigrationLockIfOwned()
     })()
 
     // Listen to auth state changes within this tab
@@ -1120,7 +1181,16 @@ function MainApp() {
 
     // Listen to auth changes from other tabs via storage events
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === AUTH_SESSION_STORAGE_KEY) {
+      if (event.key === MIGRATION_LOCK_STORAGE_KEY) {
+        // Migration lock changed in another tab
+        // If another tab set the lock or marked it complete, reload immediately
+        // This prevents this tab from writing any data during migration
+        if (isLockedByAnotherTab() || isMigrationComplete()) {
+          if (typeof window !== 'undefined') {
+            window.location.reload()
+          }
+        }
+      } else if (event.key === AUTH_SESSION_STORAGE_KEY) {
         // Skip debounce for sign-out events to ensure immediate response
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
@@ -2859,6 +2929,10 @@ function AuthCallbackScreen(): React.ReactElement {
           console.error('[AuthCallback] Bootstrap failed:', error)
         }
       }
+      
+      // Mark migration complete (signals other tabs to reload)
+      // Don't clear the lock yet - the main app will clear it after full load
+      markMigrationComplete()
       
       if (!cancelled) {
         // Clear focus task state on sign-in so user starts with default presets
