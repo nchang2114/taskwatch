@@ -4998,6 +4998,14 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       setActiveRange('7d')
       setCalendarView('3d')
       setMultiDayCount(6)
+      // Compute a start time one hour from now, snapped to minute
+      const now = Date.now()
+      const start = Math.max(now + 60 * 60 * 1000, now + 60 * 1000)
+      // Navigate calendar so today is in the second column of the 6-day view
+      // Offset by -1 means the first column is yesterday, second column is today
+      const dayOffsetForScheduled = -1
+      setHistoryDayOffset(dayOffsetForScheduled)
+      historyDayOffsetRef.current = dayOffsetForScheduled
       // Scroll calendar into view
       setTimeout(() => {
         if (historyBlockRef.current) {
@@ -5010,9 +5018,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           window.scrollTo({ top: targetY, behavior: 'smooth' })
         }
       }, 100)
-      // Compute a start time one hour from now, snapped to minute
-      const now = Date.now()
-      const start = Math.max(now + 60 * 60 * 1000, now + 60 * 1000)
       const end = start + 60 * 60 * 1000
       const elapsed = Math.max(1, end - start)
       const goalName = detail.goalName?.trim() ?? ''
@@ -5503,6 +5508,11 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (isLifeRoutineGoalSelected || isSnapbackGoalSelected) return false
     return availableBucketOptions.length === 0
   }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, isQuickListGoalSelected, availableBucketOptions.length])
+  const taskDropdownDisabled = useMemo(() => {
+    // Daily Life and Snapback don't have tasks - the "task" is really the routine/trigger selected in bucket
+    if (isLifeRoutineGoalSelected || isSnapbackGoalSelected) return true
+    return taskDropdownOptions.length === 0
+  }, [isLifeRoutineGoalSelected, isSnapbackGoalSelected, taskDropdownOptions.length])
 
   const historyWithTaskNotes = useMemo(() => {
     if (editorOpenRef.current) {
@@ -5843,16 +5853,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         if (field === 'goalName') {
           const nextGoal = nextValue.trim().toLowerCase()
           const prevGoal = draft.goalName.trim().toLowerCase()
-          const wasQuickList = prevGoal === QUICK_LIST_NAME.toLowerCase()
           const isQuickList = nextGoal === QUICK_LIST_NAME.toLowerCase()
           
-          // When selecting Quick List, auto-set the bucket
-          if (isQuickList && !wasQuickList) {
-            base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME }
-          }
-          // When changing away from Quick List, reset bucket and task
-          if (wasQuickList && !isQuickList) {
-            base = { ...base, bucketName: '', taskName: '' }
+          // When goal changes, reset bucket and task (except for special cases)
+          if (nextGoal !== prevGoal) {
+            if (isQuickList) {
+              // Quick List: auto-set the bucket, clear task
+              base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME, taskName: '' }
+            } else {
+              // All other goals: reset bucket and task
+              base = { ...base, bucketName: '', taskName: '' }
+            }
           }
         }
         
@@ -11816,19 +11827,23 @@ useEffect(() => {
       })()
 
       const buildYearPanel = (yr: number) => {
-        // Rotate weekday headers for mini month grids based on weekStartDay
-        const baseMiniHeaders = ['S','M','T','W','T','F','S']
-        const miniHeaders = [...baseMiniHeaders.slice(weekStartDay), ...baseMiniHeaders.slice(0, weekStartDay)]
         const months = Array.from({ length: 12 }).map((_, idx) => {
           const firstOfMonth = new Date(yr, idx, 1)
           const label = firstOfMonth.toLocaleDateString(undefined, { month: 'short' })
-          // Build a 6x7 grid of days for consistent height
+          // Calculate the start of the grid (first day of the week containing the 1st)
           const start = new Date(firstOfMonth)
           const startDow = start.getDay() // 0=Sun
           const offset = (startDow - weekStartDay + 7) % 7
           start.setDate(start.getDate() - offset)
+          // Calculate how many weeks we need: only show weeks that contain days from this month
+          const lastOfMonth = new Date(yr, idx + 1, 0) // last day of current month
+          const lastDow = lastOfMonth.getDay()
+          const daysAfterLastInWeek = (weekStartDay + 6 - lastDow + 7) % 7 // days to complete that week
+          const endOfGrid = new Date(lastOfMonth)
+          endOfGrid.setDate(lastOfMonth.getDate() + daysAfterLastInWeek)
+          const totalDays = Math.round((endOfGrid.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1
           const cells: ReactElement[] = []
-          for (let i = 0; i < 42; i += 1) {
+          for (let i = 0; i < totalDays; i += 1) {
             const d = new Date(start)
             d.setDate(start.getDate() + i)
             d.setHours(0, 0, 0, 0)
@@ -11867,12 +11882,6 @@ useEffect(() => {
                 title={`Open ${label} ${yr}`}
               >
                 {label}
-              </div>
-              {/* Mini month weekday headers for clarity */}
-              <div className="calendar-month-headers" aria-hidden>
-                {miniHeaders.map((ch, i) => (
-                  <div key={`hdr-${label}-${i}`} className="calendar-month-header">{ch}</div>
-                ))}
               </div>
               <div className="calendar-month-grid" role="grid" aria-label={`Calendar for ${label} ${yr}`}>
                 {cells}
@@ -13061,7 +13070,7 @@ useEffect(() => {
                                 placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                                 options={taskDropdownOptions}
                                 onChange={handleTaskDropdownChange}
-                                disabled={taskDropdownOptions.length === 0}
+                                disabled={taskDropdownDisabled}
                               />
                             </div>
             <div className="history-timeline__extras">
@@ -13857,7 +13866,7 @@ useEffect(() => {
                       placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                       options={taskDropdownOptions}
                       onChange={handleTaskDropdownChange}
-                      disabled={taskDropdownOptions.length === 0}
+                      disabled={taskDropdownDisabled}
                     />
                   </div>
                   <div className="history-timeline__extras">
@@ -14067,7 +14076,7 @@ useEffect(() => {
                   placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                   options={taskDropdownOptions}
                   onChange={handleTaskDropdownChange}
-                  disabled={taskDropdownOptions.length === 0}
+                  disabled={taskDropdownDisabled}
                 />
               </div>
               <div className="history-timeline__extras">
@@ -15114,7 +15123,7 @@ useEffect(() => {
                                 placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                                 options={taskDropdownOptions}
                                 onChange={handleTaskDropdownChange}
-                                disabled={taskDropdownOptions.length === 0}
+                                disabled={taskDropdownDisabled}
                               />
                             </div>
                             <div className="history-timeline__extras">
