@@ -2838,7 +2838,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                   ) : (
                     <p className="auth-modal__hint">Use an organization email to easily collaborate with teammates.</p>
                   )}
-                  <button type="submit" className="auth-modal__continue" disabled={!isAuthEmailValid || authEmailChecking}>
+                  <button type="button" className="auth-modal__continue" onClick={() => setFeatureModalOpen(true)}>
                     {authEmailChecking ? 'Checking…' : 'Continue'}
                   </button>
                 </form>
