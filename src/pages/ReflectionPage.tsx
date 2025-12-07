@@ -91,6 +91,7 @@ import {
 import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbackChannel'
 import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
+import { isRecentlyFullSynced } from '../lib/bootstrap'
 
 type ReflectionRangeKey = '24h' | '48h' | '7d' | 'all'
 
@@ -3791,7 +3792,7 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const calendarPanFallbackTimeoutRef = useRef<number | null>(null)
   const calendarPanDesiredOffsetRef = useRef<number>(historyDayOffset)
   // Repeating sessions (rules fetched from backend)
-  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
+  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>(() => readLocalRepeatingRules())
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
   const historyOwnerId = useMemo(() => readHistoryOwnerId(), [historyOwnerSignal])
   const [accountCreatedAtMs, setAccountCreatedAtMs] = useState<number | null>(null)
@@ -3869,6 +3870,10 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
         // ignore local read issues
       }
       if (isGuestOwner) {
+        return
+      }
+      // Skip fetch if we just did a full sync (e.g. after auth callback)
+      if (isRecentlyFullSynced()) {
         return
       }
       try {
@@ -4831,6 +4836,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (!owner || owner === HISTORY_GUEST_USER_ID) {
       return
     }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      return
+    }
     let cancelled = false
     void (async () => {
       const synced = await syncHistoryWithSupabase()
@@ -4849,6 +4858,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   useEffect(() => {
     const owner = readGoalsSnapshotOwner()
     if (!owner || owner === GOALS_GUEST_USER_ID) {
+      return
+    }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
       return
     }
     let cancelled = false
@@ -6948,7 +6961,7 @@ useEffect(() => {
       return
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === HISTORY_STORAGE_KEY) {
+      if (event.key?.startsWith(HISTORY_STORAGE_KEY)) {
         const stored = readPersistedHistory()
         if (!historiesAreEqual(latestHistoryRef.current, stored)) {
           setHistory(stored)

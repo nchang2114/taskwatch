@@ -93,6 +93,7 @@ import {
   areHistorySubtasksEqual,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
+import { isRecentlyFullSynced } from '../lib/bootstrap'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -1152,6 +1153,10 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   }, [])
 
   useEffect(() => {
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      return
+    }
     let cancelled = false
     void (async () => {
       const synced = await syncLifeRoutinesWithSupabase()
@@ -1298,6 +1303,10 @@ useEffect(() => {
     if (!owner || owner === HISTORY_GUEST_USER_ID) {
       return
     }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      return
+    }
     let cancelled = false
     void (async () => {
       const synced = await syncHistoryWithSupabase()
@@ -1324,7 +1333,7 @@ useEffect(() => {
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key !== HISTORY_STORAGE_KEY) {
+      if (!event.key?.startsWith(HISTORY_STORAGE_KEY)) {
         return
       }
       try {
@@ -2196,7 +2205,7 @@ useEffect(() => {
   }, [activeGoalSnapshots, currentTime, goalGradientById, history, lifeRoutineColorByBucket])
 
   // Fetch repeating rules to surface guide tasks that overlap 'now'
-  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
+  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>(() => readLocalRepeatingRules())
   useEffect(() => {
     let cancelled = false
     const hydrateRepeatingRules = async () => {
@@ -2210,6 +2219,10 @@ useEffect(() => {
         }
       } catch {}
       if (isGuestOwner) {
+        return
+      }
+      // Skip fetch if we just did a full sync (e.g. after auth callback)
+      if (isRecentlyFullSynced()) {
         return
       }
       try {

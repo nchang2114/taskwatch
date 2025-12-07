@@ -87,6 +87,7 @@ import {
   type HistoryEntry,
 } from '../lib/sessionHistory'
 import { logDebug, logInfo, logWarn } from '../lib/logging'
+import { isRecentlyFullSynced } from '../lib/bootstrap'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -5867,6 +5868,11 @@ export default function GoalsPage(): ReactElement {
   // Gate pushes to Supabase until after the initial remote pull completes
   const lifeRoutinesSyncedRef = useRef(false)
   useEffect(() => {
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      lifeRoutinesSyncedRef.current = true
+      return
+    }
     let cancelled = false
     lifeRoutinesSyncedRef.current = false
     void (async () => {
@@ -7449,10 +7455,18 @@ export default function GoalsPage(): ReactElement {
 
   // Load once on mount and refresh when the user returns focus to this tab
   useEffect(() => {
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      return
+    }
     refreshGoalsFromSupabase('initial-load')
   }, [refreshGoalsFromSupabase, refreshQuickListFromSupabase])
   useEffect(() => {
     if (shouldSkipQuickListRemote()) {
+      return
+    }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
       return
     }
     refreshQuickListFromSupabase('initial-load')

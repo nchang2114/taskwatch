@@ -15,7 +15,7 @@ import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
 import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
-import { bootstrapGuestDataIfNeeded, clearAllLocalStorage } from './lib/bootstrap'
+import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
 import { ensureGoalsUser } from './lib/goalsSync'
 
 type Theme = 'light' | 'dark'
@@ -1225,6 +1225,9 @@ function MainApp() {
       try {
         window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
+      
+      // Clear the full sync timestamp so next sign-in doesn't skip fetches
+      clearLastFullSyncTimestamp()
       
       // Clear all localStorage data for a fresh guest experience
       clearAllLocalStorage()

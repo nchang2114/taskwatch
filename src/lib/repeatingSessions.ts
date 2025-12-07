@@ -38,7 +38,7 @@ export const REPEATING_RULES_ACTIVATION_KEY = 'nc-taskwatch-repeating-activation
 // We also persist a local end-boundary override to ensure offline correctness.
 export const REPEATING_RULES_END_KEY = 'nc-taskwatch-repeating-end-map'
 const REPEATING_RULES_USER_KEY = 'nc-taskwatch-repeating-user'
-const REPEATING_RULES_GUEST_USER_ID = '__guest__'
+export const REPEATING_RULES_GUEST_USER_ID = '__guest__'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 export const isRepeatingRuleId = (value: string | undefined | null): value is string =>
@@ -286,12 +286,15 @@ export const pushRepeatingRulesToSupabase = async (
     const baseRule = { ...rule, taskName: safeTaskName, dayOfWeek: normalizeWeekdays(rule.dayOfWeek) }
     const incomingId = typeof rule.id === 'string' ? rule.id : null
     if (!isRepeatingRuleId(incomingId)) {
+      // Non-UUID ID (like "sample-sleep-rule") - generate a new UUID
       const newId = randomRuleId()
       if (incomingId) {
         idMap[incomingId] = newId
       }
       return { ...baseRule, id: newId }
     }
+    // Already a valid UUID - add identity mapping so session remapping knows this rule exists
+    idMap[incomingId] = incomingId
     return baseRule
   })
   if (Object.keys(idMap).length > 0) {
