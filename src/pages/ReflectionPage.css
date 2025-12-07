@@ -2484,6 +2484,7 @@ html[data-theme='light'] .history-calendar {
   font-size: 0.8rem;
   color: var(--text-secondary);
   padding: 0.25rem 0.35rem;
+  text-align: center;
 }
 
 .calendar-cell {
@@ -2493,10 +2494,24 @@ html[data-theme='light'] .history-calendar {
   border-radius: 0.5rem;
   padding: 0.35rem;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .calendar-cell--muted {
-  opacity: 0.6;
+  opacity: 0.35;
+  background: rgba(14, 18, 36, 0.15);
+}
+
+html[data-theme='light'] .calendar-cell {
+  border-color: rgba(176, 186, 240, 0.4);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+html[data-theme='light'] .calendar-cell--muted {
+  opacity: 0.5;
+  background: rgba(230, 235, 250, 0.5);
 }
 
 /* Highlight today's date in month view */
@@ -2516,7 +2531,7 @@ html[data-theme='light'] .history-calendar {
   width: 1.55em; /* match year-view badge size */
   height: 1.55em;
   border-radius: 999px;
-  background: #3b82f6; /* match year-view color in dark */
+  background: #1d4ed8; /* blue-700 to match week/6d view */
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
   pointer-events: none;
   z-index: -1; /* render behind the number */
@@ -2526,7 +2541,7 @@ html[data-theme='light'] .history-calendar {
 
 html[data-theme='light'] .calendar-cell--today { }
 html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
-  background: #2563eb; /* match year-view color in light */
+  background: #2563eb; /* blue-600 to match week/6d view */
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
@@ -2547,14 +2562,22 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
 
 .calendar-grid--year {
   display: grid;
-  /* 3 columns × 4 rows layout */
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(4, 1fr);
+  /* Force a 4 × 3 layout so 12 months always fill perfectly */
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(3, 1fr);
   gap: 0.5rem;
   touch-action: pan-y;
   /* Let the year grid stretch within the carousel panel */
   height: 100%;
   min-height: 0;
+}
+
+/* Switch to 3 columns × 4 rows on smaller viewports */
+@media (max-width: 700px) {
+  .calendar-grid--year {
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+  }
 }
 
 /* Generic carousel wrapper used for month/year swipe with preview panes */
@@ -2640,13 +2663,32 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
   align-items: center;
   justify-content: center;
   aspect-ratio: 1 / 1;
-  /* Let date numbers scale with the month cell; never below 4px */
-  font-size: clamp(8px, 2cqh, 0.72rem);
+  /* Scale with viewport, bigger on larger screens */
+  font-size: clamp(9px, 1.8vw, 0.78rem);
   line-height: 1;
   border-radius: 4px;
   color: var(--text-primary);
   z-index: 0; /* allow pseudo background to sit behind text */
   cursor: pointer;
+}
+
+/* Further shrink on very small viewports */
+@media (max-width: 500px) {
+  .calendar-month-day {
+    font-size: clamp(9px, 1.5vw, 9px);
+  }
+}
+@media (max-width: 400px) {
+  .calendar-month-day {
+    font-size: 9px;
+  }
+}
+
+/* Slightly larger font on bigger screens */
+@media (min-width: 1200px) {
+  .calendar-month-day {
+    font-size: clamp(10px, 1vw, 0.82rem);
+  }
 }
 .calendar-month-day--muted {
   color: var(--text-secondary);
@@ -2664,7 +2706,7 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
   width: 1.55em;
   height: 1.55em;
   border-radius: 999px;
-  background: #3b82f6; /* vivid blue in dark theme */
+  background: #1d4ed8; /* blue-700 to match week/6d view */
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
   z-index: -1; /* ensure it's behind the number */
 }
@@ -2678,7 +2720,7 @@ html[data-theme='light'] .calendar-year-cell {
   background: rgba(248, 250, 255, 0.9);
 }
 html[data-theme='light'] .calendar-month-day--today::before {
-  background: #2563eb; /* deeper blue for light background */
+  background: #2563eb; /* blue-600 to match week/6d view */
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 html[data-theme='light'] .calendar-month-day--today {
