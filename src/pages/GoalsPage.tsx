@@ -3174,10 +3174,9 @@ const GoalRow: React.FC<GoalRowProps> = ({
     if (typeof document === 'undefined') {
       return
     }
-    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      document.body.style.overflow = previousOverflow
+      document.body.style.overflow = ''
     }
   }, [activeBucketCustomizerId])
 
@@ -6975,10 +6974,9 @@ export default function GoalsPage(): ReactElement {
     if (typeof document === 'undefined') {
       return
     }
-    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      document.body.style.overflow = previousOverflow
+      document.body.style.overflow = ''
     }
   }, [activeLifeRoutineCustomizerId])
 
@@ -8346,10 +8344,9 @@ export default function GoalsPage(): ReactElement {
     if (typeof document === 'undefined') {
       return
     }
-    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      document.body.style.overflow = previousOverflow
+      document.body.style.overflow = ''
     }
   }, [activeCustomizerGoalId])
 

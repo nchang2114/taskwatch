@@ -1255,14 +1255,13 @@ function MainApp() {
     if (typeof document === 'undefined') {
       return
     }
-    const originalOverflow = document.body.style.overflow
     if (settingsOpen || authModalOpen || featureModalOpen || shortcutsPanelOpen) {
       document.body.style.overflow = 'hidden'
     } else {
-      document.body.style.overflow = originalOverflow
+      document.body.style.overflow = ''
     }
     return () => {
-      document.body.style.overflow = originalOverflow
+      document.body.style.overflow = ''
     }
   }, [settingsOpen, authModalOpen, featureModalOpen, shortcutsPanelOpen])
 
