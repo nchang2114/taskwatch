@@ -1298,8 +1298,21 @@ function MainApp() {
       // Clear the full sync timestamp so next sign-in doesn't skip fetches
       clearLastFullSyncTimestamp()
       
+      // Preserve theme preference before clearing localStorage
+      let savedTheme: string | null = null
+      try {
+        savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+      } catch {}
+      
       // Clear all localStorage data for a fresh guest experience
       clearAllLocalStorage()
+      
+      // Restore theme preference after clearing
+      if (savedTheme) {
+        try {
+          window.localStorage.setItem(THEME_STORAGE_KEY, savedTheme)
+        } catch {}
+      }
       
       // Immediately reload - fresh page will have clean guest defaults
       window.location.reload()
