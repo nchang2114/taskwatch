@@ -592,8 +592,8 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
   const sessionPresets: Record<string, SessionPreset> = {
     study: {
       taskName: 'Deep study block',
-      goalName: 'Ace This Semester',
-      bucketName: 'Lectures & Notes',
+      goalName: 'MATH1131',
+      bucketName: 'Weekly Work (15%)',
       goalId: 'g_demo',
       bucketId: 'b_demo_1',
       taskId: 't_demo_1',
@@ -614,8 +614,8 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
     },
     creative: {
       taskName: 'Creative assignment burst',
-      goalName: 'Ace This Semester',
-      bucketName: 'Assignments',
+      goalName: 'MATH1131',
+      bucketName: 'Assignment (10%)',
       goalId: 'g_demo',
       bucketId: 'b_demo_2',
       taskId: 't_demo_4',
