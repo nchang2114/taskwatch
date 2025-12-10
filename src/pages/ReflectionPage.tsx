@@ -9877,9 +9877,15 @@ useEffect(() => {
           let colEnd: number
           
           if (entry.isAllDay) {
-            // UTC midnight timestamps - match by UTC date string
-            const startDateKey = getUtcDateKey(startAt)
-            const endDateKey = getUtcDateKey(endAt)
+            // When previewing (dragging), the timestamps are display-timezone midnights
+            // When not previewing, the timestamps are UTC midnights
+            // Use appropriate date key extraction for each case
+            const startDateKey = isPreviewed 
+              ? getDateKeyInTimezone(startAt, displayTimezone)
+              : getUtcDateKey(startAt)
+            const endDateKey = isPreviewed 
+              ? getDateKeyInTimezone(endAt, displayTimezone)
+              : getUtcDateKey(endAt)
             colStart = dayDateKeys.indexOf(startDateKey)
             // End is exclusive, so find the end date column
             const endColIdx = dayDateKeys.indexOf(endDateKey)
@@ -10180,9 +10186,10 @@ useEffect(() => {
               let guideColStart: number
               let guideColEnd: number
               if (isBeingDragged) {
-                // Use UTC date key from the preview timestamps
-                const previewStartDateKey = getUtcDateKey(startedAt)
-                const previewEndDateKey = getUtcDateKey(endedAt)
+                // For drag preview, use display-timezone date key since dayDateKeys uses local dates
+                // and preview timestamps are display-timezone midnights
+                const previewStartDateKey = getDateKeyInTimezone(startedAt, displayTimezone)
+                const previewEndDateKey = getDateKeyInTimezone(endedAt, displayTimezone)
                 guideColStart = dayDateKeys.indexOf(previewStartDateKey)
                 const endColIdx = dayDateKeys.indexOf(previewEndDateKey)
                 guideColEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
@@ -11506,10 +11513,17 @@ useEffect(() => {
                       try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (moved && preview && preview.entryId === bar.entry.id && (preview.startedAt !== initialStart || preview.endedAt !== initialEnd)) {
-                        // Use preview values directly - they're already computed in system timezone space
-                        // (dayStarts uses system local time, so no unadjust needed for existing entries)
-                        const finalStartedAt = preview.startedAt
-                        const finalEndedAt = preview.endedAt
+                        // For all-day entries, convert display-timezone midnight to UTC midnight
+                        // (dayStarts contains display-timezone midnight, but all-day entries should use UTC midnight)
+                        let finalStartedAt = preview.startedAt
+                        let finalEndedAt = preview.endedAt
+                        if (bar.entry.isAllDay) {
+                          // Convert from display-timezone midnight to UTC midnight
+                          const startDateKey = getDateKeyInTimezone(preview.startedAt, displayTimezone)
+                          const endDateKey = getDateKeyInTimezone(preview.endedAt, displayTimezone)
+                          finalStartedAt = dateKeyToUtcMidnight(startDateKey)
+                          finalEndedAt = dateKeyToUtcMidnight(endDateKey)
+                        }
                         
                         // Check if this is a guide (synthetic entry from repeating rule)
                         if (bar.isGuide && bar.entry.id.startsWith('repeat:')) {
