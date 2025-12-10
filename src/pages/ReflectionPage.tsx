@@ -2142,6 +2142,12 @@ const isEntryAllDay = (entry: { isAllDay?: boolean; startedAt: number; endedAt: 
   return isAllDayRangeTs(entry.startedAt, entry.endedAt)
 }
 
+// Check if an entry is a skipped session (zero-elapsed entry created when skipping a repeating guide)
+// These should not be displayed in the calendar as visible events
+const isSkippedSession = (entry: { elapsed: number; repeatingSessionId?: string | null }): boolean => {
+  return entry.elapsed === 0 && typeof entry.repeatingSessionId === 'string' && entry.repeatingSessionId.length > 0
+}
+
 const DRAG_DETECTION_THRESHOLD_PX = 3
 const MIN_SESSION_DURATION_DRAG_MS = MINUTE_MS
 const DRAG_HOLD_DURATION_MS = 300 // Hold duration required to start dragging/extending sessions
@@ -8301,6 +8307,7 @@ useEffect(() => {
   const daySegments = useMemo(() => {
     const preview = dragPreview
     const entries = effectiveHistory
+      .filter((entry) => !isSkippedSession(entry)) // Exclude skipped sessions from calendar
       .map((entry) => {
         const isPreviewed = preview && preview.entryId === entry.id
         const rawStartedAt = isPreviewed ? preview.startedAt : entry.startedAt
@@ -9857,6 +9864,8 @@ useEffect(() => {
 
         const raws: Raw[] = []
         for (const entry of effectiveHistory) {
+          // Skip sessions that were skipped (zero-elapsed entries from guide skip)
+          if (isSkippedSession(entry)) continue
           const isPreviewed = dragPreview && dragPreview.entryId === entry.id
           const startAt = isPreviewed ? dragPreview.startedAt : entry.startedAt
           const endAt = isPreviewed ? dragPreview.endedAt : entry.endedAt
@@ -10281,6 +10290,7 @@ useEffect(() => {
         type SliceAssignment = { left: number; right: number }
 
         const raw: RawEvent[] = effectiveHistory
+          .filter((entry) => !isSkippedSession(entry)) // Exclude skipped sessions from calendar
           .map((entry) => {
             // Exclude all‑day entries from the time grid; they render in the all‑day lane
             if (isEntryAllDay(entry)) return null
