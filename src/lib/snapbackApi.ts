@@ -64,6 +64,17 @@ export async function getOrCreateTriggerByName(trigger_name: string): Promise<Db
     .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .single()
   if (error) {
+    // Handle race condition: if duplicate key error, fetch the existing record
+    if (error.code === '23505') {
+      console.log('[snapbackApi] Trigger already exists (race condition), fetching existing:', trigger_name)
+      const { data: raceExisting } = await supabase
+        .from('snapback_overview')
+        .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+        .eq('user_id', session.user.id)
+        .eq('trigger_name', trigger_name)
+        .maybeSingle()
+      return raceExisting as DbSnapbackOverview | null
+    }
     console.error('[snapbackApi] getOrCreateTriggerByName insert error:', error)
     return null
   }

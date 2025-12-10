@@ -13347,6 +13347,14 @@ useEffect(() => {
                       }
                       return
                     }
+                    // If entry is already linked to a different repeating session, unlink it first
+                    // This allows the old rule's guide task to reappear for that occurrence
+                    const existingRuleId = entry.repeatingSessionId
+                    if (existingRuleId) {
+                      updateHistory((current) =>
+                        current.map((h) => (h.id === entry.id ? { ...h, repeatingSessionId: null, originalTime: null } : h)),
+                      )
+                    }
                     const created = await createRepeatingRuleForEntry(entry, val, { displayTimezone })
                     if (created) {
                       // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
@@ -14526,6 +14534,14 @@ useEffect(() => {
                   }
                   return
                 }
+                // If entry is already linked to a different repeating session, unlink it first
+                // This allows the old rule's guide task to reappear for that occurrence
+                const existingRuleId = inspectorEntry.repeatingSessionId
+                if (existingRuleId) {
+                  updateHistory((current) =>
+                    current.map((h) => (h.id === inspectorEntry.id ? { ...h, repeatingSessionId: null, originalTime: null } : h)),
+                  )
+                }
                 const created = await createRepeatingRuleForEntry(inspectorEntry, val, { displayTimezone })
                 if (created) {
                   // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
@@ -15149,6 +15165,14 @@ useEffect(() => {
               frequency = 'annually'
             } else {
               frequency = 'daily'
+            }
+            // If entry is already linked to a different repeating session, unlink it first
+            // This allows the old rule's guide task to reappear for that occurrence
+            const existingRuleId = customRecurrenceEntry.repeatingSessionId
+            if (existingRuleId) {
+              updateHistory((current) =>
+                current.map((h) => (h.id === customRecurrenceEntry.id ? { ...h, repeatingSessionId: null, originalTime: null } : h)),
+              )
             }
             const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, { ...createOptions, displayTimezone })
             if (created) {
