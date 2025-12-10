@@ -13,7 +13,7 @@ create table public.buckets (
   constraint buckets_goal_id_fkey foreign KEY (goal_id) references goals (id) on delete CASCADE,
   constraint buckets_user_goal_fk foreign KEY (user_id, goal_id) references goals (user_id, id) on delete CASCADE
 ) TABLESPACE pg_default;
-
+ 
 create index IF not exists buckets_user_goal_sort_idx on public.buckets using btree (user_id, goal_id, sort_index) TABLESPACE pg_default;
 
 create unique INDEX IF not exists buckets_user_id_id_uidx on public.buckets using btree (user_id, id) TABLESPACE pg_default;
