@@ -764,13 +764,9 @@ const isCityInEffectiveTimezone = (cityFullName: string, appTimezoneOverride: st
   return cityTimezone === effectiveTimezone
 }
 
-// ========== TIMEZONE OFFSET CACHE ==========
-// Cache timezone offset calculations to avoid repeated Intl.DateTimeFormat instantiation.
-// Offsets only change at DST boundaries, so we cache by hour-rounded timestamps.
-// Key format: "sourceTz|targetTz|hourTimestamp"
-const timezoneOffsetCache = new Map<string, number>()
-const HOUR_MS = 60 * 60 * 1000
-const MAX_TZ_CACHE_SIZE = 500 // Prevent unbounded growth
+// ========== TIMEZONE UTILITIES (Option C: Google/Apple approach) ==========
+// Instead of calculating offsets between timezones, we ask the browser
+// "what time is this UTC timestamp in timezone X?" and use that directly.
 
 // Reusable DateTimeFormat instances per timezone (much cheaper than creating new ones)
 const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>()
@@ -792,65 +788,181 @@ const getDateTimeFormatter = (timeZone: string): Intl.DateTimeFormat => {
   return formatter
 }
 
-// Clear timezone caches when timezone changes (called from updateAppTimezone)
-const clearTimezoneCaches = () => {
-  timezoneOffsetCache.clear()
-  // Keep dateTimeFormatCache - those are still valid
+// Reusable formatter for extracting time parts (reuses dateTimeFormatCache)
+const getTimePartsInTimezone = (utcMs: number, tz: string): {
+  year: number
+  month: number  // 1-indexed (1-12)
+  day: number
+  hour: number
+  minute: number
+  second: number
+} => {
+  const formatter = getDateTimeFormatter(tz)
+  const parts = formatter.formatToParts(new Date(utcMs))
+  
+  let year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0
+  for (const part of parts) {
+    switch (part.type) {
+      case 'year': year = parseInt(part.value, 10); break
+      case 'month': month = parseInt(part.value, 10); break
+      case 'day': day = parseInt(part.value, 10); break
+      case 'hour': hour = parseInt(part.value, 10); break
+      case 'minute': minute = parseInt(part.value, 10); break
+      case 'second': second = parseInt(part.value, 10); break
+    }
+  }
+  
+  return { year, month, day, hour, minute, second }
 }
 
-// Get the offset in milliseconds between two timezones at a given timestamp
-// Returns (targetTz offset - sourceTz offset), so adding this to a sourceTz timestamp
-// gives the equivalent time in targetTz
-const getTimezoneOffsetMs = (timestamp: number, sourceTz: string, targetTz: string): number => {
-  if (sourceTz === targetTz) return 0
+// Returns "YYYY-MM-DD" date key for a UTC timestamp in the given timezone
+const getDateKeyInTimezone = (utcMs: number, tz: string): string => {
+  const { year, month, day } = getTimePartsInTimezone(utcMs, tz)
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+// Returns 0-100 position on the day timeline for a UTC timestamp in the given timezone
+const getPositionPercentInTimezone = (utcMs: number, tz: string): number => {
+  const { hour, minute, second } = getTimePartsInTimezone(utcMs, tz)
+  return ((hour + minute / 60 + second / 3600) / 24) * 100
+}
+
+// Get minutes from midnight (0-1439) for a UTC timestamp in the given timezone
+// This is useful for extracting the wall-clock time for repeating rule creation
+const getMinutesFromMidnightInTimezone = (utcMs: number, tz: string): number => {
+  const { hour, minute } = getTimePartsInTimezone(utcMs, tz)
+  return hour * 60 + minute
+}
+
+// Get the UTC timestamp for midnight on a given date in a given timezone
+// dateKey is "YYYY-MM-DD" format
+const getMidnightUtcForDateInTimezone = (dateKey: string, tz: string): number => {
+  // Parse the date key
+  const [year, month, day] = dateKey.split('-').map(Number)
   
-  // Round to nearest hour for cache key (offsets don't change within an hour)
-  const hourTs = Math.floor(timestamp / HOUR_MS) * HOUR_MS
-  const cacheKey = `${sourceTz}|${targetTz}|${hourTs}`
+  // Create a date string that represents midnight in the target timezone
+  // We use a binary search approach to find the exact UTC time
+  // Start with a rough estimate assuming UTC
+  const roughEstimate = Date.UTC(year, month - 1, day, 0, 0, 0, 0)
   
-  // Check cache first
-  const cached = timezoneOffsetCache.get(cacheKey)
-  if (cached !== undefined) {
-    return cached
+  // Check what date this rough estimate shows in the target timezone
+  const checkDate = getDateKeyInTimezone(roughEstimate, tz)
+  
+  if (checkDate === dateKey) {
+    // We're on the right day, now find exact midnight
+    const parts = getTimePartsInTimezone(roughEstimate, tz)
+    // Subtract the hours/minutes/seconds to get to midnight
+    const msToSubtract = (parts.hour * 3600 + parts.minute * 60 + parts.second) * 1000
+    return roughEstimate - msToSubtract
   }
   
-  // Prevent cache from growing unbounded
-  if (timezoneOffsetCache.size >= MAX_TZ_CACHE_SIZE) {
-    // Clear oldest entries (simple approach: clear all and let it rebuild)
-    timezoneOffsetCache.clear()
+  // If the date is different, we need to adjust
+  // The target timezone is ahead or behind UTC
+  if (checkDate < dateKey) {
+    // We're behind the target date, add hours
+    let adjusted = roughEstimate + 14 * 60 * 60 * 1000 // Add up to 14 hours (max TZ offset)
+    const parts = getTimePartsInTimezone(adjusted, tz)
+    const adjustedDateKey = getDateKeyInTimezone(adjusted, tz)
+    if (adjustedDateKey === dateKey) {
+      const msToSubtract = (parts.hour * 3600 + parts.minute * 60 + parts.second) * 1000
+      return adjusted - msToSubtract
+    }
+  } else {
+    // We're ahead of the target date, subtract hours
+    let adjusted = roughEstimate - 14 * 60 * 60 * 1000
+    const parts = getTimePartsInTimezone(adjusted, tz)
+    const adjustedDateKey = getDateKeyInTimezone(adjusted, tz)
+    if (adjustedDateKey === dateKey) {
+      const msToSubtract = (parts.hour * 3600 + parts.minute * 60 + parts.second) * 1000
+      return adjusted - msToSubtract
+    }
   }
   
-  // Get the local time components in each timezone using cached formatters
-  const sourceFormatter = getDateTimeFormatter(sourceTz)
-  const targetFormatter = getDateTimeFormatter(targetTz)
-  
-  const dateObj = new Date(timestamp)
-  
-  // Parse the formatted strings back to dates in UTC context
-  const parseFormattedDate = (formatted: string): number => {
-    // Format is: MM/DD/YYYY, HH:MM:SS
-    const [datePart, timePart] = formatted.split(', ')
-    const [month, day, year] = datePart.split('/')
-    const [hour, minute, second] = timePart.split(':')
-    return Date.UTC(
-      parseInt(year, 10),
-      parseInt(month, 10) - 1,
-      parseInt(day, 10),
-      parseInt(hour, 10),
-      parseInt(minute, 10),
-      parseInt(second, 10)
-    )
+  // Fallback: just return the rough estimate (shouldn't happen in practice)
+  return roughEstimate
+}
+
+// Add N days to a date key, returning the new date key
+const addDaysToDateKey = (dateKey: string, days: number): string => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// Calculate the number of days between two date keys (targetKey - baseKey)
+// Returns positive if targetKey is after baseKey, negative if before
+const daysBetweenDateKeys = (baseKey: string, targetKey: string): number => {
+  const [by, bm, bd] = baseKey.split('-').map(Number)
+  const [ty, tm, td] = targetKey.split('-').map(Number)
+  const baseDate = new Date(by, bm - 1, bd)
+  const targetDate = new Date(ty, tm - 1, td)
+  return Math.round((targetDate.getTime() - baseDate.getTime()) / DAY_DURATION_MS)
+}
+
+// Get day of week (0=Sunday, 6=Saturday) from a date key string
+const getDayOfWeekFromDateKey = (dateKey: string): number => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  // Use UTC to avoid local timezone shifting the date
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+}
+
+// Get date parts (year, month 1-12, day 1-31) from a date key string
+const getDatePartsFromDateKey = (dateKey: string): { year: number; month: number; day: number } => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  return { year, month, day }
+}
+
+// Get "month-day" key (e.g., "12-10") from a date key string for annual matching
+const monthDayKeyFromDateKey = (dateKey: string): string => {
+  const { month, day } = getDatePartsFromDateKey(dateKey)
+  return `${month}-${day}`
+}
+
+// Check if a date key matches a monthly rule (date-key aware version)
+const matchesMonthlyDayWithDateKey = (rule: RepeatingSessionRule, dateKey: string): boolean => {
+  const { year, month, day } = getDatePartsFromDateKey(dateKey)
+  const pattern = ruleMonthlyPattern(rule)
+  if (pattern === 'day') {
+    const anchorDay = ruleDayOfMonth(rule)
+    if (!Number.isFinite(anchorDay as number)) return false
+    // Use UTC to avoid timezone issues when calculating last day of month
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    const expectedDay = Math.min(anchorDay as number, lastDay)
+    return day === expectedDay
   }
-  
-  const sourceUtc = parseFormattedDate(sourceFormatter.format(dateObj))
-  const targetUtc = parseFormattedDate(targetFormatter.format(dateObj))
-  
-  const offset = targetUtc - sourceUtc
-  
-  // Cache the result
-  timezoneOffsetCache.set(cacheKey, offset)
-  
-  return offset
+  const weekday = ruleMonthlyWeekday(rule)
+  if (!Number.isFinite(weekday as number)) return false
+  if (pattern === 'first') {
+    // First day of month in UTC
+    const firstOfMonth = new Date(Date.UTC(year, month - 1, 1))
+    const offset = ((weekday as number) - firstOfMonth.getUTCDay() + 7) % 7
+    const firstOccurrence = 1 + offset
+    return day === firstOccurrence
+  }
+  // Last occurrence pattern
+  const lastOfMonth = new Date(Date.UTC(year, month, 0))
+  const offset = (lastOfMonth.getUTCDay() - (weekday as number) + 7) % 7
+  const lastOccurrence = lastOfMonth.getUTCDate() - offset
+  return day === lastOccurrence
+}
+
+// Convert a percentage position (0-100) on a day to a UTC timestamp
+// Uses the day's midnight UTC as the base
+const percentToUtcTimestamp = (percent: number, dayMidnightUtc: number): number => {
+  return dayMidnightUtc + (percent / 100) * DAY_DURATION_MS
+}
+
+// Generate an array of midnight UTC timestamps for a range of days in a timezone
+// anchorDateKey is "YYYY-MM-DD", startOffset is days before anchor (negative), count is total days
+const getDayStartsInTimezone = (anchorDateKey: string, startOffset: number, count: number, tz: string): number[] => {
+  const startDateKey = addDaysToDateKey(anchorDateKey, startOffset)
+  const dayStarts: number[] = []
+  for (let i = 0; i < count; i++) {
+    const dateKey = addDaysToDateKey(startDateKey, i)
+    dayStarts.push(getMidnightUtcForDateInTimezone(dateKey, tz))
+  }
+  return dayStarts
 }
 
 // Snapback virtual goal
@@ -1992,6 +2104,18 @@ const snapToNearestInterval = (timestamp: number, intervalMinutes: number): numb
 }
 
 // All‑day helpers (shared across calendar + popover/editor)
+// Get UTC date string "YYYY-MM-DD" from a UTC midnight timestamp
+const getUtcDateKey = (utcMidnightMs: number): string => {
+  const d = new Date(utcMidnightMs)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+// Convert a date string "YYYY-MM-DD" to UTC midnight timestamp
+const dateKeyToUtcMidnight = (dateKey: string): number => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  return Date.UTC(year, month - 1, day)
+}
+
+// Legacy local midnight helpers (for backwards compatibility during migration)
 const toLocalMidnightTs = (ms: number): number => {
   const d = new Date(ms)
   d.setHours(0, 0, 0, 0)
@@ -2001,6 +2125,7 @@ const isLocalMidnightTs = (ms: number): boolean => {
   const d = new Date(ms)
   return d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0
 }
+// Legacy all-day detection by timestamps (for entries without isAllDay flag)
 const isAllDayRangeTs = (start: number, end: number): boolean => {
   if (!(Number.isFinite(start) && Number.isFinite(end)) || end <= start) return false
   if (!isLocalMidnightTs(start) || !isLocalMidnightTs(end)) return false
@@ -2009,6 +2134,14 @@ const isAllDayRangeTs = (start: number, end: number): boolean => {
   const days = Math.round((endMid - startMid) / DAY_DURATION_MS)
   return days >= 1
 }
+
+// Check if an entry is all-day (prefer isAllDay flag, fallback to timestamp detection)
+const isEntryAllDay = (entry: { isAllDay?: boolean; startedAt: number; endedAt: number }): boolean => {
+  if (typeof entry.isAllDay === 'boolean') return entry.isAllDay
+  // Fallback for entries without the flag
+  return isAllDayRangeTs(entry.startedAt, entry.endedAt)
+}
+
 const DRAG_DETECTION_THRESHOLD_PX = 3
 const MIN_SESSION_DURATION_DRAG_MS = MINUTE_MS
 const DRAG_HOLD_DURATION_MS = 300 // Hold duration required to start dragging/extending sessions
@@ -3662,8 +3795,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
   const updateAppTimezone = useCallback((timezone: string | null) => {
-    // Clear timezone offset cache before changing timezone
-    clearTimezoneCaches()
     storeAppTimezone(timezone)
     startTransition(() => {
       setAppTimezone(timezone)
@@ -3679,13 +3810,11 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
         const newValue = event.newValue
         if (!newValue || newValue === '') {
           // Timezone was cleared (sign-out) - reset to system default
-          clearTimezoneCaches()
           startTransition(() => {
             setAppTimezone(null)
           })
         } else if (newValue !== appTimezone) {
           // Timezone was changed from another tab - sync
-          clearTimezoneCaches()
           startTransition(() => {
             setAppTimezone(newValue)
           })
@@ -3695,7 +3824,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
     
     // Handle same-tab timezone reset (custom event from App.tsx on sign-in/sign-out)
     const handleTimezoneReset = () => {
-      clearTimezoneCaches()
       startTransition(() => {
         setAppTimezone(null)
       })
@@ -3715,12 +3843,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
     return formatTimeOfDay(timestamp, deferredAppTimezone, use24HourTime)
   }, [deferredAppTimezone, use24HourTime])
   
-  // Format an already-adjusted timestamp (no timezone conversion needed)
-  // Use this for previewStart/previewEnd values which are already timezone-shifted
-  const formatAdjustedTime = useCallback((adjustedTimestamp: number) => {
-    return formatTimeOfDay(adjustedTimestamp, undefined, use24HourTime) // No timezone - just format as local time
-  }, [use24HourTime])
-  
   // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
     const effective = appTimezone || getCurrentSystemTimezone()
@@ -3737,27 +3859,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const isUsingCustomTimezone = useMemo(() => {
     if (!appTimezone) return false
     return appTimezone !== getCurrentSystemTimezone()
-  }, [appTimezone])
-  
-  // Adjust a timestamp from system timezone to app timezone for visual positioning
-  // Uses DEFERRED timezone to avoid blocking UI during heavy calendar re-renders
-  const adjustTimestampForTimezone = useCallback((timestamp: number): number => {
-    if (!deferredAppTimezone) return timestamp
-    const systemTz = getCurrentSystemTimezone()
-    if (systemTz === deferredAppTimezone) return timestamp
-    
-    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
-  }, [deferredAppTimezone])
-  
-  // Reverse of adjustTimestampForTimezone - converts display time back to UTC for storage
-  // When creating/editing entries in a custom timezone, the visual position is in "display space"
-  // (already adjusted for the app timezone). Before saving, we need to un-adjust back to UTC.
-  const unadjustTimestampForTimezone = useCallback((displayTimestamp: number): number => {
-    if (!appTimezone) return displayTimestamp
-    const systemTz = getCurrentSystemTimezone()
-    if (systemTz === appTimezone) return displayTimestamp
-    // Subtract instead of add (reverse of adjustTimestampForTimezone)
-    return displayTimestamp - getTimezoneOffsetMs(displayTimestamp, systemTz, appTimezone)
   }, [appTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
@@ -4780,12 +4881,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     [cacheSubtasksForEntry],
   )
 
-  const computeEntryScheduledStart = useCallback((entry: HistoryEntry): number => {
-    const start = new Date(entry.startedAt)
-    const minutes = start.getHours() * 60 + start.getMinutes()
-    const dayStart = new Date(entry.startedAt)
-    dayStart.setHours(0, 0, 0, 0)
-    return dayStart.getTime() + minutes * 60000
+  const computeEntryScheduledStart = useCallback((entry: HistoryEntry, tz: string): number => {
+    // Use provided timezone for wall-clock time extraction
+    const minutes = getMinutesFromMidnightInTimezone(entry.startedAt, tz)
+    const dateKey = getDateKeyInTimezone(entry.startedAt, tz)
+    const dayStart = getMidnightUtcForDateInTimezone(dateKey, tz)
+    return dayStart + minutes * 60000
   }, [])
 
   useEffect(() => {
@@ -5904,11 +6005,11 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               }
             }
           }
-          // For timezone markers, sync endedAt with startedAt
+          // For timezone markers, set duration to 1 minute
           if (nextBucket === TIMEZONE_CHANGE_MARKER) {
             const startTs = base.startedAt
             if (startTs !== null) {
-              base = { ...base, endedAt: startTs }
+              base = { ...base, endedAt: startTs + MINUTE_MS }
             }
           }
           // Only auto-fill once: when choosing a Life Routine bucket, and only if name is effectively empty or default
@@ -6563,11 +6664,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     let nextNotes = draft.notes
     const nextSubtasks = cloneHistorySubtasks(draft.subtasks)
     
-    // Draft timestamps are in display-space (adjusted for app timezone) when set by the user.
-    // We need to unadjust them back to storage-space for saving.
-    // If draft.startedAt is null, we fall back to entry's existing (storage-space) timestamp.
-    const draftStartedAt = draft.startedAt !== null ? unadjustTimestampForTimezone(draft.startedAt) : selectedHistoryEntry.startedAt
-    const draftEndedAt = draft.endedAt !== null ? unadjustTimestampForTimezone(draft.endedAt) : selectedHistoryEntry.endedAt
+    // Draft timestamps are now in UTC (since dayStarts uses display timezone bounds).
+    // If draft.startedAt is null, we fall back to entry's existing timestamp.
+    const draftStartedAt = draft.startedAt !== null ? draft.startedAt : selectedHistoryEntry.startedAt
+    const draftEndedAt = draft.endedAt !== null ? draft.endedAt : selectedHistoryEntry.endedAt
     let nextStartedAt = Number.isFinite(draftStartedAt) ? draftStartedAt : selectedHistoryEntry.startedAt
     let nextEndedAt = Number.isFinite(draftEndedAt) ? draftEndedAt : selectedHistoryEntry.endedAt
     if (!Number.isFinite(nextStartedAt)) {
@@ -6775,7 +6875,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     selectedHistoryId,
     setPendingNewHistoryId,
     updateHistory,
-    unadjustTimestampForTimezone,
   ])
 
   useEffect(() => {
@@ -8140,28 +8239,65 @@ useEffect(() => {
     }
     return Component
   }, [])
+  
+  // Get the effective display timezone (user-selected or system default)
+  const displayTimezone = deferredAppTimezone ?? getCurrentSystemTimezone()
+  
+  // Track previous timezone to compensate historyDayOffset when timezone changes
+  // Use appTimezone (not deferred) so offset updates immediately when user changes TZ
+  // Use useLayoutEffect to update offset synchronously before paint
+  const effectiveAppTimezone = appTimezone ?? getCurrentSystemTimezone()
+  const prevAppTimezoneRef = useRef<string>(effectiveAppTimezone)
+  useLayoutEffect(() => {
+    const prevTz = prevAppTimezoneRef.current
+    if (prevTz !== effectiveAppTimezone) {
+      // Timezone changed - adjust historyDayOffset to keep the same date visible
+      // Get the currently viewed date key in the OLD timezone
+      const oldTodayKey = getDateKeyInTimezone(Date.now(), prevTz)
+      const currentDateKey = historyDayOffsetRef.current === 0 
+        ? oldTodayKey 
+        : addDaysToDateKey(oldTodayKey, historyDayOffsetRef.current)
+      
+      // Get what "today" is in the NEW timezone
+      const newTodayKey = getDateKeyInTimezone(Date.now(), effectiveAppTimezone)
+      
+      // Calculate the new offset needed to show the same date
+      const newOffset = daysBetweenDateKeys(newTodayKey, currentDateKey)
+      
+      // Update offset synchronously to prevent visual glitch
+      if (newOffset !== historyDayOffsetRef.current) {
+        historyDayOffsetRef.current = newOffset
+        flushSync(() => {
+          setHistoryDayOffset(newOffset)
+        })
+      }
+      
+      prevAppTimezoneRef.current = effectiveAppTimezone
+    }
+  }, [effectiveAppTimezone])
+  
+  // Get today's date key in the display timezone, then apply offset
+  const selectedDateKey = useMemo(() => {
+    const todayKey = getDateKeyInTimezone(nowTick, displayTimezone)
+    if (historyDayOffset === 0) return todayKey
+    return addDaysToDateKey(todayKey, historyDayOffset)
+  }, [nowTick, historyDayOffset, displayTimezone])
+  
+  // Get UTC timestamps for the start and end of the selected day in display timezone
   const dayStart = useMemo(() => {
-    const date = new Date(nowTick)
-    date.setHours(0, 0, 0, 0)
-    if (calendarView === '3d' && historyDayOffset !== 0) {
-      const adjusted = new Date(date)
-      adjusted.setDate(adjusted.getDate() + historyDayOffset)
-      return adjusted.getTime()
-    }
-    if (historyDayOffset !== 0) {
-      date.setDate(date.getDate() + historyDayOffset)
-    }
-    return date.getTime()
-  }, [nowTick, historyDayOffset, calendarView])
+    return getMidnightUtcForDateInTimezone(selectedDateKey, displayTimezone)
+  }, [selectedDateKey, displayTimezone])
   const dayEnd = dayStart + DAY_DURATION_MS
   const anchorDate = useMemo(() => new Date(dayStart), [dayStart])
+  
+  // Current time indicator position (0-100%)
   const currentTimePercent = useMemo(() => {
-    if (nowTick < dayStart || nowTick > dayEnd) {
-      return null
-    }
-    const raw = ((nowTick - dayStart) / DAY_DURATION_MS) * 100
-    return Math.min(Math.max(raw, 0), 100)
-  }, [nowTick, dayStart, dayEnd])
+    // Check if current time is on the selected day in display timezone
+    const nowDateKey = getDateKeyInTimezone(nowTick, displayTimezone)
+    if (nowDateKey !== selectedDateKey) return null
+    return getPositionPercentInTimezone(nowTick, displayTimezone)
+  }, [nowTick, selectedDateKey, displayTimezone])
+  
   const daySegments = useMemo(() => {
     const preview = dragPreview
     const entries = effectiveHistory
@@ -8170,35 +8306,62 @@ useEffect(() => {
         const rawStartedAt = isPreviewed ? preview.startedAt : entry.startedAt
         const rawEndedAt = isPreviewed ? preview.endedAt : entry.endedAt
         
-        // Adjust timestamps for app timezone (for positioning on the timeline)
-        const startedAt = adjustTimestampForTimezone(rawStartedAt)
-        const endedAt = adjustTimestampForTimezone(rawEndedAt)
+        // Check if this entry overlaps with the selected day in display timezone
+        const startDateKey = getDateKeyInTimezone(rawStartedAt, displayTimezone)
+        const endDateKey = getDateKeyInTimezone(rawEndedAt, displayTimezone)
+        const overlapsSelectedDay = startDateKey === selectedDateKey || endDateKey === selectedDateKey ||
+          (startDateKey < selectedDateKey && endDateKey > selectedDateKey)
         
+        if (!overlapsSelectedDay) return null
+        
+        // Get position percentages in display timezone
+        const startsOnSelectedDay = startDateKey === selectedDateKey
+        const endsOnSelectedDay = endDateKey === selectedDateKey
+        
+        const startPercent = startsOnSelectedDay 
+          ? getPositionPercentInTimezone(rawStartedAt, displayTimezone) 
+          : 0
+        const endPercent = endsOnSelectedDay 
+          ? getPositionPercentInTimezone(rawEndedAt, displayTimezone) 
+          : 100
+        
+        // Skip if no visible portion
+        if (endPercent <= startPercent) return null
+        
+        // For the entry object, keep original timestamps (used for duration display etc)
         const previewedEntry = isPreviewed
           ? {
               ...entry,
-              startedAt,
-              endedAt,
-              elapsed: Math.max(endedAt - startedAt, 1),
+              startedAt: rawStartedAt,
+              endedAt: rawEndedAt,
+              elapsed: Math.max(rawEndedAt - rawStartedAt, 1),
             }
-          : {
-              ...entry,
-              startedAt,
-              endedAt,
-            }
-        const start = Math.max(previewedEntry.startedAt, dayStart)
-        const end = Math.min(previewedEntry.endedAt, dayEnd)
-        if (end <= start) {
-          return null
+          : entry
+        
+        return { 
+          entry: previewedEntry, 
+          startPercent, 
+          endPercent,
+          // Keep start/end as UTC timestamps for sorting
+          start: rawStartedAt,
+          end: rawEndedAt,
         }
-        return { entry: previewedEntry, start, end }
       })
-      .filter((segment): segment is { entry: HistoryEntry; start: number; end: number } => Boolean(segment))
+      .filter((segment): segment is { entry: HistoryEntry; startPercent: number; endPercent: number; start: number; end: number } => Boolean(segment))
 
     if (preview && preview.entryId === 'new-entry') {
-      const start = Math.max(Math.min(preview.startedAt, preview.endedAt), dayStart)
-      const end = Math.min(Math.max(preview.startedAt, preview.endedAt), dayEnd)
-      if (end > start) {
+      // For new entry preview, preview.startedAt/endedAt are already in display space (percent-based)
+      // Convert back to check if it's valid
+      const minPercent = Math.min(preview.startedAt, preview.endedAt)
+      const maxPercent = Math.max(preview.startedAt, preview.endedAt)
+      const startPercent = Math.max(minPercent, 0)
+      const endPercent = Math.min(maxPercent, 100)
+      
+      if (endPercent > startPercent) {
+        // Convert percentages to UTC timestamps for the synthetic entry
+        const syntheticStartedAt = percentToUtcTimestamp(startPercent, dayStart)
+        const syntheticEndedAt = percentToUtcTimestamp(endPercent, dayStart)
+        
         const syntheticEntry: HistoryEntry = {
           id: 'new-entry',
           taskName: '',
@@ -8207,31 +8370,38 @@ useEffect(() => {
           goalId: LIFE_ROUTINES_GOAL_ID,
           bucketId: null,
           taskId: null,
-          elapsed: Math.max(end - start, MIN_SESSION_DURATION_DRAG_MS),
-          startedAt: start,
-          endedAt: end,
+          elapsed: Math.max(syntheticEndedAt - syntheticStartedAt, MIN_SESSION_DURATION_DRAG_MS),
+          startedAt: syntheticStartedAt,
+          endedAt: syntheticEndedAt,
           goalSurface: LIFE_ROUTINES_SURFACE,
           bucketSurface: null,
           notes: '',
           subtasks: [],
         }
-        entries.push({ entry: syntheticEntry, start, end })
+        entries.push({ 
+          entry: syntheticEntry, 
+          startPercent, 
+          endPercent,
+          start: syntheticStartedAt,
+          end: syntheticEndedAt,
+        })
       }
     }
 
     entries.sort((a, b) => a.start - b.start)
     const lanes: number[] = []
-    return entries.map(({ entry, start, end }) => {
-      let lane = lanes.findIndex((laneEnd) => start >= laneEnd - 1000)
+    return entries.map(({ entry, startPercent, endPercent, start }) => {
+      // Lane assignment based on overlap (using percentages)
+      let lane = lanes.findIndex((laneEndPercent) => startPercent >= laneEndPercent - 0.5)
       if (lane === -1) {
         lane = lanes.length
-        lanes.push(end)
+        lanes.push(endPercent)
       } else {
-        lanes[lane] = end
+        lanes[lane] = endPercent
       }
-      const left = ((start - dayStart) / DAY_DURATION_MS) * 100
-      const rawWidth = ((end - start) / DAY_DURATION_MS) * 100
-      const safeLeft = Math.min(Math.max(left, 0), 100)
+      
+      const safeLeft = Math.min(Math.max(startPercent, 0), 100)
+      const rawWidth = endPercent - startPercent
       const maxWidth = Math.max(100 - safeLeft, 0)
       const widthPercent = Math.min(Math.max(rawWidth, 0.8), maxWidth)
       const labelSource = entry.goalName?.trim().length ? entry.goalName! : entry.taskName
@@ -8251,7 +8421,7 @@ useEffect(() => {
         id: entry.id,
         entry,
         start,
-        end,
+        end: entry.endedAt,
         lane,
         leftPercent: safeLeft,
         widthPercent,
@@ -8265,7 +8435,7 @@ useEffect(() => {
         tooltipTask,
       }
     })
-  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone, use24HourTime])
+  }, [effectiveHistory, selectedDateKey, dayStart, displayTimezone, enhancedGoalLookup, goalColorLookup, dragPreview, use24HourTime])
   
   // Separate timezone markers from regular segments
   const { regularSegments, timezoneMarkers } = useMemo(() => {
@@ -9546,11 +9716,8 @@ useEffect(() => {
       setView('month')
     }
 
-    const todayMidnightMs = (() => {
-      const t = new Date()
-      t.setHours(0, 0, 0, 0)
-      return t.getTime()
-    })()
+    // Use display timezone for today detection
+    const todayDateKeyInDisplayTz = getDateKeyInTimezone(Date.now(), displayTimezone)
 
     const renderCell = (date: Date, isCurrentMonth: boolean) => {
       const start = new Date(date)
@@ -9558,7 +9725,9 @@ useEffect(() => {
       const end = new Date(start)
       end.setDate(end.getDate() + 1)
       const has = dayHasSessions(start.getTime(), end.getTime())
-      const isToday = start.getTime() === todayMidnightMs
+      // Compare date key strings instead of timestamps for accurate today detection
+      const cellDateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+      const isToday = cellDateKey === todayDateKeyInDisplayTz
       return (
         <div
           key={`cell-${start.toISOString()}`}
@@ -9589,43 +9758,33 @@ useEffect(() => {
       const visibleDayCount = calendarView === '3d' ? Math.max(2, Math.min(multiDayCount, 14)) : calendarView === 'week' ? 7 : 1
       const bufferDays = getCalendarBufferDays(visibleDayCount)
       const totalCount = visibleDayCount + bufferDays * 2
-      // Determine range start (shifted by buffer)
-      const windowStart = new Date(anchorDate)
+      
+      // Calculate the anchor date key and apply week-start adjustment if needed
+      let anchorDateKey = selectedDateKey
       if (calendarView === 'week') {
-        const dow = windowStart.getDay() // 0=Sun, 1=Mon, etc.
+        // Get day-of-week in display timezone (0=Sun, 1=Mon, etc.)
+        const anchorParts = getTimePartsInTimezone(dayStart, displayTimezone)
+        const anchorDateObj = new Date(anchorParts.year, anchorParts.month - 1, anchorParts.day)
+        const dow = anchorDateObj.getDay()
         // Calculate days to go back to reach weekStartDay (0=Sunday, 1=Monday)
         const daysBack = (dow - weekStartDay + 7) % 7
-        windowStart.setDate(windowStart.getDate() - daysBack)
+        anchorDateKey = addDaysToDateKey(selectedDateKey, -daysBack)
       }
-      windowStart.setDate(windowStart.getDate() - bufferDays)
-      const dayStarts: number[] = []
-      for (let i = 0; i < totalCount; i += 1) {
-        const d = new Date(windowStart)
-        d.setDate(windowStart.getDate() + i)
-        d.setHours(0, 0, 0, 0)
-        dayStarts.push(d.getTime())
+      
+      // Generate dayStarts using display timezone
+      const dayStarts = getDayStartsInTimezone(anchorDateKey, -bufferDays, totalCount, displayTimezone)
+      
+      // Generate dateKeys for each day (used for filtering entries)
+      const dayDateKeys: string[] = []
+      for (let i = 0; i < totalCount; i++) {
+        dayDateKeys.push(addDaysToDateKey(anchorDateKey, i - bufferDays))
       }
 
-      // Helpers for all-day support
-      const toLocalMidnight = (ms: number): number => {
-        const d = new Date(ms)
-        d.setHours(0, 0, 0, 0)
-        return d.getTime()
-      }
-      const isLocalMidnight = (ms: number): boolean => {
-        const d = new Date(ms)
-        return d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0
-      }
-      const isAllDayRange = (start: number, end: number): boolean => {
-        if (!(Number.isFinite(start) && Number.isFinite(end)) || end <= start) return false
-        // All‑day if both endpoints are at local midnight and span at least 1 day
-        if (!isLocalMidnight(start) || !isLocalMidnight(end)) return false
-        const startMid = toLocalMidnight(start)
-        const endMid = toLocalMidnight(end)
-        // Allow for DST shifts by comparing local midnight indices instead of exact ms duration
-        const days = Math.round((endMid - startMid) / DAY_DURATION_MS)
-        return days >= 1
-      }
+      // All-day detection uses SYSTEM local time (not display timezone)
+      // because all-day events are stored with local midnight timestamps
+      // and represent calendar days in the user's local context.
+      // Switching display timezone shouldn't change whether something is "all-day".
+      // We use the top-level isAllDayRangeTs function for this.
 
       type AllDayBar = {
         entry: HistoryEntry
@@ -9701,16 +9860,40 @@ useEffect(() => {
           const isPreviewed = dragPreview && dragPreview.entryId === entry.id
           const startAt = isPreviewed ? dragPreview.startedAt : entry.startedAt
           const endAt = isPreviewed ? dragPreview.endedAt : entry.endedAt
-          if (!isAllDayRange(startAt, endAt)) continue
-          // Clamp the visual range to the current window
-          const startMid = toLocalMidnight(startAt)
-          const endMid = toLocalMidnight(endAt)
-          if (endMid <= windowStartMs || startMid >= windowEndMs) continue
-          const clampedStart = Math.max(startMid, windowStartMs)
-          const clampedEnd = Math.min(endMid, windowEndMs)
-          // Map to column indices (inclusive start, exclusive end)
-          const colStart = Math.floor((clampedStart - windowStartMs) / DAY_DURATION_MS)
-          const colEnd = Math.ceil((clampedEnd - windowStartMs) / DAY_DURATION_MS)
+          if (!isEntryAllDay(entry)) continue
+          
+          // For entries with isAllDay flag, use UTC date matching (timestamps are UTC midnight)
+          // For legacy entries, use local midnight detection
+          let colStart: number
+          let colEnd: number
+          
+          if (entry.isAllDay) {
+            // UTC midnight timestamps - match by UTC date string
+            const startDateKey = getUtcDateKey(startAt)
+            const endDateKey = getUtcDateKey(endAt)
+            colStart = dayDateKeys.indexOf(startDateKey)
+            // End is exclusive, so find the end date column
+            const endColIdx = dayDateKeys.indexOf(endDateKey)
+            colEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
+            // If start date not found in window, try to find overlap
+            if (colStart < 0) {
+              // Check if event overlaps with window at all
+              const windowFirstDate = dayDateKeys[0]
+              const windowLastDate = dayDateKeys[dayDateKeys.length - 1]
+              if (startDateKey > windowLastDate || endDateKey <= windowFirstDate) continue
+              colStart = 0
+            }
+          } else {
+            // Legacy: local midnight timestamps
+            const startMid = toLocalMidnightTs(startAt)
+            const endMid = toLocalMidnightTs(endAt)
+            if (endMid <= windowStartMs || startMid >= windowEndMs) continue
+            const clampedStart = Math.max(startMid, windowStartMs)
+            const clampedEnd = Math.min(endMid, windowEndMs)
+            colStart = Math.floor((clampedStart - windowStartMs) / DAY_DURATION_MS)
+            colEnd = Math.ceil((clampedEnd - windowStartMs) / DAY_DURATION_MS)
+          }
+          
           if (colEnd <= colStart) continue
           const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
           const derivedLabel = deriveEntryTaskName(entry)
@@ -9728,12 +9911,13 @@ useEffect(() => {
           })
         }
         if (Array.isArray(repeatingRules) && repeatingRules.length > 0) {
+          // Use display timezone to get date key (must match guide's occurrence key)
           const confirmedKeySet = (() => {
             const set = new Set<string>()
             effectiveHistory.forEach((h) => {
               const rid = (h as any).repeatingSessionId as string | undefined | null
               const ot = (h as any).originalTime as number | undefined | null
-              if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${formatLocalYmd(ot as number)}`)
+              if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${getDateKeyInTimezone(ot as number, displayTimezone)}`)
             })
             return set
           })()
@@ -9757,73 +9941,213 @@ useEffect(() => {
             })
             return set
           })()
-          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${formatLocalYmd(baseMs)}`
-          const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
-            if (!rule.isActive) return false
-            if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
-            if (rule.frequency === 'weekly') {
-              const d = new Date(dayStart)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay()) && ruleIntervalAllowsDay(rule, dayStart)
-            }
-            if (rule.frequency === 'monthly') {
-              return matchesMonthlyDay(rule, dayStart) && ruleIntervalAllowsDay(rule, dayStart)
-            }
-            if (rule.frequency === 'annually') {
-              const dayKey = monthDayKey(dayStart)
-              const ruleKey = ruleMonthDayKey(rule)
-              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
-            }
-            return false
-          }
-          const isWithinBoundaries = (rule: RepeatingSessionRule, baseDayStart: number) => {
-            const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
-            const scheduledStart = baseDayStart + timeOfDayMin * MINUTE_MS
+          // Use display timezone for occurrence key to match confirmedKeySet
+          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${getDateKeyInTimezone(baseMs, displayTimezone)}`
+          
+          // For all-day rules, check boundaries by DATE not timestamp
+          // This properly handles the case where an all-day entry spawned the rule
+          const isAllDayWithinBoundaries = (rule: RepeatingSessionRule, columnIndex: number) => {
+            // Use the same date key that all-day entries use for column matching
+            const columnDateKey = dayDateKeys[columnIndex]
             const startAtMs = (rule as any).startAtMs as number | undefined
-            if (Number.isFinite(startAtMs as number)) {
-              if (scheduledStart < (startAtMs as number)) return false
-            } else {
-              const createdMs = (rule as any).createdAtMs as number | undefined
-              if (Number.isFinite(createdMs as number)) {
-                if (scheduledStart <= (createdMs as number)) return false
+            const createdMs = (rule as any).createdAtMs as number | undefined
+            const anchorMs = Number.isFinite(startAtMs as number) ? (startAtMs as number) : (Number.isFinite(createdMs as number) ? (createdMs as number) : null)
+            
+            if (Number.isFinite(anchorMs as number)) {
+              // Get the anchor date using UTC (same as how all-day entries compute their date key)
+              const anchorDateKey = getUtcDateKey(anchorMs as number)
+              
+              // For all-day rules, the first guide should appear on the day AFTER the anchor
+              // because the anchor day already has the original entry
+              if (columnDateKey === anchorDateKey) {
+                return false
+              }
+              // Also check if the column is before the anchor
+              if (columnDateKey < anchorDateKey) {
+                return false
               }
             }
+            
             const endAtMs = (rule as any).endAtMs as number | undefined
             if (Number.isFinite(endAtMs as number)) {
-              if (scheduledStart > (endAtMs as number)) return false
+              const endDateKey = getUtcDateKey(endAtMs as number)
+              if (columnDateKey > endDateKey) return false
             }
             return true
           }
+          
           const isAllDayRule = (rule: RepeatingSessionRule) => {
+            // Check explicit isAllDay flag first
+            if (rule.isAllDay === true) return true
+            // Legacy detection: timeOfDayMinutes=0 and duration >= 24 hours
             const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
             const durationMinutes = Math.max(1, rule.durationMinutes ?? 60)
-            return timeOfDayMin === 0 && durationMinutes >= 1440
+            if (timeOfDayMin === 0 && durationMinutes >= 1440) return true
+            // Heuristic: very short duration (< 5 min) suggests malformed all-day conversion
+            // Also check if duration is exactly 1440 (24 hours)
+            if (durationMinutes >= 1440) return true
+            return false
           }
-          const TOL = 60 * 1000
-          repeatingRules.forEach((rule) => {
+          
+          // For all-day rules, use date-based interval matching (not weekday matching)
+          // E.g., if set on the 7th, weekly repeat means 7th → 14th → 21st (not "every Monday")
+          const isAllDayRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
+            if (!rule.isActive) return false
+            const dateKey = getDateKeyInTimezone(dayStart, displayTimezone)
+            const { year, month, day } = getDatePartsFromDateKey(dateKey)
+            
+            // Get anchor date (startAtMs or createdAtMs)
+            const anchorMs = getRuleAnchorDayStart(rule)
+            if (!Number.isFinite(anchorMs as number)) return true // No anchor, allow all days
+            const anchorDateKey = getDateKeyInTimezone(anchorMs as number, displayTimezone)
+            const anchorParts = getDatePartsFromDateKey(anchorDateKey)
+            
+            const interval = Math.max(1, Number.isFinite((rule as any).repeatEvery as number) ? Math.floor((rule as any).repeatEvery as number) : 1)
+            
+            if (rule.frequency === 'daily') {
+              // Every N days from anchor
+              const DAY_MS = 24 * 60 * 60 * 1000
+              const diffDays = Math.floor((dayStart - (anchorMs as number)) / DAY_MS)
+              if (diffDays < 0) return false
+              return diffDays % interval === 0
+            }
+            
+            if (rule.frequency === 'weekly') {
+              // If dayOfWeek is specified and not empty, use weekday matching (user explicitly chose days)
+              if (Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.length > 0) {
+                const dow = getDayOfWeekFromDateKey(dateKey)
+                if (!rule.dayOfWeek.includes(dow)) return false
+                // Also check week interval
+                const DAY_MS = 24 * 60 * 60 * 1000
+                const diffDays = Math.floor((dayStart - (anchorMs as number)) / DAY_MS)
+                if (diffDays < 0) return false
+                const diffWeeks = Math.floor(diffDays / 7)
+                return diffWeeks % interval === 0
+              }
+              // No dayOfWeek specified: repeat every 7*interval days from anchor
+              const DAY_MS = 24 * 60 * 60 * 1000
+              const diffDays = Math.floor((dayStart - (anchorMs as number)) / DAY_MS)
+              if (diffDays < 0) return false
+              return diffDays % (7 * interval) === 0
+            }
+            
+            if (rule.frequency === 'monthly') {
+              // Same day-of-month, every N months
+              // Handle month-end clamping: if anchor was 31st, in Feb it becomes 28th/29th
+              const lastDayOfMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+              const expectedDay = Math.min(anchorParts.day, lastDayOfMonth)
+              if (day !== expectedDay) return false
+              // Check month interval
+              const anchorMonthIndex = anchorParts.year * 12 + (anchorParts.month - 1)
+              const currentMonthIndex = year * 12 + (month - 1)
+              const diffMonths = currentMonthIndex - anchorMonthIndex
+              if (diffMonths < 0) return false
+              return diffMonths % interval === 0
+            }
+            
+            if (rule.frequency === 'annually') {
+              // Same month-day, every N years
+              if (month !== anchorParts.month || day !== anchorParts.day) {
+                // Handle Feb 29 → Feb 28 in non-leap years
+                if (anchorParts.month === 2 && anchorParts.day === 29 && month === 2 && day === 28) {
+                  const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0)
+                  if (!isLeapYear) {
+                    // Allow Feb 28 as fallback for Feb 29 anchor in non-leap year
+                  } else {
+                    return false
+                  }
+                } else {
+                  return false
+                }
+              }
+              const diffYears = year - anchorParts.year
+              if (diffYears < 0) return false
+              return diffYears % interval === 0
+            }
+            
+            return false
+          }
+          
+          // Deduplicate rules by ID (in case the same rule appears multiple times)
+          const uniqueRules = Array.from(new Map(repeatingRules.map((r) => [r.id, r])).values())
+          
+          uniqueRules.forEach((rule) => {
             if (!isAllDayRule(rule)) return
+            // All-day guides use date-based scheduling (not weekday matching)
             dayStarts.forEach((dayStart, columnIndex) => {
-              if (!isRuleScheduledForDay(rule, dayStart)) return
-              if (!isWithinBoundaries(rule, dayStart)) return
+              if (!isAllDayRuleScheduledForDay(rule, dayStart)) return
+              // Use date-based boundary check for all-day rules
+              if (!isAllDayWithinBoundaries(rule, columnIndex)) return
               const occKey = makeOccurrenceKey(rule.id, dayStart)
               if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return
-              const startedAt = dayStart
-              const endedAt = dayStart + DAY_DURATION_MS
-              if (coveredOriginalSet.has(`${rule.id}:${startedAt}`)) return
-              const duplicateReal = effectiveHistory.some((h) => {
-                const startMatch = Math.abs(h.startedAt - startedAt) <= TOL
-                const endMatch = Math.abs(h.endedAt - endedAt) <= TOL
-                return startMatch && endMatch
-              })
-              if (duplicateReal) return
+              const guideEntryId = `repeat:${rule.id}:${dayStart}:allday`
+              
+              // Check if this guide is being dragged
+              const isBeingDragged = dragPreview && dragPreview.entryId === guideEntryId
+              
+              // Use preview position if dragging, otherwise use scheduled position
+              const startedAt = isBeingDragged ? dragPreview.startedAt : dayStart
+              const endedAt = isBeingDragged ? dragPreview.endedAt : dayStart + DAY_DURATION_MS
+              
+              // Skip this iteration if not dragged and already covered
+              if (!isBeingDragged && coveredOriginalSet.has(`${rule.id}:${dayStart}`)) return
+              
+              // Get the date key for this column - use the same dayDateKeys array
+              // that real all-day entries use for column matching
+              const columnDateKey = dayDateKeys[columnIndex]
               const taskName = rule.taskName?.trim() || 'Session'
               const goalName = rule.goalName?.trim() || null
               const bucketName = rule.bucketName?.trim() || null
+              
+              // Check for duplicate: match by date key + task name for all-day entries
+              // OR match by repeatingSessionId + originalTime for confirmed/skipped guides
+              const duplicateReal = effectiveHistory.some((h) => {
+                // Check for repeatingSessionId match first (for guide suppression)
+                const hRid = (h as any).repeatingSessionId as string | undefined | null
+                const hOt = (h as any).originalTime as number | undefined | null
+                if (hRid === rule.id && Number.isFinite(hOt as number)) {
+                  // For all-day entries, originalTime is stored as UTC midnight
+                  // Use getUtcDateKey for timezone-agnostic comparison
+                  if (isEntryAllDay(h)) {
+                    const entryDateKey = getUtcDateKey(hOt as number)
+                    if (entryDateKey === columnDateKey) {
+                      return true
+                    }
+                  } else {
+                    // For time-based entries, use timezone-aware comparison
+                    const otDateKey = getDateKeyInTimezone(hOt as number, displayTimezone)
+                    const guideOccDateKey = getDateKeyInTimezone(dayStart, displayTimezone)
+                    if (otDateKey === guideOccDateKey) {
+                      return true
+                    }
+                  }
+                }
+                
+                // Fallback: check by all-day entry date + task match for MANUALLY CREATED entries only
+                // If the entry has a repeatingSessionId, it should only suppress via the originalTime check above
+                // (so dragging a linked entry to another date doesn't suppress that date's guide)
+                if (hRid) return false
+                
+                if (!isEntryAllDay(h)) return false
+                
+                // Get entry's date key the same way it's used for column placement
+                const entryDateKey = getUtcDateKey(h.startedAt)
+                if (entryDateKey !== columnDateKey) return false
+                
+                // Same date - now check if it's the same task
+                const sameTask = (h.taskName?.trim() || 'Session') === taskName
+                const sameGoal = (h.goalName ?? null) === goalName
+                const sameBucket = (h.bucketName ?? null) === bucketName
+                return sameTask && sameGoal && sameBucket
+              })
+              if (duplicateReal) return
               const entry: HistoryEntry = {
-                id: `repeat:${rule.id}:${dayStart}:allday`,
+                id: guideEntryId,
                 taskName,
                 elapsed: Math.max(endedAt - startedAt, 1),
                 startedAt,
                 endedAt,
+                isAllDay: true,
                 goalName,
                 bucketName,
                 goalId: null,
@@ -9834,15 +10158,36 @@ useEffect(() => {
                 entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
                 notes: '',
                 subtasks: [],
+                repeatingSessionId: rule.id,
               }
               const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
               const label = deriveEntryTaskName(entry)
               const colorCss = meta.colorInfo?.gradient?.css ?? meta.colorInfo?.solidColor ?? getPaletteColorForLabel(label)
               const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
+              // Skip if we already have a guide with the same entry ID (dedup safety)
+              if (raws.some((r) => r.entry.id === entry.id)) return
+              
+              // Calculate column position based on actual timestamps (handles drag preview)
+              let guideColStart: number
+              let guideColEnd: number
+              if (isBeingDragged) {
+                // Use UTC date key from the preview timestamps
+                const previewStartDateKey = getUtcDateKey(startedAt)
+                const previewEndDateKey = getUtcDateKey(endedAt)
+                guideColStart = dayDateKeys.indexOf(previewStartDateKey)
+                const endColIdx = dayDateKeys.indexOf(previewEndDateKey)
+                guideColEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
+                // If start not found, clamp to visible range
+                if (guideColStart < 0) guideColStart = 0
+              } else {
+                guideColStart = columnIndex
+                guideColEnd = Math.min(dayStarts.length, columnIndex + 1)
+              }
+              
               raws.push({
                 entry,
-                colStart: columnIndex,
-                colEnd: Math.min(dayStarts.length, columnIndex + 1),
+                colStart: guideColStart,
+                colEnd: guideColEnd,
                 label,
                 colorCss,
                 baseColor,
@@ -9938,28 +10283,28 @@ useEffect(() => {
         const raw: RawEvent[] = effectiveHistory
           .map((entry) => {
             // Exclude all‑day entries from the time grid; they render in the all‑day lane
-            if (isAllDayRange(entry.startedAt, entry.endedAt)) return null
+            if (isEntryAllDay(entry)) return null
             const isPreviewed = dragPreview && dragPreview.entryId === entry.id
             const rawStart = isPreviewed ? dragPreview.startedAt : entry.startedAt
             const rawEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
             
-            // Guide tasks show at their scheduled local time (not timezone-adjusted)
-            // Real sessions are timezone-adjusted so they appear in app timezone
-            const isGuideEntry = entry.id.startsWith('repeat:')
-            const previewStart = isGuideEntry ? rawStart : adjustTimestampForTimezone(rawStart)
-            const previewEnd = isGuideEntry ? rawEnd : adjustTimestampForTimezone(rawEnd)
+            // Guide tasks use their scheduled time directly (already in display timezone local time)
+            // Real sessions: since dayStarts are now UTC bounds for the display timezone,
+            // we can use UTC timestamps directly without adjustment
+            const previewStart = rawStart
+            const previewEnd = rawEnd
             
             const clampedStart = Math.max(Math.min(previewStart, previewEnd), startMs)
             const clampedEnd = Math.min(Math.max(previewStart, previewEnd), endMs)
-            // Allow timezone markers (zero duration) to pass through
+            // Timezone markers should have 1 minute duration
             const isTimezoneMarkerEntry = entry.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-            if (clampedEnd < clampedStart || (clampedEnd === clampedStart && !isTimezoneMarkerEntry)) {
+            if (clampedEnd < clampedStart) {
               return null
             }
             return {
               entry,
               start: clampedStart,
-              end: isTimezoneMarkerEntry ? clampedStart : clampedEnd, // Ensure timezone markers have start === end
+              end: isTimezoneMarkerEntry ? Math.min(clampedStart + MINUTE_MS, endMs) : clampedEnd,
               previewStart,
               previewEnd,
             }
@@ -9968,12 +10313,13 @@ useEffect(() => {
           .sort((a, b) => (a.start === b.start ? a.end - b.end : a.start - b.start))
 
         // Build lookup for confirmed occurrences and exceptions to suppress guides
+        // Use display timezone to get date key (must match guide's occurrence key)
         const confirmedKeySet = (() => {
           const set = new Set<string>()
           effectiveHistory.forEach((h) => {
             const rid = (h as any).repeatingSessionId as string | undefined | null
             const ot = (h as any).originalTime as number | undefined | null
-            if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${formatLocalYmd(ot as number)}`)
+            if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${getDateKeyInTimezone(ot as number, displayTimezone)}`)
           })
           return set
         })()
@@ -10005,35 +10351,43 @@ useEffect(() => {
         })()
 
         // Synthesize guide events from repeating session rules for this day
+        // SIMPLE APPROACH: Guides always render at their set time in the DISPLAY timezone.
+        // If a guide is set for 11 PM, it shows at 11 PM regardless of what timezone you view in.
         const guideRaw: RawEvent[] = (() => {
           if (!Array.isArray(repeatingRules) || repeatingRules.length === 0) return []
-          // Resolve basic day info (not needed explicitly here; kept via startMs)
 
-          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${formatLocalYmd(baseMs)}`
+          // Get the date key for this column in the display timezone
+          const displayDateKey = getDateKeyInTimezone(startMs, displayTimezone)
 
-          const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
+          // Check if a rule is scheduled for a given date key (uses date directly, no timezone conversion)
+          const isRuleScheduledForDateKey = (rule: RepeatingSessionRule, dateKey: string) => {
             if (!rule.isActive) return false
-            if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
+            // For interval checking, use display timezone midnight
+            const dayStartForInterval = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
+            if (rule.frequency === 'daily') {
+              return ruleIntervalAllowsDay(rule, dayStartForInterval)
+            }
             if (rule.frequency === 'weekly') {
-              const d = new Date(dayStart)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay()) && ruleIntervalAllowsDay(rule, dayStart)
+              const dow = getDayOfWeekFromDateKey(dateKey)
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(dow) && ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             if (rule.frequency === 'monthly') {
-              return matchesMonthlyDay(rule, dayStart) && ruleIntervalAllowsDay(rule, dayStart)
+              return matchesMonthlyDayWithDateKey(rule, dateKey) && ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             if (rule.frequency === 'annually') {
-              const dayKey = monthDayKey(dayStart)
+              const dayKey = monthDayKeyFromDateKey(dateKey)
               const ruleKey = ruleMonthDayKey(rule)
-              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
+              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             return false
           }
 
-          const isWithinBoundaries = (rule: RepeatingSessionRule, baseDayStart: number) => {
-            // Compute the scheduled startedAt for this occurrence
+          const isWithinBoundariesForDateKey = (rule: RepeatingSessionRule, dateKey: string) => {
+            // Compute the scheduled startedAt using DISPLAY timezone (guide shows at set time in display tz)
+            const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
-            const scheduledStart = baseDayStart + timeOfDayMin * MINUTE_MS
-            // Start boundary: prefer explicit startAtMs (inclusive). If absent, fall back to createdAtMs (strictly after)
+            const scheduledStart = displayDayStart + timeOfDayMin * MINUTE_MS
+            // Start boundary
             const startAtMs = (rule as any).startAtMs as number | undefined
             if (Number.isFinite(startAtMs as number)) {
               if (scheduledStart < (startAtMs as number)) return false
@@ -10043,40 +10397,65 @@ useEffect(() => {
                 if (scheduledStart <= (createdMs as number)) return false
               }
             }
-            // End boundary: inclusive (allow selected occurrence when end_date equals its start time)
+            // End boundary
             const endAtMs = (rule as any).endAtMs as number | undefined
             if (Number.isFinite(endAtMs as number)) {
               if (scheduledStart > (endAtMs as number)) return false
             }
             return true
           }
+          
+          // Helper to check if a rule is all-day (for time grid exclusion)
+          const isAllDayRuleForTimeGrid = (rule: RepeatingSessionRule): boolean => {
+            if (rule.isAllDay === true) return true
+            const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
+            const durationMinutes = Math.max(1, rule.durationMinutes ?? 60)
+            if (timeOfDayMin === 0 && durationMinutes >= 1440) return true
+            // Heuristic: duration >= 24 hours means all-day regardless of start time
+            if (durationMinutes >= 1440) return true
+            return false
+          }
 
-          const buildGuideForDay = (rule: RepeatingSessionRule, baseDayStart: number): RawEvent | null => {
+          // Build a guide using DISPLAY timezone - guide shows at its set wall-clock time
+          // (e.g., a 2pm rule always shows at 2pm in whatever timezone you're viewing)
+          const buildGuideForDateKey = (rule: RepeatingSessionRule, dateKey: string): RawEvent | null => {
+            // Skip all-day rules - they render in the all-day section, not time grid
+            if (isAllDayRuleForTimeGrid(rule)) return null
+            
+            // Use DISPLAY timezone for computing guide position
+            // timeOfDayMinutes is the wall-clock time (e.g., 840 = 2pm), applied to display timezone
+            const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
+            
             // Suppression by confirmed/exception for this occurrence date
-            const occKey = makeOccurrenceKey(rule.id, baseDayStart)
+            const occKey = `${rule.id}:${dateKey}`
             if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return null
-            // Fallback suppression if an identical real session exists for this occurrence's full timing
-            const startedAt = baseDayStart + Math.max(0, Math.min(1439, rule.timeOfDayMinutes)) * MINUTE_MS
-            // Suppress if this occurrence has been linked already in session_history
+            
+            // Compute start time: display timezone midnight + timeOfDayMinutes
+            const startedAt = displayDayStart + Math.max(0, Math.min(1439, rule.timeOfDayMinutes)) * MINUTE_MS
+            // Suppress if this occurrence has been linked already
             if (coveredOriginalSet.has(`${rule.id}:${startedAt}`)) return null
+            
             const durationMs = Math.max(1, (rule.durationMinutes ?? 60) * MINUTE_MS)
-            // Allow crossing midnight: DO NOT clamp to end of day here
             const endedAt = startedAt + durationMs
-            if (isAllDayRange(startedAt, endedAt)) {
-              return null
-            }
-            const task = (rule.taskName?.trim() || 'Session')
+            
+            if (isAllDayRangeTs(startedAt, endedAt)) return null
+            
+            const task = rule.taskName?.trim() || 'Session'
             const goal = rule.goalName?.trim() || null
             const bucket = rule.bucketName?.trim() || null
-          const TOL = 60 * 1000 // 1 minute tolerance for DST/rounding
-          const duplicateReal = effectiveHistory.some((h) => {
-            const sameLabel = (h.taskName?.trim() || 'Session') === task && (h.goalName ?? null) === goal && (h.bucketName ?? null) === bucket
-            const startMatch = Math.abs(h.startedAt - startedAt) <= TOL
-            const endMatch = Math.abs(h.endedAt - endedAt) <= TOL
-            return sameLabel && startMatch && endMatch
-          })
-          if (duplicateReal) return null
-            const entryId = `repeat:${rule.id}:${baseDayStart}`
+            
+            // Check for duplicate real sessions
+            const TOL = 60 * 1000
+            const duplicateReal = effectiveHistory.some((h) => {
+              const sameLabel = (h.taskName?.trim() || 'Session') === task && (h.goalName ?? null) === goal && (h.bucketName ?? null) === bucket
+              const startMatch = Math.abs(h.startedAt - startedAt) <= TOL
+              const endMatch = Math.abs(h.endedAt - endedAt) <= TOL
+              return sameLabel && startMatch && endMatch
+            })
+            if (duplicateReal) return null
+            
+            // Entry ID uses displayDayStart for consistent identification
+            const entryId = `repeat:${rule.id}:${displayDayStart}`
             const entry: HistoryEntry = {
               id: entryId,
               taskName: task,
@@ -10093,11 +10472,22 @@ useEffect(() => {
               entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
               notes: '',
               subtasks: [],
+              repeatingSessionId: rule.id,
             }
-            // Check if this guide is being dragged and use preview times
+            
+            // Handle drag preview
             const isPreviewed = dragPreview && dragPreview.entryId === entry.id
             const previewStart = isPreviewed ? dragPreview.startedAt : startedAt
             const previewEnd = isPreviewed ? dragPreview.endedAt : endedAt
+            
+            if (isPreviewed) {
+              const overlapsThisColumn = previewStart < endMs && previewEnd > startMs
+              if (!overlapsThisColumn) return null
+            }
+            
+            // Check if guide overlaps this column's time range
+            if (!isPreviewed && (startedAt >= endMs || endedAt <= startMs)) return null
+            
             return {
               entry,
               start: Math.max(previewStart, startMs),
@@ -10109,25 +10499,78 @@ useEffect(() => {
 
           const guides: RawEvent[] = []
 
-          // Today’s scheduled occurrence
+          // Check today's date and previous day (for overnight carryover)
           for (const rule of repeatingRules) {
-            if (!isRuleScheduledForDay(rule, startMs)) continue
-            if (!isWithinBoundaries(rule, startMs)) continue
-            const ev = buildGuideForDay(rule, startMs)
-            if (ev) guides.push(ev)
+            // Check current day
+            if (isRuleScheduledForDateKey(rule, displayDateKey) && isWithinBoundariesForDateKey(rule, displayDateKey)) {
+              const ev = buildGuideForDateKey(rule, displayDateKey)
+              if (ev && !guides.some(g => g.entry.id === ev.entry.id)) {
+                guides.push(ev)
+              }
+            }
+            
+            // Check previous day for overnight carryover
+            const prevDateKey = addDaysToDateKey(displayDateKey, -1)
+            if (isRuleScheduledForDateKey(rule, prevDateKey) && isWithinBoundariesForDateKey(rule, prevDateKey)) {
+              const durationMin = Math.max(1, rule.durationMinutes ?? 60)
+              const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
+              // Only check carryover if the rule crosses midnight
+              if (timeOfDayMin + durationMin > 24 * 60) {
+                const ev = buildGuideForDateKey(rule, prevDateKey)
+                if (ev && !guides.some(g => g.entry.id === ev.entry.id)) {
+                  guides.push(ev)
+                }
+              }
+            }
           }
 
-          // Carryover from previous day if duration crosses midnight
-          const prevStartMs = startMs - DAY_DURATION_MS
-          for (const rule of repeatingRules) {
-            // Only consider rules scheduled on the previous day
-            if (!isRuleScheduledForDay(rule, prevStartMs)) continue
-            if (!isWithinBoundaries(rule, prevStartMs)) continue
-            const durationMin = Math.max(1, (rule.durationMinutes ?? 60))
-            const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
-            if (timeOfDayMin + durationMin <= 24 * 60) continue // no cross-midnight, nothing to carry
-            const ev = buildGuideForDay(rule, prevStartMs)
-            if (ev) guides.push(ev)
+          // Handle dragged guide appearing in a different column than its original day
+          // When a guide is dragged to another day, we need to render it in the target column
+          // NOTE: Skip all-day guides - they should only render in the all-day section, not the time grid
+          if (dragPreview && dragPreview.entryId.startsWith('repeat:') && !dragPreview.entryId.endsWith(':allday')) {
+            const previewStart = dragPreview.startedAt
+            const previewEnd = dragPreview.endedAt
+            // Check if the dragged guide overlaps with this column's day range
+            const overlapsThisColumn = previewStart < endMs && previewEnd > startMs
+            // Check if we already have this guide in the guides array (same entry ID)
+            const alreadyInGuides = guides.some((g) => g.entry.id === dragPreview.entryId)
+            if (overlapsThisColumn && !alreadyInGuides) {
+              // Parse the guide entry ID to reconstruct the entry
+              const parts = dragPreview.entryId.split(':')
+              const ruleId = parts[1]
+              // parts[2] is the original day start (not needed here, just for ID parsing)
+              const rule = repeatingRules.find((r) => r.id === ruleId)
+              if (rule) {
+                // Build a synthetic guide entry for this column at the preview position
+                const task = rule.taskName?.trim() || 'Session'
+                const goal = rule.goalName?.trim() || null
+                const bucket = rule.bucketName?.trim() || null
+                const entry: HistoryEntry = {
+                  id: dragPreview.entryId,
+                  taskName: task,
+                  elapsed: Math.max(previewEnd - previewStart, 1),
+                  startedAt: previewStart,
+                  endedAt: previewEnd,
+                  goalName: goal,
+                  bucketName: bucket,
+                  goalId: null,
+                  bucketId: null,
+                  taskId: null,
+                  goalSurface: DEFAULT_SURFACE_STYLE,
+                  bucketSurface: null,
+                  entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
+                  notes: '',
+                  subtasks: [],
+                }
+                guides.push({
+                  entry,
+                  start: Math.max(previewStart, startMs),
+                  end: Math.min(previewEnd, endMs),
+                  previewStart,
+                  previewEnd,
+                })
+              }
+            }
           }
 
           return guides
@@ -10392,11 +10835,8 @@ useEffect(() => {
           const isGuide = info.entry.id.startsWith('repeat:')
           const isPlanned = !!(info.entry as any).futureSession
           
-          // Guides show at scheduled local time (format without timezone)
-          // Real sessions are timezone-adjusted (format as local since already adjusted)
-          const rangeLabel = isGuide
-            ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
-            : `${formatAdjustedTime(info.previewStart)} — ${formatAdjustedTime(info.previewEnd)}`
+          // Both guides and real sessions show times in the display timezone
+          const rangeLabel = `${formatTimeOfDay(info.previewStart, displayTimezone, use24HourTime)} — ${formatTimeOfDay(info.previewEnd, displayTimezone, use24HourTime)}`
 
           const duration = Math.max(info.end - info.start, 1)
           const durationScore = Math.max(0, Math.round((DAY_DURATION_MS - duration) / MINUTE_MS))
@@ -10430,11 +10870,8 @@ useEffect(() => {
       }
 
       // Set CSS var for column count via inline style on container later
-      const todayMidnight = (() => {
-        const t = new Date()
-        t.setHours(0, 0, 0, 0)
-        return t.getTime()
-      })()
+      // Use display timezone for today detection to match dayStarts
+      const todayMidnight = getMidnightUtcForDateInTimezone(getDateKeyInTimezone(Date.now(), displayTimezone), displayTimezone)
 
       const handleCalendarEventPointerDown = (
         entry: HistoryEntry,
@@ -10715,14 +11152,12 @@ useEffect(() => {
             const preview = dragPreviewRef.current
             if (s && preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
               dragPreventClickRef.current = true
-              // For existing entries (non-guides), the drag calculation uses system timezone dayStarts,
-              // and real sessions are displayed with timezone adjustment, so no conversion needed.
-              // For guide materializations: the preview is calculated using system timezone dayStarts.
-              // Guide timestamps represent intended LOCAL time, so we need to unadjust for storage.
+              // Since dayStarts are now computed in display timezone (UTC bounds),
+              // preview timestamps are already in UTC - no conversion needed
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
-                const storedStartedAt = unadjustTimestampForTimezone(preview.startedAt)
-                const storedEndedAt = unadjustTimestampForTimezone(preview.endedAt)
+                const storedStartedAt = preview.startedAt
+                const storedEndedAt = preview.endedAt
                 flushSync(() => {
                   updateHistory((current) => {
                     const materialized = {
@@ -10741,7 +11176,7 @@ useEffect(() => {
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
-                // Existing real entry - preview values are already correct
+                // Existing real entry - preview values are already UTC
                 const finalStartedAt = preview.startedAt
                 const finalEndedAt = preview.endedAt
                 flushSync(() => {
@@ -10761,18 +11196,18 @@ useEffect(() => {
                       : target.futureSession && nowInPast ? false
                       : target.futureSession
                     const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-                    const finalEnd = isTimezoneMarkerEntry ? finalStartedAt : finalEndedAt
+                    const finalEnd = isTimezoneMarkerEntry ? finalStartedAt + MINUTE_MS : finalEndedAt
                     next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEnd, elapsed: Math.max(finalEnd - finalStartedAt, 1), futureSession: isFuture }
                     return next
                   })
                 })
               }
             } else if (guideMaterialization && s) {
-              // Guide held but not moved - materialize at same visual position.
-              // Guide timestamps represent intended LOCAL time, unadjust for storage.
+              // Guide held but not moved - materialize at same visual position
+              // Guide timestamps are already UTC in the new system
               const { realEntry, ruleId, ymd } = guideMaterialization
-              const storedStartedAt = unadjustTimestampForTimezone(realEntry.startedAt)
-              const storedEndedAt = unadjustTimestampForTimezone(realEntry.endedAt)
+              const storedStartedAt = realEntry.startedAt
+              const storedEndedAt = realEntry.endedAt
               const materializedEntry = {
                 ...realEntry,
                 startedAt: storedStartedAt,
@@ -10901,15 +11336,19 @@ useEffect(() => {
                   }}
                   onPointerDown={(pev) => {
                     if (pev.button !== 0) return
+                    // Check if another interaction is already active
+                    const currentMode = calendarInteractionModeRef.current
+                    if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
                     // Start horizontal drag to move all-day block across days (after hold)
-                    pev.preventDefault(); pev.stopPropagation(); handleCloseCalendarPreview()
+                    pev.stopPropagation(); handleCloseCalendarPreview()
                     const track = calendarAllDayRef.current
-                    if (!track) return
+                    const area = calendarDaysAreaRef.current
+                    if (!track || !area) return
                     const rect = track.getBoundingClientRect()
                     if (!(Number.isFinite(rect.width) && rect.width > 0 && dayStarts.length > 0)) return
                     const pointerId = pev.pointerId
+                    let mode: 'pending' | 'dragging' | 'panning' = 'pending'
                     let moved = false
-                    let activated = false
                     const startX = pev.clientX
                     const startY = pev.clientY
                     const dayWidth = rect.width / Math.max(1, dayStarts.length)
@@ -10920,37 +11359,102 @@ useEffect(() => {
                     const initialStart = bar.entry.startedAt
                     const initialEnd = bar.entry.endedAt
                     let holdTimer: number | null = null
+                    
                     const activateDrag = () => {
-                      if (activated) return
-                      activated = true
+                      if (mode !== 'pending') return
+                      mode = 'dragging'
+                      calendarInteractionModeRef.current = 'dragging'
                       try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
                     }
+                    
+                    const startPan = () => {
+                      if (mode !== 'pending') return
+                      mode = 'panning'
+                      calendarInteractionModeRef.current = 'panning'
+                      // Clear hold timer
+                      if (holdTimer !== null) {
+                        try { window.clearTimeout(holdTimer) } catch {}
+                        holdTimer = null
+                      }
+                      const areaRect = area.getBoundingClientRect()
+                      if (areaRect.width <= 0) return
+                      const dayCount = calendarView === '3d'
+                        ? Math.max(2, Math.min(multiDayCount, 14))
+                        : calendarView === 'week' ? 7 : 1
+                      stopCalendarPanAnimation()
+                      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+                      const daysEl = calendarDaysRef.current
+                      const hdrEl = calendarHeadersRef.current
+                      const allDayEl = calendarAllDayRef.current
+                      if (daysEl) daysEl.style.transition = ''
+                      if (hdrEl) hdrEl.style.transition = ''
+                      if (allDayEl) allDayEl.style.transition = ''
+                      resetCalendarPanTransform()
+                      const baseOffset = calendarPanDesiredOffsetRef.current
+                      calendarDragRef.current = {
+                        pointerId,
+                        startX,
+                        startY,
+                        startTime: now,
+                        areaWidth: areaRect.width,
+                        dayCount,
+                        baseOffset,
+                        mode: 'hdrag',
+                        lastAppliedDx: 0,
+                      }
+                      calendarEventDragRef.current = null
+                      try { area.setPointerCapture?.(pointerId) } catch {}
+                      setPageScrollLock(true)
+                    }
+                    
                     const onMove = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
                       const dx = e.clientX - startX
                       const dy = e.clientY - startY
-                      // Cancel hold timer if movement exceeds threshold before activation
-                      if (!activated && Math.hypot(dx, dy) > 6) {
-                        if (holdTimer !== null) {
-                          try { window.clearTimeout(holdTimer) } catch {}
-                          holdTimer = null
+                      
+                      if (mode === 'pending') {
+                        // Still waiting - check if we should transition to pan
+                        if (hasMovedPastThreshold(dx, dy, 8)) {
+                          startPan()
+                          try { e.preventDefault() } catch {}
                         }
                         return
                       }
-                      if (!activated) return
-                      const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
-                      const pointerIndex = clampColumnIndex(rawPointerIndex)
-                      const deltaDays = pointerIndex - pointerStartIndex
-                      if (Math.abs(dx) > 4 && !moved) { moved = true; dragPreventClickRef.current = true }
-                      if (!moved) return
-                      const nextStart = initialStart + deltaDays * DAY_DURATION_MS
-                      const nextEnd = initialEnd + deltaDays * DAY_DURATION_MS
-                      const current = dragPreviewRef.current
-                      if (current && current.entryId === bar.entry.id && current.startedAt === nextStart && current.endedAt === nextEnd) return
-                      const preview = { entryId: bar.entry.id, startedAt: nextStart, endedAt: nextEnd }
-                      dragPreviewRef.current = preview
-                      setDragPreview(preview)
-                      try { e.preventDefault() } catch {}
+                      
+                      if (mode === 'panning') {
+                        // Handle pan move
+                        const state = calendarDragRef.current
+                        if (!state || e.pointerId !== state.pointerId) return
+                        const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                        if (!Number.isFinite(panDayWidth) || panDayWidth <= 0) return
+                        try { e.preventDefault() } catch {}
+                        const constrainedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                        state.lastAppliedDx = constrainedDx
+                        const totalPx = calendarBaseTranslateRef.current + constrainedDx
+                        const daysEl = calendarDaysRef.current
+                        const hdrEl = calendarHeadersRef.current
+                        const allDayEl = calendarAllDayRef.current
+                        if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                        if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                        if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
+                        return
+                      }
+                      
+                      if (mode === 'dragging') {
+                        const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
+                        const pointerIndex = clampColumnIndex(rawPointerIndex)
+                        const deltaDays = pointerIndex - pointerStartIndex
+                        if (Math.abs(dx) > 4 && !moved) { moved = true; dragPreventClickRef.current = true }
+                        if (!moved) return
+                        const nextStart = initialStart + deltaDays * DAY_DURATION_MS
+                        const nextEnd = initialEnd + deltaDays * DAY_DURATION_MS
+                        const current = dragPreviewRef.current
+                        if (current && current.entryId === bar.entry.id && current.startedAt === nextStart && current.endedAt === nextEnd) return
+                        const preview = { entryId: bar.entry.id, startedAt: nextStart, endedAt: nextEnd }
+                        dragPreviewRef.current = preview
+                        setDragPreview(preview)
+                        try { e.preventDefault() } catch {}
+                      }
                     }
                     const onUp = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
@@ -10961,6 +11465,34 @@ useEffect(() => {
                       window.removeEventListener('pointermove', onMove)
                       window.removeEventListener('pointerup', onUp)
                       window.removeEventListener('pointercancel', onUp)
+                      
+                      if (mode === 'panning') {
+                        // Finish pan
+                        const state = calendarDragRef.current
+                        try { area.releasePointerCapture?.(pointerId) } catch {}
+                        if (state && state.pointerId === pointerId) {
+                          const dx = e.clientX - state.startX
+                          const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                          if (Number.isFinite(panDayWidth) && panDayWidth > 0) {
+                            const appliedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                            state.lastAppliedDx = appliedDx
+                            const totalPx = calendarBaseTranslateRef.current + appliedDx
+                            const daysEl = calendarDaysRef.current
+                            const hdrEl = calendarHeadersRef.current
+                            const allDayEl = calendarAllDayRef.current
+                            if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                            if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                            if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
+                            const { snap } = resolvePanSnap(state, dx, panDayWidth, calendarView, appliedDx)
+                            animateCalendarPan(snap, panDayWidth, state.baseOffset)
+                          }
+                        }
+                        calendarDragRef.current = null
+                        calendarInteractionModeRef.current = null
+                        setPageScrollLock(false)
+                        return
+                      }
+                      
                       try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (moved && preview && preview.entryId === bar.entry.id && (preview.startedAt !== initialStart || preview.endedAt !== initialEnd)) {
@@ -10968,19 +11500,56 @@ useEffect(() => {
                         // (dayStarts uses system local time, so no unadjust needed for existing entries)
                         const finalStartedAt = preview.startedAt
                         const finalEndedAt = preview.endedAt
-                        flushSync(() => {
-                          updateHistory((current) => {
-                            const idx = current.findIndex((h) => h.id === bar.entry.id)
-                            if (idx === -1) return current
-                            const target = current[idx]
-                            const next = [...current]
-                            next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - finalStartedAt, 1) }
-                            return next
+                        
+                        // Check if this is a guide (synthetic entry from repeating rule)
+                        if (bar.isGuide && bar.entry.id.startsWith('repeat:')) {
+                          // For guides, create a new future session entry instead of updating
+                          // Extract rule ID and original dayStart from guide ID format: repeat:${ruleId}:${dayStart}:allday
+                          const guideParts = bar.entry.id.split(':')
+                          const guideRuleId = guideParts[1] ?? null
+                          const guideOriginalDayStart = guideParts[2] ? Number(guideParts[2]) : null
+                          const isAllDayGuide = guideParts.length >= 4 && guideParts[3] === 'allday'
+                          // For all-day guides, convert to UTC midnight for timezone-agnostic suppression
+                          let originalTimeForStorage = guideOriginalDayStart
+                          if (isAllDayGuide && guideOriginalDayStart != null) {
+                            const ymd = getDateKeyInTimezone(guideOriginalDayStart, displayTimezone)
+                            originalTimeForStorage = dateKeyToUtcMidnight(ymd)
+                          }
+                          const newEntry: HistoryEntry = {
+                            ...bar.entry,
+                            id: makeHistoryId(),
+                            startedAt: finalStartedAt,
+                            endedAt: finalEndedAt,
+                            elapsed: Math.max(finalEndedAt - finalStartedAt, 1),
+                            futureSession: true,
+                            // Link to repeating rule so the original guide date gets suppressed
+                            repeatingSessionId: guideRuleId,
+                            originalTime: originalTimeForStorage,
+                          }
+                          flushSync(() => {
+                            updateHistory((current) => {
+                              const next = [...current, newEntry]
+                              next.sort((a, b) => a.startedAt - b.startedAt)
+                              return next
+                            })
                           })
-                        })
+                        } else {
+                          // For real entries, update in place
+                          flushSync(() => {
+                            updateHistory((current) => {
+                              const idx = current.findIndex((h) => h.id === bar.entry.id)
+                              if (idx === -1) return current
+                              const target = current[idx]
+                              const next = [...current]
+                              next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - finalStartedAt, 1) }
+                              return next
+                            })
+                          })
+                        }
                       }
                       dragPreviewRef.current = null
                       setDragPreview(null)
+                      calendarInteractionModeRef.current = null
                     }
                     holdTimer = window.setTimeout(() => {
                       holdTimer = null
@@ -10997,30 +11566,279 @@ useEffect(() => {
                   </div>
                 </div>
               )})}
-              {/* Click/creation hit areas per day (span all rows) */}
-              {dayStarts.map((start, i) => (
-                <button
-                  key={`adh-${i}`}
-                  type="button"
-                  className="calendar-allday-hit"
-                  style={{ gridColumn: `${i + 1} / ${i + 2}`, gridRow: `1 / ${allDayTrackRows + 1}` }}
-                  onClick={(ev) => {
-                    ev.preventDefault(); ev.stopPropagation()
-                    const newId = makeHistoryId()
-                    const dayStart = start
-                    const newEntry: HistoryEntry = {
-                      id: newId, taskName: '', elapsed: DAY_DURATION_MS,
-                      startedAt: dayStart, endedAt: dayStart + DAY_DURATION_MS,
-                      goalName: LIFE_ROUTINES_NAME, bucketName: null, goalId: LIFE_ROUTINES_GOAL_ID, bucketId: null, taskId: null,
-                      goalSurface: LIFE_ROUTINES_SURFACE, bucketSurface: null, notes: '', subtasks: [],
+              {/* Hold-to-create hit area for all-day sessions (single element spanning all days) */}
+              <div
+                className="calendar-allday-hit-area"
+                style={{ gridColumn: `1 / ${dayStarts.length + 1}`, gridRow: `1 / ${allDayTrackRows + 1}` }}
+                onPointerDown={(pev) => {
+                  if (pev.button !== 0) return
+                  // Check if another interaction is already active
+                  const currentMode = calendarInteractionModeRef.current
+                  if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
+                  // Ignore if starting on an existing all-day event
+                  const rawTarget = pev.target as HTMLElement | null
+                  if (rawTarget && rawTarget.closest('.calendar-allday-event')) return
+                  pev.stopPropagation()
+
+                  const track = calendarAllDayRef.current
+                  const area = calendarDaysAreaRef.current
+                  if (!track || !area) return
+                  const rect = track.getBoundingClientRect()
+                  if (!(Number.isFinite(rect.width) && rect.width > 0 && dayStarts.length > 0)) return
+
+                  const pointerId = pev.pointerId
+                  const startX = pev.clientX
+                  const startY = pev.clientY
+                  const dayWidth = rect.width / Math.max(1, dayStarts.length)
+                  const trackLeft = rect.left
+                  const clampColumnIndex = (value: number) =>
+                    Math.max(0, Math.min(dayStarts.length - 1, Number.isFinite(value) ? value : 0))
+                  const pointerStartIndex = clampColumnIndex(Math.floor((startX - trackLeft) / dayWidth))
+
+                  // Set interaction mode to pending
+                  calendarInteractionModeRef.current = 'pending'
+
+                  let creatingNewAllDay = false
+                  let newEntryId: string | null = null
+                  let initialColIndex = pointerStartIndex
+                  let currentColIndex = pointerStartIndex
+
+                  const startCreate = () => {
+                    if (calendarInteractionModeRef.current !== 'pending') return
+                    calendarInteractionModeRef.current = 'creating'
+                    creatingNewAllDay = true
+                    newEntryId = makeHistoryId()
+                    // Initial preview: single day
+                    const dateKey = dayDateKeys[initialColIndex]
+                    const utcMidnight = dateKeyToUtcMidnight(dateKey)
+                    const preview = { entryId: 'new-allday', startedAt: utcMidnight, endedAt: utcMidnight + DAY_DURATION_MS }
+                    dragPreviewRef.current = preview
+                    setDragPreview(preview)
+                    setPageScrollLock(true)
+                    try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
+                  }
+
+                  const startPan = () => {
+                    if (calendarInteractionModeRef.current !== 'pending') return
+                    calendarInteractionModeRef.current = 'panning'
+                    if (calendarHoldTimerRef.current !== null) {
+                      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                      calendarHoldTimerRef.current = null
                     }
-                    updateHistory((current) => { const next = [...current, newEntry]; next.sort((a, b) => a.startedAt - b.startedAt); return next })
-                    setPendingNewHistoryId(newId)
-                    setTimeout(() => { openCalendarInspector(newEntry) }, 0)
-                  }}
-                  aria-label={`Create all-day session for ${new Date(start).toDateString()}`}
-                />
-              ))}
+                    const areaRect = area.getBoundingClientRect()
+                    if (areaRect.width <= 0) return
+                    const dayCount = calendarView === '3d'
+                      ? Math.max(2, Math.min(multiDayCount, 14))
+                      : calendarView === 'week' ? 7 : 1
+                    stopCalendarPanAnimation()
+                    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+                    const daysEl = calendarDaysRef.current
+                    const hdrEl = calendarHeadersRef.current
+                    if (daysEl) daysEl.style.transition = ''
+                    if (hdrEl) hdrEl.style.transition = ''
+                    resetCalendarPanTransform()
+                    const baseOffset = calendarPanDesiredOffsetRef.current
+                    calendarDragRef.current = {
+                      pointerId,
+                      startX,
+                      startY,
+                      startTime: now,
+                      areaWidth: areaRect.width,
+                      dayCount,
+                      baseOffset,
+                      mode: 'hdrag',
+                      lastAppliedDx: 0,
+                    }
+                    try { area.setPointerCapture?.(pointerId) } catch {}
+                    setPageScrollLock(true)
+                  }
+
+                  const onMove = (e: PointerEvent) => {
+                    if (e.pointerId !== pointerId) return
+                    const dx = e.clientX - startX
+                    const dy = e.clientY - startY
+                    const mode = calendarInteractionModeRef.current
+
+                    if (mode === 'pending') {
+                      // Movement before hold timer - start panning
+                      if (hasMovedPastThreshold(dx, dy, 8)) {
+                        startPan()
+                        try { e.preventDefault() } catch {}
+                        return
+                      }
+                      return
+                    }
+
+                    if (mode === 'panning') {
+                      const state = calendarDragRef.current
+                      if (!state || e.pointerId !== state.pointerId) return
+                      const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                      if (!Number.isFinite(panDayWidth) || panDayWidth <= 0) return
+                      try { e.preventDefault() } catch {}
+                      const constrainedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                      state.lastAppliedDx = constrainedDx
+                      const totalPx = calendarBaseTranslateRef.current + constrainedDx
+                      const daysEl = calendarDaysRef.current
+                      const allDayEl = calendarAllDayRef.current
+                      if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                      const hdrEl = calendarHeadersRef.current
+                      if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                      if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
+                      return
+                    }
+
+                    if (mode === 'creating' && creatingNewAllDay) {
+                      try { e.preventDefault() } catch {}
+                      const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
+                      const pointerIndex = clampColumnIndex(rawPointerIndex)
+                      if (pointerIndex === currentColIndex) return
+                      currentColIndex = pointerIndex
+                      // Calculate start and end columns (can drag left or right)
+                      const startCol = Math.min(initialColIndex, currentColIndex)
+                      const endCol = Math.max(initialColIndex, currentColIndex)
+                      const startDateKey = dayDateKeys[startCol]
+                      const endDateKey = dayDateKeys[endCol]
+                      const startUtc = dateKeyToUtcMidnight(startDateKey)
+                      const endUtc = dateKeyToUtcMidnight(endDateKey) + DAY_DURATION_MS
+                      const preview = { entryId: 'new-allday', startedAt: startUtc, endedAt: endUtc }
+                      dragPreviewRef.current = preview
+                      setDragPreview(preview)
+                      return
+                    }
+                  }
+
+                  const onUp = (e: PointerEvent) => {
+                    if (e.pointerId !== pointerId) return
+                    if (calendarHoldTimerRef.current !== null) {
+                      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                      calendarHoldTimerRef.current = null
+                    }
+                    window.removeEventListener('pointermove', onMove)
+                    window.removeEventListener('pointerup', onUp)
+                    window.removeEventListener('pointercancel', onUp)
+                    try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
+
+                    const finalMode = calendarInteractionModeRef.current
+
+                    if (finalMode === 'panning') {
+                      const state = calendarDragRef.current
+                      if (state && e.pointerId === state.pointerId) {
+                        area.releasePointerCapture?.(state.pointerId)
+                        const dx = e.clientX - state.startX
+                        const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                        if (Number.isFinite(panDayWidth) && panDayWidth > 0) {
+                          const appliedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                          state.lastAppliedDx = appliedDx
+                          const totalPx = calendarBaseTranslateRef.current + appliedDx
+                          const daysEl = calendarDaysRef.current
+                          if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                          const hdrEl = calendarHeadersRef.current
+                          if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                          const { snap } = resolvePanSnap(state, dx, panDayWidth, calendarView, appliedDx)
+                          animateCalendarPan(snap, panDayWidth, state.baseOffset)
+                        } else {
+                          const base = calendarBaseTranslateRef.current
+                          const daysEl = calendarDaysRef.current
+                          if (daysEl) daysEl.style.transform = `translateX(${base}px)`
+                          const hdrEl = calendarHeadersRef.current
+                          if (hdrEl) hdrEl.style.transform = `translateX(${base}px)`
+                        }
+                      }
+                      calendarDragRef.current = null
+                      setPageScrollLock(false)
+                      calendarInteractionModeRef.current = null
+                      return
+                    }
+
+                    if (finalMode === 'creating' && creatingNewAllDay && newEntryId) {
+                      setPageScrollLock(false)
+                      const preview = dragPreviewRef.current
+                      if (preview && preview.entryId === 'new-allday') {
+                        const startCol = Math.min(initialColIndex, currentColIndex)
+                        const endCol = Math.max(initialColIndex, currentColIndex)
+                        const startDateKey = dayDateKeys[startCol]
+                        const endDateKey = dayDateKeys[endCol]
+                        const startUtc = dateKeyToUtcMidnight(startDateKey)
+                        const endUtc = dateKeyToUtcMidnight(endDateKey) + DAY_DURATION_MS
+                        const elapsed = endUtc - startUtc
+                        const newEntry: HistoryEntry = {
+                          id: newEntryId,
+                          taskName: '',
+                          elapsed,
+                          startedAt: startUtc,
+                          endedAt: endUtc,
+                          goalName: LIFE_ROUTINES_NAME,
+                          bucketName: null,
+                          goalId: LIFE_ROUTINES_GOAL_ID,
+                          bucketId: null,
+                          taskId: null,
+                          goalSurface: LIFE_ROUTINES_SURFACE,
+                          bucketSurface: null,
+                          notes: '',
+                          subtasks: [],
+                          isAllDay: true,
+                        }
+                        flushSync(() => {
+                          updateHistory((current) => {
+                            const next = [...current, newEntry]
+                            next.sort((a, b) => a.startedAt - b.startedAt)
+                            return next
+                          })
+                        })
+                        setPendingNewHistoryId(newEntryId)
+                        setTimeout(() => { openCalendarInspector(newEntry) }, 0)
+                      }
+                      dragPreviewRef.current = null
+                      setDragPreview(null)
+                      calendarInteractionModeRef.current = null
+                      return
+                    }
+
+                    // Mode was pending - just a click, do nothing
+                    calendarInteractionModeRef.current = null
+                    setPageScrollLock(false)
+                  }
+
+                  // Start hold timer for creating
+                  calendarHoldTimerRef.current = window.setTimeout(() => {
+                    calendarHoldTimerRef.current = null
+                    startCreate()
+                  }, DRAG_HOLD_DURATION_MS)
+
+                  window.addEventListener('pointermove', onMove)
+                  window.addEventListener('pointerup', onUp)
+                  window.addEventListener('pointercancel', onUp)
+                }}
+                aria-label="Hold to create all-day session"
+              />
+              {/* Preview element for new all-day session being created */}
+              {(() => {
+                const preview = dragPreview
+                if (!preview || preview.entryId !== 'new-allday') return null
+                // Calculate columns from UTC midnight timestamps
+                const startDateKey = getUtcDateKey(preview.startedAt)
+                const endDateKey = getUtcDateKey(preview.endedAt)
+                const colStart = dayDateKeys.indexOf(startDateKey)
+                const endColIdx = dayDateKeys.indexOf(endDateKey)
+                const colEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
+                if (colStart < 0 || colEnd <= colStart) return null
+                return (
+                  <div
+                    className="calendar-allday-event calendar-allday-event--preview"
+                    style={{
+                      gridColumn: `${colStart + 1} / ${colEnd + 1}`,
+                      gridRow: `${allDayTrackRows}`,
+                      background: 'rgba(104, 124, 255, 0.6)',
+                      pointerEvents: 'none',
+                    }}
+                    aria-hidden
+                  >
+                    <div className="calendar-allday-event__content">
+                      <div className="calendar-allday-event__title">New session</div>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           </div>
           <div className="calendar-time-axis" aria-hidden>
@@ -11275,9 +12093,9 @@ useEffect(() => {
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (preview && preview.entryId === 'new-entry') {
-                        // Convert from display time back to UTC for storage
-                        const rawStartedAt = unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
-                        const rawEndedAt = unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
+                        // Preview timestamps are already UTC (dayStarts uses display timezone bounds)
+                        const rawStartedAt = Math.min(preview.startedAt, preview.endedAt)
+                        const rawEndedAt = Math.max(preview.startedAt, preview.endedAt)
                         const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
                         const newId = makeHistoryId()
                         const newEntry: HistoryEntry = {
@@ -11504,9 +12322,9 @@ useEffect(() => {
                             const ruleId = parts[1]
                             const dayStart = Number(parts[2])
                             const ymd = formatLocalYmd(dayStart)
-                            // Guide timestamps represent intended LOCAL time, unadjust for storage.
-                            const storedStartedAt = unadjustTimestampForTimezone(ev.entry.startedAt)
-                            const storedEndedAt = unadjustTimestampForTimezone(ev.entry.endedAt)
+                            // Guide timestamps are now UTC (dayStarts uses display timezone bounds)
+                            const storedStartedAt = ev.entry.startedAt
+                            const storedEndedAt = ev.entry.endedAt
                             const newEntry: HistoryEntry = {
                               ...ev.entry,
                               id: makeHistoryId(),
@@ -11594,8 +12412,8 @@ useEffect(() => {
                       if (endClamped <= startClamped) return null
                       const topPct = ((startClamped - dayStart) / DAY_DURATION_MS) * 100
                       const heightPct = Math.max(((endClamped - startClamped) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-                      // Drag preview values are computed from dayStarts (system timezone), so format as local
-                      const label = `${formatAdjustedTime(startClamped)} — ${formatAdjustedTime(endClamped)}`
+                      // Drag preview values are computed from dayStarts (display timezone)
+                      const label = `${formatTimeOfDay(startClamped, displayTimezone, use24HourTime)} — ${formatTimeOfDay(endClamped, displayTimezone, use24HourTime)}`
                       return (
                         <div
                           className="calendar-event calendar-event--dragging"
@@ -11820,11 +12638,8 @@ useEffect(() => {
 
     if (calendarView === 'year') {
       const year = anchorDate.getFullYear()
-      const todayMidnight = (() => {
-        const t = new Date()
-        t.setHours(0, 0, 0, 0)
-        return t.getTime()
-      })()
+      // Use display timezone for today detection
+      const todayDateKeyInDisplayTz = getDateKeyInTimezone(Date.now(), displayTimezone)
 
       const buildYearPanel = (yr: number) => {
         const months = Array.from({ length: 12 }).map((_, idx) => {
@@ -11848,7 +12663,9 @@ useEffect(() => {
             d.setDate(start.getDate() + i)
             d.setHours(0, 0, 0, 0)
             const inMonth = d.getMonth() === idx
-            const isToday = d.getTime() === todayMidnight
+            // Compare date key strings instead of timestamps for accurate today detection
+            const cellDateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const isToday = cellDateKey === todayDateKeyInDisplayTz
             const cell = (
               <div
                 key={`y-${yr}-${idx}-${i}`}
@@ -12026,7 +12843,6 @@ useEffect(() => {
     setHistoryDayOffset,
     navigateByDelta,
     stepSizeByView,
-    adjustTimestampForTimezone,
     formatTime,
     weekStartDay,
     snapToInterval,
@@ -12059,7 +12875,7 @@ useEffect(() => {
   const entry = effectiveHistory.find((h) => h.id === calendarPreview.entryId) || calendarPreview.entrySnapshot || null
     if (!entry) return null
     const dateLabel = (() => {
-      if (isAllDayRangeTs(entry.startedAt, entry.endedAt)) {
+      if (isEntryAllDay(entry)) {
         // All‑day rendering: same‑day => "Mon, Oct 14 · All day"; multi‑day => "Oct 14 – Oct 16"
         const startD = new Date(entry.startedAt)
         const endD = new Date(entry.endedAt)
@@ -12293,8 +13109,15 @@ useEffect(() => {
       if (parts.length < 3) return null
       const ruleId = parts[1]
       const dayStart = Number(parts[2])
-      const ymd = formatLocalYmd(dayStart)
-      return { ruleId, dayStart, ymd }
+      // Check if this is an all-day guide (has ':allday' suffix)
+      const isAllDayGuide = parts.length >= 4 && parts[3] === 'allday'
+      // Use display timezone for date key to match how occurrence keys are built
+      // (confirmedKeySet and excKeySet both use displayTimezone)
+      const ymd = getDateKeyInTimezone(dayStart, displayTimezone)
+      // For all-day guides, compute UTC midnight for storage
+      // (all-day entries use getUtcDateKey for column matching, which expects UTC midnight)
+      const utcMidnight = isAllDayGuide ? dateKeyToUtcMidnight(ymd) : null
+      return { ruleId, dayStart, ymd, isAllDayGuide, utcMidnight }
     })()
     return createPortal(
       <div
@@ -12408,12 +13231,16 @@ useEffect(() => {
               <span className="calendar-popover__repeat-icon calendar-popover__repeat-icon--caret">▸</span>
             </span>
             {(() => {
-              const start = new Date(entry.startedAt)
-              const minutes = start.getHours() * 60 + start.getMinutes()
+              // Use display timezone for wall-clock time extraction
+              const minutes = getMinutesFromMidnightInTimezone(entry.startedAt, displayTimezone)
               const durMin = Math.max(1, Math.round((entry.endedAt - entry.startedAt) / 60000))
-              const dow = start.getDay()
-              const dayStartMs = (() => { const d = new Date(entry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
-              const monthDay = monthDayKey(start.getTime())
+              const timeParts = getTimePartsInTimezone(entry.startedAt, displayTimezone)
+              const dateKey = getDateKeyInTimezone(entry.startedAt, displayTimezone)
+              const dayStartMs = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
+              // Get day of week in display timezone
+              const dowDate = new Date(dayStartMs + 12 * 60 * 60 * 1000) // noon to avoid DST issues
+              const dow = dowDate.getUTCDay()
+              const monthDay = `${String(timeParts.month).padStart(2, '0')}-${String(timeParts.day).padStart(2, '0')}`
               const matches = (r: RepeatingSessionRule) =>
                 r.isActive &&
                 r.timeOfDayMinutes === minutes &&
@@ -12467,10 +13294,10 @@ useEffect(() => {
                       if (isGuide) {
                         // parsedGuide contains ruleId and ymd for this guide
                         if (parsedGuide) {
-                          const guideMinutes = start.getHours() * 60 + start.getMinutes()
-                          const guideDay = new Date(entry.startedAt)
-                          guideDay.setHours(0, 0, 0, 0)
-                          const scheduledStart = guideDay.getTime() + guideMinutes * 60000
+                          const guideMinutes = getMinutesFromMidnightInTimezone(entry.startedAt, displayTimezone)
+                          const guideDateKey = getDateKeyInTimezone(entry.startedAt, displayTimezone)
+                          const guideDayStart = getMidnightUtcForDateInTimezone(guideDateKey, displayTimezone)
+                          const scheduledStart = guideDayStart + guideMinutes * 60000
                           const preciseStart = Math.max(entry.startedAt, scheduledStart)
                           await setRepeatToNoneAfterTimestamp(parsedGuide.ruleId, preciseStart)
                           // Update local cache to reflect new end boundary but keep the rule so this occurrence remains
@@ -12483,25 +13310,28 @@ useEffect(() => {
                         }
                       } else {
                         // Non-guide: if this entry is the seed (rule start), delete by rule id; else fall back to shape deletion
-                        const start = new Date(entry.startedAt)
-                        const minutes = start.getHours() * 60 + start.getMinutes()
+                        const noneMinutes = getMinutesFromMidnightInTimezone(entry.startedAt, displayTimezone)
                         const durMin = Math.max(1, Math.round((entry.endedAt - entry.startedAt) / 60000))
-                        const dow = start.getDay()
+                        const noneDateKey = getDateKeyInTimezone(entry.startedAt, displayTimezone)
+                        const noneDayStartMs = getMidnightUtcForDateInTimezone(noneDateKey, displayTimezone)
+                        // Get day of week in display timezone
+                        const noneDowDate = new Date(noneDayStartMs + 12 * 60 * 60 * 1000)
+                        const noneDow = noneDowDate.getUTCDay()
+                        const noneTimeParts = getTimePartsInTimezone(entry.startedAt, displayTimezone)
+                        const noneMonthDay = `${String(noneTimeParts.month).padStart(2, '0')}-${String(noneTimeParts.day).padStart(2, '0')}`
                         const labelTask = (entry.taskName?.trim() || '')
                         const labelGoal = (entry.goalName?.trim() || null)
                         const labelBucket = (entry.bucketName?.trim() || null)
                         // Compute scheduled start (truncate seconds/ms) to match how rules store startAtMs
-                        const dayStart = new Date(entry.startedAt)
-                        dayStart.setHours(0, 0, 0, 0)
-                        const scheduledStart = dayStart.getTime() + minutes * 60000
+                        const scheduledStart = noneDayStartMs + noneMinutes * 60000
                         const seedRules = repeatingRules.filter((r) => {
                           const labelMatch = (r.taskName?.trim() || '') === labelTask && (r.goalName?.trim() || null) === labelGoal && (r.bucketName?.trim() || null) === labelBucket
-                          const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
+                          const timeMatch = r.timeOfDayMinutes === noneMinutes && r.durationMinutes === durMin
                           const freqMatch =
                             r.frequency === 'daily' ||
-                            (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
-                            (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStart.getTime())) ||
-                            (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
+                            (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(noneDow)) ||
+                            (r.frequency === 'monthly' && matchesMonthlyDay(r, noneDayStartMs)) ||
+                            (r.frequency === 'annually' && ruleMonthDayKey(r) === noneMonthDay)
                           const startAt = (r as any).startAtMs as number | undefined
                           const startMatch = Number.isFinite(startAt as number) && (startAt as number) === scheduledStart
                           return labelMatch && timeMatch && freqMatch && startMatch
@@ -12521,22 +13351,26 @@ useEffect(() => {
                           // Fallback: remove locally by matching shape
                           setRepeatingRules((prev) => prev.filter((r) => {
                             const labelMatch = (r.taskName?.trim() || '') === (entry.taskName?.trim() || '') && (r.goalName?.trim() || null) === (entry.goalName?.trim() || null) && (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
-                            const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
+                            const timeMatch = r.timeOfDayMinutes === noneMinutes && r.durationMinutes === durMin
                             const freqMatch =
                               r.frequency === 'daily' ||
-                              (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
-                              (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStart.getTime())) ||
-                              (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
+                              (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(noneDow)) ||
+                              (r.frequency === 'monthly' && matchesMonthlyDay(r, noneDayStartMs)) ||
+                              (r.frequency === 'annually' && ruleMonthDayKey(r) === noneMonthDay)
                             return !(labelMatch && timeMatch && freqMatch)
                           }))
                         }
                       }
                       return
                     }
-                    const created = await createRepeatingRuleForEntry(entry, val)
+                    const created = await createRepeatingRuleForEntry(entry, val, { displayTimezone })
                     if (created) {
-                      setRepeatingRules((prev) => [...prev, created])
-                      const scheduledStart = computeEntryScheduledStart(entry)
+                      // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
+                      setRepeatingRules((prev) => {
+                        if (prev.some((r) => r.id === created.id)) return prev
+                        return [...prev, created]
+                      })
+                      const scheduledStart = computeEntryScheduledStart(entry, displayTimezone)
                       updateHistory((current) => current.map((h) => (h.id === entry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)))
                     }
                   }}
@@ -12560,22 +13394,29 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                    // Guide timestamps are computed in system timezone (baseDayStart + timeOfDayMinutes).
-                    // Guide timestamps represent intended LOCAL time (e.g., "11 AM wherever I am").
-                    // We need to unadjust them so that when displayed with adjustTimestampForTimezone,
-                    // the session appears at the same visual position as the guide.
-                    const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
-                    const storedEndedAt = unadjustTimestampForTimezone(entry.endedAt)
+                    // For all-day guides, use UTC midnight for storage so getUtcDateKey works correctly
+                    // For regular guides, use the display-timezone timestamps
+                    const storedStartedAt = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : entry.startedAt
+                    const storedEndedAt = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight + DAY_DURATION_MS
+                      : entry.endedAt
+                    // For all-day guides, store originalTime as UTC midnight for timezone-agnostic matching
+                    // For time-based guides, use dayStart (display-timezone midnight)
+                    const originalTimeForKey = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : parsedGuide.dayStart
                     const newEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
                       startedAt: storedStartedAt,
                       endedAt: storedEndedAt,
-                      elapsed: Math.max(entry.endedAt - entry.startedAt, 1),
+                      elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                       repeatingSessionId: parsedGuide.ruleId,
-                      // originalTime must match the guide's time for suppression lookup to work
-                      // (confirmedKeySet uses formatLocalYmd(originalTime) to match guide's dayStart)
-                      originalTime: entry.startedAt,
+                      // For all-day: UTC midnight for timezone-agnostic suppression
+                      // For time-based: dayStart for display-timezone matching
+                      originalTime: originalTimeForKey,
                       futureSession: false,
                     }
                     updateHistory((current) => {
@@ -12605,8 +13446,14 @@ useEffect(() => {
                   onClick={async () => {
                     if (!parsedGuide) return
                     // Create a zero-duration entry to mark this occurrence as resolved without rendering.
-                    // Guide timestamps represent intended LOCAL time, unadjust for storage.
-                    const storedTime = unadjustTimestampForTimezone(entry.startedAt)
+                    // For all-day guides, use UTC midnight; for regular guides, use display-timezone time
+                    const storedTime = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : entry.startedAt
+                    // For all-day guides, store originalTime as UTC midnight for timezone-agnostic matching
+                    const originalTimeForKey = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : parsedGuide.dayStart
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
@@ -12614,8 +13461,8 @@ useEffect(() => {
                       endedAt: storedTime,
                       elapsed: 0,
                       repeatingSessionId: parsedGuide.ruleId,
-                      // originalTime must match the guide's time for suppression lookup to work
-                      originalTime: entry.startedAt,
+                      // For all-day: UTC midnight; for time-based: dayStart
+                      originalTime: originalTimeForKey,
                     }
                     updateHistory((current) => {
                       const next = [...current, zeroEntry]
@@ -12859,12 +13706,11 @@ useEffect(() => {
       currentGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
       currentBucket === TIMEZONE_CHANGE_MARKER
     
-    // Guide entries (repeat:xxx IDs) display without timezone adjustment
-    // Real sessions are timezone-adjusted for display
-    const isGuideEntry = entry.id.startsWith('repeat:')
-    const adjustForDisplay = (ts: number) => isGuideEntry ? ts : adjustTimestampForTimezone(ts)
+    // All timestamps are now UTC - dayStarts uses display timezone bounds
+    // so no adjustment needed for display
+    const adjustForDisplay = (ts: number) => ts
     
-    // Resolve current values - adjust base times for display in the inputs
+    // Resolve current values - timestamps are already in UTC
     const startBase = adjustForDisplay(entry.startedAt)
     const endBase = adjustForDisplay(entry.endedAt)
     const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
@@ -12882,7 +13728,8 @@ useEffect(() => {
       const d = new Date(resolvedStart)
       return d.getHours() * 60 + d.getMinutes()
     })()
-    const isDraftAllDay = isAllDayRangeTs(resolvedStart, resolvedEnd)
+    // Use the entry's isAllDay flag (not timestamp detection) - all-day entries can't be converted to timed and vice versa
+    const isDraftAllDay = entry.isAllDay === true
   // Using inspector pickers for date/time in the editor panel; input-formatted strings no longer needed here
 
     return createPortal(
@@ -13128,7 +13975,6 @@ useEffect(() => {
       document.body,
     )
   }, [
-    adjustTimestampForTimezone,
     calendarEditorEntryId,
     history,
     historyDraft.bucketName,
@@ -13339,15 +14185,10 @@ useEffect(() => {
 
       const preview = dragPreviewRef.current
       if (state.hasMoved && preview) {
-        // For NEW entries: preview is in display time, need to unadjust for storage
-        // For EXISTING entries: preview is already in system timezone space (dayStarts uses system local time)
+        // Preview timestamps are now UTC (dayStarts uses display timezone bounds)
+        const rawStartedAt = Math.min(preview.startedAt, preview.endedAt)
+        const rawEndedAt = Math.max(preview.startedAt, preview.endedAt)
         const isNewEntry = state.entryId === 'new-entry'
-        const rawStartedAt = isNewEntry
-          ? unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
-          : Math.min(preview.startedAt, preview.endedAt)
-        const rawEndedAt = isNewEntry
-          ? unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
-          : Math.max(preview.startedAt, preview.endedAt)
         if (isNewEntry) {
           const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
           const newEntry: HistoryEntry = {
@@ -13550,10 +14391,9 @@ useEffect(() => {
   let calendarInspectorPanel: ReactElement | null = null
   if (calendarInspectorEntryId !== null) {
     if (inspectorEntry) {
-      // Guide entries (repeat:xxx IDs) display without timezone adjustment
-      // Real sessions are timezone-adjusted for display
-      const isInspectorGuide = inspectorEntry.id.startsWith('repeat:')
-      const adjustForDisplay = (ts: number) => isInspectorGuide ? ts : adjustTimestampForTimezone(ts)
+      // All timestamps are now UTC - dayStarts uses display timezone bounds
+      // so no adjustment needed for display
+      const adjustForDisplay = (ts: number) => ts
       
       const startBase = adjustForDisplay(inspectorEntry.startedAt)
       const endBase = adjustForDisplay(inspectorEntry.endedAt)
@@ -13588,11 +14428,16 @@ useEffect(() => {
       const inspectorDurationLabel = formatDuration(Math.max(resolvedEnd - resolvedStart, 0))
 
       const inspectorRepeatControl = (() => {
-        const start = new Date(inspectorEntry.startedAt)
-        const minutes = start.getHours() * 60 + start.getMinutes()
+        // Use display timezone for wall-clock time extraction
+        const minutes = getMinutesFromMidnightInTimezone(inspectorEntry.startedAt, displayTimezone)
         const durMin = Math.max(1, Math.round((inspectorEntry.endedAt - inspectorEntry.startedAt) / 60000))
-        const dow = start.getDay()
-        const dayStartMs = (() => { const d = new Date(inspectorEntry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
+        const inspDateKey = getDateKeyInTimezone(inspectorEntry.startedAt, displayTimezone)
+        const dayStartMs = getMidnightUtcForDateInTimezone(inspDateKey, displayTimezone)
+        // Get day of week in display timezone
+        const inspDowDate = new Date(dayStartMs + 12 * 60 * 60 * 1000)
+        const dow = inspDowDate.getUTCDay()
+        const inspTimeParts = getTimePartsInTimezone(inspectorEntry.startedAt, displayTimezone)
+        const monthDay = `${String(inspTimeParts.month).padStart(2, '0')}-${String(inspTimeParts.day).padStart(2, '0')}`
         const matches = (r: RepeatingSessionRule) =>
           r.isActive &&
           r.timeOfDayMinutes === minutes &&
@@ -13608,7 +14453,6 @@ useEffect(() => {
           (r) => matches(r) && r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow),
         )
         const hasMonthly = repeatingRules.some((r) => matches(r) && r.frequency === 'monthly' && matchesMonthlyDay(r, dayStartMs))
-        const monthDay = monthDayKey(inspectorEntry.startedAt)
         const hasAnnual = repeatingRules.some((r) => matches(r) && r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
         const currentVal: 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom' =
           hasCustom
@@ -13670,10 +14514,14 @@ useEffect(() => {
                   }
                   return
                 }
-                const created = await createRepeatingRuleForEntry(inspectorEntry, val)
+                const created = await createRepeatingRuleForEntry(inspectorEntry, val, { displayTimezone })
                 if (created) {
-                  setRepeatingRules((prev) => [...prev, created])
-                  const scheduledStart = computeEntryScheduledStart(inspectorEntry)
+                  // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
+                  setRepeatingRules((prev) => {
+                    if (prev.some((r) => r.id === created.id)) return prev
+                    return [...prev, created]
+                  })
+                  const scheduledStart = computeEntryScheduledStart(inspectorEntry, displayTimezone)
                   updateHistory((current) =>
                     current.map((h) => (h.id === inspectorEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
                   )
@@ -14290,14 +15138,16 @@ useEffect(() => {
             } else {
               frequency = 'daily'
             }
-            const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, createOptions)
+            const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, { ...createOptions, displayTimezone })
             if (created) {
+              // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
               setRepeatingRules((prev) => {
+                if (prev.some((r) => r.id === created.id)) return prev
                 const next = [...prev, created]
                 storeRepeatingRulesLocal(next)
                 return next
               })
-              const scheduledStart = computeEntryScheduledStart(customRecurrenceEntry)
+              const scheduledStart = computeEntryScheduledStart(customRecurrenceEntry, displayTimezone)
               updateHistory((current) =>
                 current.map((h) => (h.id === customRecurrenceEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
               )

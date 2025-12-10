@@ -2758,6 +2758,8 @@ html[data-theme='light'] .calendar-month-day--today {
   padding: 0.4rem 0 0.35rem;
   /* Remove dividing line above the all-day row */
   border-bottom: none;
+  user-select: none; /* Prevent text selection during drag/pan */
+  -webkit-user-select: none;
 }
 
 .calendar-axis-header {
@@ -2828,6 +2830,8 @@ html[data-theme='light'] .calendar-day-header.is-today::after {
   /* Let height shrink-wrap to the all-day bars (no fixed minimum) */
   min-height: 0;
   border-bottom: 1px solid rgba(124, 138, 220, 0.22);
+  user-select: none; /* Prevent text selection during drag/pan */
+  -webkit-user-select: none;
 }
 .calendar-alldays {
   display: grid;
@@ -2849,15 +2853,17 @@ html[data-theme='light'] .calendar-day-header.is-today::after {
 }
 .calendar-allday-gridline.is-first { border-left: none; }
 .calendar-allday-event { z-index: 2; }
-.calendar-allday-hit {
+.calendar-allday-hit-area {
   position: relative;
   z-index: 1;
   width: 100%;
   height: 100%;
-  border: none;
   background: transparent;
   /* Use default arrow cursor instead of a plus/crosshair */
   cursor: default;
+  touch-action: pan-y; /* Allow vertical scroll, capture horizontal for pan */
+  user-select: none; /* Prevent text selection during drag/pan */
+  -webkit-user-select: none;
 }
 .calendar-allday-event {
   position: relative;
@@ -2915,6 +2921,10 @@ html[data-theme='light'] .calendar-day-header.is-today::after {
 }
 .calendar-allday-event--guide .calendar-allday-event__content {
   color: currentColor;
+}
+.calendar-allday-event--preview {
+  z-index: 10;
+  box-shadow: inset 0 0 0 1px rgba(104, 124, 255, 0.6), 0 1px 3px rgba(6, 8, 20, 0.35);
 }
 
 html[data-theme='light'] .calendar-allday-wrapper { border-color: rgba(176, 186, 240, 0.35); }

@@ -6,6 +6,7 @@ import { readRepeatingExceptions } from './repeatingExceptions'
 export type RepeatingSessionRule = {
   id: string
   isActive: boolean
+  isAllDay?: boolean
   frequency: 'daily' | 'weekly' | 'monthly' | 'annually'
   // Interval multiplier: 1=daily/weekly/monthly/annually, 2=every 2 units, etc.
   repeatEvery?: number
@@ -81,6 +82,55 @@ const toDbWeekdays = (days: number[] | null | undefined): number[] | null => {
 
 const ruleIncludesWeekday = (rule: RepeatingSessionRule, jsDow: number): boolean =>
   Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(jsDow)
+
+// Helper to extract time parts in a specific timezone
+const getTimePartsInTimezone = (utcMs: number, tz: string): {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  dayOfWeek: number
+} => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    weekday: 'short',
+  })
+  const parts = formatter.formatToParts(new Date(utcMs))
+  let year = 0, month = 0, day = 0, hour = 0, minute = 0
+  let weekdayStr = ''
+  for (const part of parts) {
+    switch (part.type) {
+      case 'year': year = parseInt(part.value, 10); break
+      case 'month': month = parseInt(part.value, 10); break
+      case 'day': day = parseInt(part.value, 10); break
+      case 'hour': hour = parseInt(part.value, 10); break
+      case 'minute': minute = parseInt(part.value, 10); break
+      case 'weekday': weekdayStr = part.value; break
+    }
+  }
+  // Convert weekday string to JS day (0=Sun, 1=Mon, ...)
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const dayOfWeek = weekdayMap[weekdayStr] ?? new Date(utcMs).getDay()
+  return { year, month, day, hour, minute, dayOfWeek }
+}
+
+// Get midnight UTC for a given date in a timezone
+const getMidnightUtcForDateInTimezone = (year: number, month: number, day: number, tz: string): number => {
+  // Create a rough estimate
+  const roughEstimate = Date.UTC(year, month - 1, day, 12, 0, 0, 0)
+  const parts = getTimePartsInTimezone(roughEstimate, tz)
+  // Adjust to midnight
+  const hoursToSubtract = parts.hour
+  const minutesToSubtract = parts.minute
+  return roughEstimate - (hoursToSubtract * 60 + minutesToSubtract) * 60 * 1000
+}
 
 const deriveRuleTaskNameFromParts = (
   taskName?: string | null,
@@ -465,6 +515,8 @@ const mapRowToRule = (row: any): RepeatingSessionRule | null => {
     ? Math.max(1, Number(row.duration_minutes))
     : (Number.isFinite(row.durationMinutes) ? Math.max(1, Number(row.durationMinutes)) : 60)
   const isActive = typeof row.is_active === 'boolean' ? row.is_active : (row.isActive !== false)
+  // Support both DB is_all_day and local isAllDay
+  const isAllDay = typeof row.is_all_day === 'boolean' ? row.is_all_day : (typeof row.isAllDay === 'boolean' ? row.isAllDay : undefined)
   const goalName = typeof row.goal_name === 'string' ? row.goal_name : (typeof row.goalName === 'string' ? row.goalName : null)
   const bucketName = typeof row.bucket_name === 'string' ? row.bucket_name : (typeof row.bucketName === 'string' ? row.bucketName : null)
   const rawTaskName = typeof row.task_name === 'string' ? row.task_name : (typeof row.taskName === 'string' ? row.taskName : '')
@@ -498,6 +550,7 @@ const mapRowToRule = (row: any): RepeatingSessionRule | null => {
   return {
     id,
     isActive,
+    isAllDay,
     frequency,
     repeatEvery,
     dayOfWeek,
@@ -551,12 +604,15 @@ export async function createRepeatingRuleForEntry(
     endDateMs?: number
     endAfterOccurrences?: number
     repeatEvery?: number
+    displayTimezone?: string  // The timezone to use for wall-clock time extraction
   },
 ): Promise<RepeatingSessionRule | null> {
-  const startLocal = new Date(entry.startedAt)
-  const hours = startLocal.getHours()
-  const minutes = startLocal.getMinutes()
-  const timeOfDayMinutes = hours * 60 + minutes
+  // Use display timezone if provided, otherwise fall back to browser's timezone
+  const tz = options?.displayTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  
+  // Extract time parts in the display timezone
+  const timeParts = getTimePartsInTimezone(entry.startedAt, tz)
+  const timeOfDayMinutes = timeParts.hour * 60 + timeParts.minute
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
   const durationMinutes = Math.max(1, Math.round(durationMs / MINUTE_MS))
   const monthlyPattern =
@@ -567,25 +623,27 @@ export async function createRepeatingRuleForEntry(
         : null
   const weeklyDaysNormalized = frequency === 'weekly'
     ? (() => {
-        const normalized = normalizeWeekdays(options?.weeklyDays ?? [startLocal.getDay()]) ?? []
-        return normalized.length > 0 ? normalized : [startLocal.getDay()]
+        const normalized = normalizeWeekdays(options?.weeklyDays ?? [timeParts.dayOfWeek]) ?? []
+        return normalized.length > 0 ? normalized : [timeParts.dayOfWeek]
       })()
     : null
   const dayOfWeek =
     frequency === 'weekly'
       ? weeklyDaysNormalized
       : frequency === 'monthly' && monthlyPattern && monthlyPattern !== 'day'
-        ? [startLocal.getDay()]
+        ? [timeParts.dayOfWeek]
         : null
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null
   // Canonicalize series start to the scheduled minute (truncate seconds/ms) so it matches
   // guide occurrence timestamps exactly. This is also the anchor/first occurrence.
-  const dayStart = (() => { const d = new Date(entry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
+  const dayStart = getMidnightUtcForDateInTimezone(timeParts.year, timeParts.month, timeParts.day, tz)
   const ruleStartMs = dayStart + timeOfDayMinutes * MINUTE_MS
   const ruleTaskName = deriveRuleTaskNameFromEntry(entry)
+  // Detect if this is an all-day entry
+  const entryIsAllDay = entry.isAllDay === true
   const baseRule: RepeatingSessionRule = {
     id: 'temp',
     isActive: true,
+    isAllDay: entryIsAllDay,
     frequency,
     repeatEvery: Math.max(1, options?.repeatEvery ?? 1),
     dayOfWeek,
@@ -636,6 +694,7 @@ export async function createRepeatingRuleForEntry(
   const payload = {
     user_id: session.user.id,
     is_active: true,
+    is_all_day: entryIsAllDay || undefined,
     frequency,
     repeat_every: Math.max(1, options?.repeatEvery ?? 1),
     day_of_week: frequency === 'weekly' ? dbDayOfWeek : frequency === 'monthly' && monthlyPattern && monthlyPattern !== 'day' ? dbDayOfWeek : null,
@@ -659,6 +718,7 @@ export async function createRepeatingRuleForEntry(
     const localRule: RepeatingSessionRule = {
       id: randomRuleId(),
       isActive: true,
+      isAllDay: entryIsAllDay,
       frequency,
       dayOfWeek,
       monthlyPattern,

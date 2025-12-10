@@ -91,6 +91,7 @@ import {
   syncHistoryWithSupabase,
   type HistoryEntry,
   areHistorySubtasksEqual,
+  getCurrentTimezone,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
@@ -1946,7 +1947,10 @@ useEffect(() => {
   )
 
   // Promote scheduled (planned) sessions that overlap 'now' to the top of the selector
+  // Check if entry is all-day (prefer isAllDay flag, fallback to timestamp detection)
   const isAllDayEntry = (entry: HistoryEntry): boolean => {
+    if (typeof entry.isAllDay === 'boolean') return entry.isAllDay
+    // Fallback: detect by timestamp pattern (for entries without flag)
     const DAY_MS = 24 * 60 * 60 * 1000
     const startMid = new Date(entry.startedAt)
     startMid.setHours(0, 0, 0, 0)
@@ -5266,6 +5270,7 @@ useEffect(() => {
           repeatingOriginalTime && Number.isFinite(repeatingOriginalTime)
             ? repeatingOriginalTime
             : null,
+        timezone: getCurrentTimezone(),
       }
 
       // Save the entry ID so we can update it later
@@ -5465,6 +5470,7 @@ useEffect(() => {
                 contextRepeatingOriginalTime && Number.isFinite(contextRepeatingOriginalTime)
                   ? contextRepeatingOriginalTime
                   : null,
+              timezone: getCurrentTimezone(),
             }
             const next = [entry, ...current]
             return next.length > HISTORY_LIMIT ? next.slice(0, HISTORY_LIMIT) : next
@@ -5511,7 +5517,6 @@ useEffect(() => {
         }
         return
       }
-
       // No active entry, create a new one (fallback for edge cases)
       const entry: HistoryEntry = {
         id: makeHistoryId(),
@@ -5534,6 +5539,7 @@ useEffect(() => {
           contextRepeatingOriginalTime && Number.isFinite(contextRepeatingOriginalTime)
             ? contextRepeatingOriginalTime
             : null,
+        timezone: getCurrentTimezone(),
       }
 
       applyLocalHistoryChange((current) => {
@@ -5659,6 +5665,7 @@ useEffect(() => {
       bucketSurface: NEUTRAL_SURFACE,
       notes: '',
       subtasks: [],
+      timezone: getCurrentTimezone(),
     }
 
     applyLocalHistoryChange((current) => {

@@ -17,6 +17,16 @@ export const CURRENT_SESSION_EVENT_NAME = 'nc-taskwatch:session-update'
 export const HISTORY_LIMIT = 250
 // Reduce remote fetch window to limit egress; adjust as needed
 export const HISTORY_REMOTE_WINDOW_DAYS = 30
+
+// Get current system IANA timezone (e.g., 'Australia/Sydney')
+export const getCurrentTimezone = (): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'UTC'
+  }
+}
+
 // Feature flags persisted locally to enable/disable optional server columns dynamically
 const FEATURE_FLAGS_STORAGE_KEY = 'nc-taskwatch-flags'
 type FeatureFlags = {
@@ -104,7 +114,7 @@ const disableHistoryNotes = () => {
 const isHistorySubtasksEnabled = (): boolean => false
 const disableHistorySubtasks = () => {}
 const HISTORY_BASE_SELECT_COLUMNS =
-  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, entry_colour, created_at, updated_at, future_session'
+  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, entry_colour, created_at, updated_at, future_session, timezone, is_all_day'
 
 const buildHistorySelectColumns = (): string => {
   let columns = HISTORY_BASE_SELECT_COLUMNS
@@ -420,6 +430,10 @@ export type HistoryEntry = {
   // Timezone change marker fields
   timezoneFrom?: string | null
   timezoneTo?: string | null
+  // IANA timezone when this session was recorded (e.g., 'Australia/Sydney')
+  timezone?: string | null
+  // All-day event flag - when true, timestamps are at UTC midnight and represent calendar days
+  isAllDay?: boolean
 }
 
 export type HistoryRecord = HistoryEntry & {
@@ -449,6 +463,8 @@ type HistoryCandidate = {
   originalTime?: unknown
   timezoneFrom?: unknown
   timezoneTo?: unknown
+  timezone?: unknown
+  isAllDay?: unknown
 }
 
 type HistoryRecordCandidate = HistoryCandidate & {
@@ -498,12 +514,27 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
   repeatingSessionId?: string | null
   includeOriginalTime?: boolean
   futureSession?: boolean
+  isAllDay?: boolean
 }
 
   const entries: HistoryEntry[] = []
   const addEntry = (config: SampleConfig) => {
-    const startedAt = getStart(config.daysAgo, config.startHour, config.startMinute)
-    const elapsed = Math.max(MINUTE_MS, config.durationMinutes * MINUTE_MS)
+    let startedAt: number
+    let elapsed: number
+    
+    if (config.isAllDay) {
+      // For all-day events, use UTC midnight timestamps
+      const d = new Date(anchor.getTime())
+      d.setDate(d.getDate() - config.daysAgo)
+      // Get UTC midnight for the target date
+      startedAt = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+      // Duration in days -> end at next UTC midnight(s)
+      const durationDays = Math.max(1, Math.round(config.durationMinutes / (24 * 60)))
+      elapsed = durationDays * 24 * 60 * MINUTE_MS
+    } else {
+      startedAt = getStart(config.daysAgo, config.startHour, config.startMinute)
+      elapsed = Math.max(MINUTE_MS, config.durationMinutes * MINUTE_MS)
+    }
     const repeatingSessionId = config.repeatingSessionId ?? null
     const originalTime =
       repeatingSessionId && config.includeOriginalTime !== false ? startedAt : null
@@ -527,6 +558,7 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
       repeatingSessionId,
       originalTime,
       futureSession: config.futureSession ?? false,
+      isAllDay: config.isAllDay ?? false,
     })
   }
 
@@ -711,6 +743,7 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
     goalSurface: LIFE_ROUTINES_SURFACE,
     bucketSurface: 'sunset-orange',
     notes: 'All-day celebration for a close friend.',
+    isAllDay: true,
   })
 
   addEntry({
@@ -895,6 +928,10 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
         typeof (candidate as any).timezoneFrom === 'string' ? ((candidate as any).timezoneFrom as string) : null
       const timezoneToRaw: string | null =
         typeof (candidate as any).timezoneTo === 'string' ? ((candidate as any).timezoneTo as string) : null
+      const timezoneRaw: string | null =
+        typeof (candidate as any).timezone === 'string' ? ((candidate as any).timezone as string) : null
+      const isAllDayRaw: boolean =
+        typeof (candidate as any).isAllDay === 'boolean' ? (candidate as any).isAllDay : false
 
       const normalizedGoalName = goalNameRaw.trim()
       const normalizedBucketName = bucketNameRaw.trim()
@@ -936,6 +973,8 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
         originalTime: originalTimeRaw,
         timezoneFrom: timezoneFromRaw,
         timezoneTo: timezoneToRaw,
+        timezone: timezoneRaw,
+        isAllDay: isAllDayRaw,
       }
       return normalized
     })
@@ -1253,6 +1292,10 @@ const payloadFromRecord = (
     // Timezone change marker fields
     ...(record.timezoneFrom ? { timezone_from: record.timezoneFrom } : {}),
     ...(record.timezoneTo ? { timezone_to: record.timezoneTo } : {}),
+    // Session timezone (IANA timezone when recorded)
+    ...(record.timezone ? { timezone: record.timezone } : {}),
+    // All-day event flag
+    ...(typeof record.isAllDay === 'boolean' ? { is_all_day: record.isAllDay } : {}),
   }
 }
 
@@ -1291,6 +1334,8 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
     originalTime: parseTimestamp((row as any).original_time, NaN),
     timezoneFrom: typeof (row as any).timezone_from === 'string' ? (row as any).timezone_from : null,
     timezoneTo: typeof (row as any).timezone_to === 'string' ? (row as any).timezone_to : null,
+    timezone: typeof (row as any).timezone === 'string' ? (row as any).timezone : null,
+    isAllDay: typeof (row as any).is_all_day === 'boolean' ? (row as any).is_all_day : null,
   }
 
   const entry = sanitizeHistoryEntries([candidate])[0]
