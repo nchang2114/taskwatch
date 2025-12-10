@@ -71,13 +71,6 @@ import {
   isRepeatingRuleId,
   type RepeatingSessionRule,
 } from '../lib/repeatingSessions'
-import {
-  readRepeatingExceptions,
-  subscribeRepeatingExceptions,
-  upsertRepeatingException,
-  deleteRescheduleExceptionFor,
-  type RepeatingException,
-} from '../lib/repeatingExceptions'
 import { evaluateAndMaybeRetireRule, setRepeatToNoneAfterTimestamp, deleteRepeatingRuleById } from '../lib/repeatingSessions'
 import {
   fetchSnapbackOverviewRows as apiFetchSnapbackRows,
@@ -4234,7 +4227,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   // Snapback overview uses its own range and defaults to All Time
   const [snapActiveRange] = useState<SnapRangeKey>('all')
   const [history, setHistory] = useState<HistoryEntry[]>(() => readPersistedHistory())
-  const [repeatingExceptions, setRepeatingExceptions] = useState<RepeatingException[]>(() => readRepeatingExceptions())
   const latestHistoryRef = useRef(history)
   const goalsSnapshotSignatureRef = useRef<string | null>(null)
   const skipNextGoalsSnapshotRef = useRef(false)
@@ -4973,15 +4965,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       cancelled = true
     }
   }, [historyOwnerId])
-
-  // Subscribe to repeating exceptions updates
-  useEffect(() => {
-    setRepeatingExceptions(readRepeatingExceptions())
-  const unsub = subscribeRepeatingExceptions((rows: RepeatingException[]) => setRepeatingExceptions(rows))
-    return () => {
-      unsub?.()
-    }
-  }, [])
 
   useEffect(() => {
     const owner = readHistoryOwnerId()
@@ -5818,44 +5801,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           setInspectorFallbackMessage(INSPECTOR_DELETED_MESSAGE)
           setShowInspectorExtras(false)
         }
-        // If deleting a confirmed instance of a repeating guide (rescheduled),
-        // remove the associated 'rescheduled' exception so the guide re-renders
-        // unless another entry for the same occurrence still exists.
-        let cleanupRid: string | null = null
-        let cleanupOcc: string | null = null
         updateHistory((current) => {
-          const idx = current.findIndex((e) => e.id === entryId)
-          if (idx === -1) return current
-          const target = current[idx] as any
-          const rid = typeof target.repeatingSessionId === 'string' ? (target.repeatingSessionId as string) : null
-          const ot = (target as any).originalTime as number | undefined | null
-          const od = Number.isFinite(ot as number) ? formatLocalYmd(ot as number) : null
           const next = current.filter((e) => e.id !== entryId)
-          if (rid && od) {
-            const stillConfirmed = next.some((e: any) => {
-              const nr = typeof e.repeatingSessionId === 'string' ? e.repeatingSessionId : null
-              const no =
-                Number.isFinite((e as any).originalTime as number) ? formatLocalYmd((e as any).originalTime as number) : null
-              return nr === rid && no === od
-            })
-            if (!stillConfirmed) { cleanupRid = rid; cleanupOcc = od }
-          }
           return next
         })
-        if (cleanupRid && cleanupOcc) {
-          const rid = cleanupRid
-          const occ = cleanupOcc
-          // Optimistically update local exception state so the guide re-renders immediately,
-          // then perform the durable removal (local persistence + optional remote) in the background.
-          setRepeatingExceptions((prev) =>
-            (prev as RepeatingException[]).filter(
-              (r) => !(r.routineId === rid && r.occurrenceDate === occ && r.action === 'rescheduled'),
-            ),
-          )
-          try {
-            void deleteRescheduleExceptionFor(rid, occ)
-          } catch {}
-        }
       })
     },
     [
@@ -9936,15 +9885,6 @@ useEffect(() => {
             })
             return set
           })()
-          const excKeySet = (() => {
-            const set = new Set<string>()
-            repeatingExceptions.forEach((r) => {
-              if ((r as any).action === 'skipped') {
-                set.add(`${r.routineId}:${r.occurrenceDate}`)
-              }
-            })
-            return set
-          })()
           const coveredOriginalSet = (() => {
             const set = new Set<string>()
             effectiveHistory.forEach((h) => {
@@ -10094,7 +10034,7 @@ useEffect(() => {
               // Use date-based boundary check for all-day rules
               if (!isAllDayWithinBoundaries(rule, columnIndex)) return
               const occKey = makeOccurrenceKey(rule.id, dayStart)
-              if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return
+              if (confirmedKeySet.has(occKey)) return
               const guideEntryId = `repeat:${rule.id}:${dayStart}:allday`
               
               // Check if this guide is being dragged
@@ -10329,7 +10269,7 @@ useEffect(() => {
           .filter((v): v is RawEvent => Boolean(v))
           .sort((a, b) => (a.start === b.start ? a.end - b.end : a.start - b.start))
 
-        // Build lookup for confirmed occurrences and exceptions to suppress guides
+        // Build lookup for confirmed occurrences to suppress guides
         // Use display timezone to get date key (must match guide's occurrence key)
         const confirmedKeySet = (() => {
           const set = new Set<string>()
@@ -10337,18 +10277,6 @@ useEffect(() => {
             const rid = (h as any).repeatingSessionId as string | undefined | null
             const ot = (h as any).originalTime as number | undefined | null
             if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${getDateKeyInTimezone(ot as number, displayTimezone)}`)
-          })
-          return set
-        })()
-        const excKeySet = (() => {
-          // Only skipped occurrences should suppress guides. Rescheduled ones
-          // are already covered by the presence of a confirmed entry (via
-          // routineId+occurrenceDate) or by repeat-original linkage.
-          const set = new Set<string>()
-          repeatingExceptions.forEach((r) => {
-            if ((r as any).action === 'skipped') {
-              set.add(`${r.routineId}:${r.occurrenceDate}`)
-            }
           })
           return set
         })()
@@ -10443,9 +10371,9 @@ useEffect(() => {
             // timeOfDayMinutes is the wall-clock time (e.g., 840 = 2pm), applied to display timezone
             const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             
-            // Suppression by confirmed/exception for this occurrence date
+            // Suppression by confirmed entry for this occurrence date
             const occKey = `${rule.id}:${dateKey}`
-            if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return null
+            if (confirmedKeySet.has(occKey)) return null
             
             // Compute start time: display timezone midnight + timeOfDayMinutes
             const startedAt = displayDayStart + Math.max(0, Math.min(1439, rule.timeOfDayMinutes)) * MINUTE_MS
@@ -11172,7 +11100,7 @@ useEffect(() => {
               // Since dayStarts are now computed in display timezone (UTC bounds),
               // preview timestamps are already in UTC - no conversion needed
               if (guideMaterialization) {
-                const { realEntry, ruleId, ymd } = guideMaterialization
+                const { realEntry, ruleId } = guideMaterialization
                 const storedStartedAt = preview.startedAt
                 const storedEndedAt = preview.endedAt
                 flushSync(() => {
@@ -11189,7 +11117,6 @@ useEffect(() => {
                   })
                 })
                 try {
-                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: storedStartedAt, newEndedAt: storedEndedAt, notes: null })
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
@@ -11222,7 +11149,7 @@ useEffect(() => {
             } else if (guideMaterialization && s) {
               // Guide held but not moved - materialize at same visual position
               // Guide timestamps are already UTC in the new system
-              const { realEntry, ruleId, ymd } = guideMaterialization
+              const { realEntry, ruleId } = guideMaterialization
               const storedStartedAt = realEntry.startedAt
               const storedEndedAt = realEntry.endedAt
               const materializedEntry = {
@@ -11241,7 +11168,6 @@ useEffect(() => {
                 })
               })
               try {
-                void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: storedStartedAt, newEndedAt: storedEndedAt, notes: null })
                 void evaluateAndMaybeRetireRule(ruleId)
               } catch {}
               dragPreventClickRef.current = true
@@ -12344,8 +12270,6 @@ useEffect(() => {
                             // Materialize guide then open editor
                             const parts = ev.entry.id.split(':')
                             const ruleId = parts[1]
-                            const dayStart = Number(parts[2])
-                            const ymd = formatLocalYmd(dayStart)
                             // Guide timestamps are now UTC (dayStarts uses display timezone bounds)
                             const storedStartedAt = ev.entry.startedAt
                             const storedEndedAt = ev.entry.endedAt
@@ -12364,16 +12288,6 @@ useEffect(() => {
                               next.sort((a, b) => a.startedAt - b.startedAt)
                               return next
                             })
-                            try {
-                              void upsertRepeatingException({
-                                routineId: ruleId,
-                                occurrenceDate: ymd,
-                                action: 'rescheduled',
-                                newStartedAt: storedStartedAt,
-                                newEndedAt: storedEndedAt,
-                                notes: null,
-                              })
-                            } catch {}
                             setSelectedHistoryId(newEntry.id)
                             setHoveredHistoryId(newEntry.id)
                             setEditingHistoryId(newEntry.id)
@@ -12862,7 +12776,6 @@ useEffect(() => {
     resetCalendarPanTransform,
     stopCalendarPanAnimation,
     repeatingRules,
-    repeatingExceptions,
     setView,
     setHistoryDayOffset,
     navigateByDelta,
@@ -13136,7 +13049,6 @@ useEffect(() => {
       // Check if this is an all-day guide (has ':allday' suffix)
       const isAllDayGuide = parts.length >= 4 && parts[3] === 'allday'
       // Use display timezone for date key to match how occurrence keys are built
-      // (confirmedKeySet and excKeySet both use displayTimezone)
       const ymd = getDateKeyInTimezone(dayStart, displayTimezone)
       // For all-day guides, compute UTC midnight for storage
       // (all-day entries use getUtcDateKey for column matching, which expects UTC midnight)
@@ -13284,6 +13196,13 @@ useEffect(() => {
                 }
               })()
               
+              // Check if entry is linked to a rule that has ended
+              // If so, this entry (and all future entries with this ID) should show "None"
+              const entryRepeatId = (entry as any).repeatingSessionId as string | undefined | null
+              const linkedRule = entryRepeatId ? repeatingRules.find((r) => r.id === entryRepeatId) : null
+              const linkedRuleEndAtMs = linkedRule ? ((linkedRule as any).endAtMs as number | undefined | null) : null
+              const isPastLinkedRuleEnd = Number.isFinite(linkedRuleEndAtMs as number) && entry.startedAt >= (linkedRuleEndAtMs as number)
+              
               // Helper to check if a rule is all-day
               const ruleIsAllDay = (r: RepeatingSessionRule) => 
                 r.isAllDay === true || (r.timeOfDayMinutes === 0 && (r.durationMinutes ?? 60) >= 1440)
@@ -13291,6 +13210,14 @@ useEffect(() => {
                 if (!r.isActive) return false
                 // If entry has been moved from original time, don't match any rules
                 if (hasBeenMoved) return false
+                // If entry is past its linked rule's end, don't match any rules
+                if (isPastLinkedRuleEnd) return false
+                // If the rule has ended at or before this entry's scheduled time, don't match
+                // This ensures entries at the end boundary show "None" in the dropdown
+                const ruleEndAtMs = (r as any).endAtMs as number | undefined | null
+                if (Number.isFinite(ruleEndAtMs as number) && entry.startedAt >= (ruleEndAtMs as number)) {
+                  return false
+                }
                 // Match task/goal/bucket names
                 const taskMatch = (r.taskName?.trim() || '') === (entry.taskName?.trim() || '')
                 const goalMatch = (r.goalName?.trim() || null) === (entry.goalName?.trim() || null)
@@ -13482,14 +13409,6 @@ useEffect(() => {
                       return next
                     })
                     try {
-                      void upsertRepeatingException({
-                        routineId: parsedGuide.ruleId,
-                        occurrenceDate: parsedGuide.ymd,
-                        action: 'rescheduled',
-                        newStartedAt: newEntry.startedAt,
-                        newEndedAt: newEntry.endedAt,
-                        notes: null,
-                      })
                       void evaluateAndMaybeRetireRule(parsedGuide.ruleId)
                     } catch {}
                     handleCloseCalendarPreview()
@@ -13526,17 +13445,6 @@ useEffect(() => {
                       next.sort((a, b) => a.startedAt - b.startedAt)
                       return next
                     })
-                    try {
-                      // Keep exception for backward compatibility
-                      await upsertRepeatingException({
-                        routineId: parsedGuide.ruleId,
-                        occurrenceDate: parsedGuide.ymd,
-                        action: 'skipped',
-                        newStartedAt: null,
-                        newEndedAt: null,
-                        notes: null,
-                      })
-                    } catch {}
                     void evaluateAndMaybeRetireRule(parsedGuide.ruleId)
                     handleCloseCalendarPreview()
                   }}
@@ -14514,6 +14422,13 @@ useEffect(() => {
           }
         })()
         
+        // Check if entry is linked to a rule that has ended
+        // If so, this entry (and all future entries with this ID) should show "None"
+        const entryRepeatId = (inspectorEntry as any).repeatingSessionId as string | undefined | null
+        const linkedRule = entryRepeatId ? repeatingRules.find((r) => r.id === entryRepeatId) : null
+        const linkedRuleEndAtMs = linkedRule ? ((linkedRule as any).endAtMs as number | undefined | null) : null
+        const isPastLinkedRuleEnd = Number.isFinite(linkedRuleEndAtMs as number) && inspectorEntry.startedAt >= (linkedRuleEndAtMs as number)
+        
         // Helper to check if a rule is all-day
         const ruleIsAllDay = (r: RepeatingSessionRule) => 
           r.isAllDay === true || (r.timeOfDayMinutes === 0 && (r.durationMinutes ?? 60) >= 1440)
@@ -14521,6 +14436,13 @@ useEffect(() => {
           if (!r.isActive) return false
           // If entry has been moved from original time, don't match any rules
           if (hasBeenMoved) return false
+          // If entry is past its linked rule's end, don't match any rules
+          if (isPastLinkedRuleEnd) return false
+          // If the rule has ended at or before this entry's scheduled time, don't match
+          const ruleEndAtMs = (r as any).endAtMs as number | undefined | null
+          if (Number.isFinite(ruleEndAtMs as number) && inspectorEntry.startedAt >= (ruleEndAtMs as number)) {
+            return false
+          }
           // Match task/goal/bucket names
           const taskMatch = (r.taskName?.trim() || '') === (inspectorEntry.taskName?.trim() || '')
           const goalMatch = (r.goalName?.trim() || null) === (inspectorEntry.goalName?.trim() || null)

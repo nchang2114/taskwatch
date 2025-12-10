@@ -591,48 +591,48 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
   type SessionPreset = Omit<SampleConfig, 'daysAgo' | 'startHour' | 'startMinute' | 'durationMinutes'>
   const sessionPresets: Record<string, SessionPreset> = {
     study: {
-      taskName: 'Deep study block',
+      taskName: 'Finish Maple TA (Week 4)',
       goalName: 'MATH1131',
       bucketName: 'Weekly Work (15%)',
       goalId: 'g_demo',
       bucketId: 'b_demo_1',
-      taskId: 't_demo_1',
+      taskId: 't_demo_3',
       goalSurface: 'glass',
       bucketSurface: 'cool-blue',
-      notes: 'Lecture review + flashcards.',
+      notes: 'Weekly online homework.',
     },
     internship: {
-      taskName: 'Internship sprint',
-      goalName: 'Level Up at Work',
-      bucketName: 'Deep Work Sprints',
+      taskName: 'Submit 2 applications this week',
+      goalName: 'Land a Job/Internship',
+      bucketName: 'Applications',
       goalId: 'g2',
-      bucketId: 'b4',
-      taskId: 't19',
+      bucketId: 'b5',
+      taskId: 't11',
       goalSurface: 'glass',
-      bucketSurface: 'cherry',
-      notes: 'Heads-down product work.',
+      bucketSurface: 'sunset-orange',
+      notes: 'Applying to roles.',
     },
     creative: {
-      taskName: 'Creative assignment burst',
+      taskName: 'Start draft',
       goalName: 'MATH1131',
       bucketName: 'Assignment (10%)',
       goalId: 'g_demo',
       bucketId: 'b_demo_2',
-      taskId: 't_demo_4',
+      taskId: 't_demo_6',
       goalSurface: 'glass',
       bucketSurface: 'midnight',
-      notes: 'Essay outline + drafting.',
+      notes: 'Working on assignment draft.',
     },
     health: {
-      taskName: 'Gym + movement',
-      goalName: 'Healthy Work-Life Rhythm',
-      bucketName: 'Movement',
+      taskName: 'Run 5km',
+      goalName: 'Get in Shape',
+      bucketName: 'Cardio',
       goalId: 'g3',
-      bucketId: 'b7',
-      taskId: 't14',
+      bucketId: 'b9',
+      taskId: 't30',
       goalSurface: 'glass',
-      bucketSurface: 'fresh-teal',
-      notes: 'Strength + stretch.',
+      bucketSurface: 'ember',
+      notes: 'Cardio session.',
     },
     social: {
       taskName: 'Social reset',
@@ -656,6 +656,17 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
       bucketSurface: 'neutral-grey-blue',
       notes: 'Inbox, bills, planning.',
     },
+    demo: {
+      taskName: 'Hold a 1-min plank',
+      goalName: 'Get in Shape',
+      bucketName: 'Strength',
+      goalId: 'g3',
+      bucketId: 'b8',
+      taskId: 't27',
+      goalSurface: 'glass',
+      bucketSurface: 'fresh-teal',
+      notes: 'Core workout session.',
+    },
   }
 
   type DaySessionPlan = {
@@ -667,28 +678,28 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
 
   const dayPlans: Array<{ dayOffset: number; sessions: DaySessionPlan[] }> = [
     { dayOffset: 1, sessions: [
-      { preset: 'study', duration: 180, overrideName: 'Lecture review marathon' },
-      { preset: 'internship', duration: 150, overrideName: 'Product sprint focus' },
+      { preset: 'study', duration: 180, overrideName: 'Finish Maple TA (Week 4)' },
+      { preset: 'internship', duration: 150, overrideName: 'Submit 2 applications this week' },
       {
-        preset: 'internship',
+        preset: 'demo',
         duration: 240,
         overrideName: 'End Taskwatch Demo event',
         notes: 'Wrap up guest walkthrough and share highlights.',
       },
     ] },
     { dayOffset: 2, sessions: [
-      { preset: 'internship', duration: 180, overrideName: 'Deep work sprints' },
-      { preset: 'creative', duration: 150, overrideName: 'Studio critique prep' },
+      { preset: 'internship', duration: 180, overrideName: 'Research 5 target companies' },
+      { preset: 'creative', duration: 150, overrideName: 'Start draft' },
       { preset: 'social', duration: 120, overrideName: 'Dinner + hangout' },
     ] },
     { dayOffset: 3, sessions: [
-      { preset: 'study', duration: 150, overrideName: 'Group study jam' },
+      { preset: 'study', duration: 150, overrideName: 'Submit weekly homework' },
       { preset: 'admin', duration: 90, overrideName: 'Life admin & groceries' },
-      { preset: 'health', duration: 100, overrideName: 'Pilates + walk' },
+      { preset: 'health', duration: 100, overrideName: 'Run 5km' },
     ] },
     { dayOffset: 4, sessions: [
-      { preset: 'creative', duration: 180, overrideName: 'Essay drafting session' },
-      { preset: 'study', duration: 150, overrideName: 'Lab prep & notes' },
+      { preset: 'creative', duration: 180, overrideName: 'Complete Q2-4' },
+      { preset: 'study', duration: 150, overrideName: 'Practice past papers' },
       { preset: 'social', duration: 120, overrideName: 'Family FaceTime' },
     ] },
     { dayOffset: 5, sessions: [] },
@@ -1233,9 +1244,18 @@ export const persistHistorySnapshot = (nextEntries: HistoryEntry[]): HistoryEntr
     }
   })
 
+  // In guest mode (no Supabase), immediately remove deleted records.
+  // In logged-in mode, mark them pending delete for sync.
+  const isGuestMode = !supabase
   recordsById.forEach((record, id) => {
     if (!activeIds.has(id)) {
-      recordsById.set(id, markRecordPendingDelete(record, timestamp))
+      if (isGuestMode) {
+        // Guest mode: remove immediately from localStorage
+        recordsById.delete(id)
+      } else {
+        // Logged-in mode: mark pending delete for Supabase sync
+        recordsById.set(id, markRecordPendingDelete(record, timestamp))
+      }
     }
   })
 
@@ -1622,18 +1642,31 @@ export const pushPendingHistoryToSupabase = async (): Promise<void> => {
 
 // Remove planned (futureSession) entries for a given rule that occur strictly AFTER the given local date (YYYY-MM-DD).
 // Used when setting a repeating rule to "none" after a selected occurrence to avoid lingering planned rows.
+// NOTE: Only deletes entries that have NOT been modified by the user (moved, extended, edited, etc.).
+// Modified future sessions should persist even when the rule is set to "none".
 export const pruneFuturePlannedForRuleAfter = async (ruleId: string, afterYmd: string): Promise<void> => {
   const records = readHistoryRecords()
   if (!Array.isArray(records) || records.length === 0) return
   const now = Date.now()
   let changed = false
+  // Threshold for detecting user edits: if updatedAt is more than 1 second after createdAt,
+  // the entry was likely edited by the user after initial creation
+  const EDIT_THRESHOLD_MS = 1000
   for (let i = 0; i < records.length; i += 1) {
     const r = records[i] as any
     const rid = typeof r.repeatingSessionId === 'string' ? (r.repeatingSessionId as string) : null
     const ot = Number.isFinite(r.originalTime) ? Number(r.originalTime) : null
     const od = ot ? formatOccurrenceDate(ot) : null
     const isGuidePlaceholder = Boolean(r.futureSession) && rid && ot !== null
-    if (isGuidePlaceholder && rid === ruleId && od && od > afterYmd && (records[i] as any).pendingAction !== 'delete') {
+    // Check if this entry has been moved (startedAt differs from originalTime)
+    const hasBeenMoved = ot !== null && r.startedAt !== ot
+    // Check if this entry has been edited after creation (updatedAt significantly after createdAt)
+    const createdAt = Number.isFinite(r.createdAt) ? Number(r.createdAt) : 0
+    const updatedAt = Number.isFinite(r.updatedAt) ? Number(r.updatedAt) : 0
+    const hasBeenEdited = updatedAt > createdAt + EDIT_THRESHOLD_MS
+    // Only delete if the entry is untouched (not moved and not edited)
+    const isUntouched = !hasBeenMoved && !hasBeenEdited
+    if (isGuidePlaceholder && isUntouched && rid === ruleId && od && od > afterYmd && (records[i] as any).pendingAction !== 'delete') {
       records[i] = { ...records[i], pendingAction: 'delete', updatedAt: now }
       changed = true
     }
@@ -1758,10 +1791,18 @@ export const pushAllHistoryToSupabase = async (
     // (the rule doesn't exist in the database, so we can't reference it)
     let mappedRepeatingId: string | null = null
     if (record.repeatingSessionId) {
-      if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
+      // Check if it's a sample/demo ID (not a valid UUID) - these don't exist in DB
+      const isSampleId = record.repeatingSessionId.startsWith('sample-') || !isUuid(record.repeatingSessionId)
+      if (isSampleId) {
+        // Sample IDs should be mapped via ruleIdMap or set to null
+        if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
+          mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+        }
+        // else: sample ID with no mapping -> null
+      } else if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
         mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
       } else if (!ruleIdMap) {
-        // No ruleIdMap provided, keep original (for non-migration syncs)
+        // No ruleIdMap provided and it's a valid UUID, keep original
         mappedRepeatingId = record.repeatingSessionId
       }
       // else: ruleIdMap exists but doesn't contain this ID -> null (rule doesn't exist)
