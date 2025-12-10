@@ -13265,13 +13265,44 @@ useEffect(() => {
               const dowDate = new Date(dayStartMs + 12 * 60 * 60 * 1000) // noon to avoid DST issues
               const dow = dowDate.getUTCDay()
               const monthDay = `${String(timeParts.month).padStart(2, '0')}-${String(timeParts.day).padStart(2, '0')}`
-              const matches = (r: RepeatingSessionRule) =>
-                r.isActive &&
-                r.timeOfDayMinutes === minutes &&
-                r.durationMinutes === durMin &&
-                (r.taskName?.trim() || '') === (entry.taskName?.trim() || '') &&
-                (r.goalName?.trim() || null) === (entry.goalName?.trim() || null) &&
-                (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
+              // Check if this entry is all-day
+              const entryIsAllDay = isEntryAllDay(entry)
+              
+              // Check if entry has been moved from its original scheduled time
+              // If so, it's a rescheduled instance and should not show the repeat rule
+              const originalTime = (entry as any).originalTime as number | undefined | null
+              const hasBeenMoved = (() => {
+                if (!Number.isFinite(originalTime as number)) return false
+                if (entryIsAllDay) {
+                  // For all-day entries, compare by date (UTC date key)
+                  const originalDateKey = getUtcDateKey(originalTime as number)
+                  const currentDateKey = getUtcDateKey(entry.startedAt)
+                  return originalDateKey !== currentDateKey
+                } else {
+                  // For timed entries, compare exact timestamps
+                  return entry.startedAt !== originalTime
+                }
+              })()
+              
+              // Helper to check if a rule is all-day
+              const ruleIsAllDay = (r: RepeatingSessionRule) => 
+                r.isAllDay === true || (r.timeOfDayMinutes === 0 && (r.durationMinutes ?? 60) >= 1440)
+              const matches = (r: RepeatingSessionRule) => {
+                if (!r.isActive) return false
+                // If entry has been moved from original time, don't match any rules
+                if (hasBeenMoved) return false
+                // Match task/goal/bucket names
+                const taskMatch = (r.taskName?.trim() || '') === (entry.taskName?.trim() || '')
+                const goalMatch = (r.goalName?.trim() || null) === (entry.goalName?.trim() || null)
+                const bucketMatch = (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
+                if (!taskMatch || !goalMatch || !bucketMatch) return false
+                // For all-day entries, match against all-day rules (skip time/duration check)
+                if (entryIsAllDay) {
+                  return ruleIsAllDay(r)
+                }
+                // For timed entries, match time and duration
+                return r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
+              }
               const matchingRules = repeatingRules.filter((r) => matches(r))
               const hasDaily = matchingRules.some((r) => r.frequency === 'daily')
               const hasCustom = matchingRules.some(
@@ -13314,6 +13345,8 @@ useEffect(() => {
                       return
                     }
                     if (val === 'none') {
+                      // If already showing 'none', do nothing
+                      if (currentVal === 'none') return
                       // If this entry is a guide from a repeating rule, cut the series after this instance
                       if (isGuide) {
                         // parsedGuide contains ruleId and ymd for this guide
@@ -14462,13 +14495,44 @@ useEffect(() => {
         const dow = inspDowDate.getUTCDay()
         const inspTimeParts = getTimePartsInTimezone(inspectorEntry.startedAt, displayTimezone)
         const monthDay = `${String(inspTimeParts.month).padStart(2, '0')}-${String(inspTimeParts.day).padStart(2, '0')}`
-        const matches = (r: RepeatingSessionRule) =>
-          r.isActive &&
-          r.timeOfDayMinutes === minutes &&
-          r.durationMinutes === durMin &&
-          (r.taskName?.trim() || '') === (inspectorEntry.taskName?.trim() || '') &&
-          (r.goalName?.trim() || null) === (inspectorEntry.goalName?.trim() || null) &&
-          (r.bucketName?.trim() || null) === (inspectorEntry.bucketName?.trim() || null)
+        // Check if this entry is all-day
+        const entryIsAllDay = isEntryAllDay(inspectorEntry)
+        
+        // Check if entry has been moved from its original scheduled time
+        // If so, it's a rescheduled instance and should not show the repeat rule
+        const originalTime = (inspectorEntry as any).originalTime as number | undefined | null
+        const hasBeenMoved = (() => {
+          if (!Number.isFinite(originalTime as number)) return false
+          if (entryIsAllDay) {
+            // For all-day entries, compare by date (UTC date key)
+            const originalDateKey = getUtcDateKey(originalTime as number)
+            const currentDateKey = getUtcDateKey(inspectorEntry.startedAt)
+            return originalDateKey !== currentDateKey
+          } else {
+            // For timed entries, compare exact timestamps
+            return inspectorEntry.startedAt !== originalTime
+          }
+        })()
+        
+        // Helper to check if a rule is all-day
+        const ruleIsAllDay = (r: RepeatingSessionRule) => 
+          r.isAllDay === true || (r.timeOfDayMinutes === 0 && (r.durationMinutes ?? 60) >= 1440)
+        const matches = (r: RepeatingSessionRule) => {
+          if (!r.isActive) return false
+          // If entry has been moved from original time, don't match any rules
+          if (hasBeenMoved) return false
+          // Match task/goal/bucket names
+          const taskMatch = (r.taskName?.trim() || '') === (inspectorEntry.taskName?.trim() || '')
+          const goalMatch = (r.goalName?.trim() || null) === (inspectorEntry.goalName?.trim() || null)
+          const bucketMatch = (r.bucketName?.trim() || null) === (inspectorEntry.bucketName?.trim() || null)
+          if (!taskMatch || !goalMatch || !bucketMatch) return false
+          // For all-day entries, match against all-day rules (skip time/duration check)
+          if (entryIsAllDay) {
+            return ruleIsAllDay(r)
+          }
+          // For timed entries, match time and duration
+          return r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
+        }
         const hasDaily = repeatingRules.some((r) => matches(r) && r.frequency === 'daily')
         const hasCustom = repeatingRules.some(
           (r) => matches(r) && r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.length > 1,
@@ -14516,6 +14580,8 @@ useEffect(() => {
                   return
                 }
                 if (val === 'none') {
+                  // If already showing 'none', do nothing
+                  if (currentVal === 'none') return
                   const ids = await deactivateMatchingRulesForEntry(inspectorEntry)
                   if (Array.isArray(ids) && ids.length > 0) {
                     setRepeatingRules((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, isActive: false } : r)))
