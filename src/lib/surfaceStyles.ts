@@ -40,6 +40,7 @@ export const SURFACE_STYLES = [
 // Server-enforced allowlist for buckets (mirrors DB check constraint)
 const SERVER_BUCKET_STYLE_ALLOWLIST = new Set<string>([
   'glass',
+  'midnight',
   'coastal',
   'cherry',
   'linen',
