@@ -1075,6 +1075,65 @@ export async function setTaskSortIndex(bucketId: string, section: 'active' | 'co
   await updateTaskWithGuard(taskId, bucketId, { sort_index: newSort }, 'id')
 }
 
+/** Move a task from one bucket to another within the same goal.
+ * Updates the bucket_id and assigns a new sort_index for the destination bucket.
+ * If toIndex is omitted, the task is appended to the end of the active tasks. */
+export async function moveTaskToBucket(
+  taskId: string,
+  fromBucketId: string,
+  toBucketId: string,
+  toIndex?: number,
+) {
+  if (!supabase) return
+  const userId = await getActiveUserId()
+  if (!userId) return
+
+  // Get existing tasks in the destination bucket (active only) to calculate sort_index
+  const { data: rows } = await supabase
+    .from('tasks')
+    .select('id, sort_index')
+    .eq('bucket_id', toBucketId)
+    .eq('completed', false)
+    .eq('user_id', userId)
+    .order('sort_index', { ascending: true })
+
+  const existingIds = rows?.map((r: any) => r.id as string) ?? []
+  // Default to appending at the end if toIndex is not specified
+  const insertIndex = toIndex ?? existingIds.length
+  const prevId = insertIndex <= 0 ? null : existingIds[insertIndex - 1] ?? null
+  const nextId = insertIndex >= existingIds.length ? null : existingIds[insertIndex] ?? null
+
+  let newSort: number
+  if (!prevId && nextId) {
+    const next = rows?.find((r: any) => r.id === nextId) as any
+    newSort = Math.floor((next?.sort_index || STEP) / 2) || STEP
+  } else if (prevId && !nextId) {
+    const prev = rows?.find((r: any) => r.id === prevId) as any
+    newSort = (prev?.sort_index || 0) + STEP
+  } else if (prevId && nextId) {
+    const prev = rows?.find((r: any) => r.id === prevId) as any
+    const next = rows?.find((r: any) => r.id === nextId) as any
+    newSort = mid(prev?.sort_index || 0, next?.sort_index || STEP)
+    if (newSort === prev?.sort_index || newSort === next?.sort_index) {
+      newSort = (prev?.sort_index || 0) + Math.ceil(STEP / 2)
+    }
+  } else {
+    newSort = STEP
+  }
+
+  // Update the task's bucket_id and sort_index
+  const { error } = await supabase
+    .from('tasks')
+    .update({ bucket_id: toBucketId, sort_index: newSort })
+    .eq('id', taskId)
+    .eq('bucket_id', fromBucketId)
+    .eq('user_id', userId)
+
+  if (error) {
+    throw error
+  }
+}
+
 /** Sort all tasks in a bucket by created_at date (oldest first) and update their sort_index values.
  * This sorts ALL tasks (both priority and non-priority) so that when tasks move between
  * priority/non-priority status, they slot into the correct position.
@@ -1195,37 +1254,6 @@ export async function sortBucketTasksByPriority(bucketId: string): Promise<{ id:
   )
   
   return updates
-}
-
-/** Move a task to a different bucket while preserving completion/priority and assigning a sensible sort_index.
- * Priority tasks are placed at the top of their new section; non-priority tasks are appended to the end. */
-export async function moveTaskToBucket(taskId: string, fromBucketId: string, toBucketId: string) {
-  if (!supabase) return
-  const session = await ensureSingleUserSession()
-  if (!session?.user?.id) {
-    return
-  }
-  if (fromBucketId === toBucketId) return
-  // Fetch current flags to compute section placement
-  const { data: taskRow, error } = await supabase
-    .from('tasks')
-    .select('id, completed, priority')
-    .eq('id', taskId)
-    .eq('bucket_id', fromBucketId)
-    .eq('user_id', session.user.id)
-    .maybeSingle()
-  if (error) throw error
-  const completed = Boolean((taskRow as any)?.completed)
-  const priority = Boolean((taskRow as any)?.priority)
-  // Compute new sort index in destination bucket
-  let sort_index: number
-  if (priority) {
-    sort_index = await prependSortIndexForTasks(toBucketId, completed)
-  } else {
-    sort_index = await nextSortIndex('tasks', { bucket_id: toBucketId, completed })
-  }
-  // Guarded update that ensures the row still belongs to the expected source bucket
-  await updateTaskWithGuard(taskId, fromBucketId, { bucket_id: toBucketId, sort_index }, 'id, bucket_id, sort_index')
 }
 
 export async function upsertTaskSubtask(

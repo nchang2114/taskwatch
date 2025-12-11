@@ -38,6 +38,7 @@ import {
   setGoalMilestonesShown as apiSetGoalMilestonesShown,
   sortBucketTasksByDate as apiSortBucketTasksByDate,
   sortBucketTasksByPriority as apiSortBucketTasksByPriority,
+  moveTaskToBucket as apiMoveTaskToBucket,
 } from '../lib/goalsApi'
 import {
   DEFAULT_SURFACE_STYLE,
@@ -2550,6 +2551,13 @@ interface GoalRowProps {
     fromIndex: number,
     toIndex: number,
   ) => void
+  onMoveTaskToBucket: (
+    goalId: string,
+    taskId: string,
+    fromBucketId: string,
+    toBucketId: string,
+    toIndex: number,
+  ) => void
   onReorderBuckets: (bucketId: string, toIndex: number) => void
   onOpenCustomizer: (goalId: string) => void
   activeCustomizerGoalId: string | null
@@ -2808,6 +2816,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   onStartFocusTask,
   scheduledTaskIds,
   onReorderTasks,
+  onMoveTaskToBucket,
   onReorderBuckets,
   onOpenCustomizer,
   activeCustomizerGoalId,
@@ -4011,56 +4020,66 @@ const GoalRow: React.FC<GoalRowProps> = ({
                           </div>
                         )}
 
-                        {activeTasks.length === 0 && draftValue === undefined ? (
-                          <p className="goal-task-empty">No tasks yet.</p>
-                        ) : (
-                          <ul
-                            className="mt-2 space-y-2"
-                            onDragOver={(e) => {
-                              const info = (window as any).__dragTaskInfo as
-                                | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
-                                | null
-                              if (!info) return
-                              if (info.goalId !== goal.id || info.bucketId !== b.id || info.section !== 'active') return
-                              e.preventDefault()
-                              const list = e.currentTarget as HTMLElement
-                              const { index: insertIndex, top } = computeInsertMetrics(list, e.clientY)
-                              setDragHover((cur) => {
-                                if (cur && cur.bucketId === b.id && cur.section === 'active' && cur.index === insertIndex) {
-                                  return cur
-                                }
-                                return { bucketId: b.id, section: 'active', index: insertIndex }
-                              })
-                              setDragLine({ bucketId: b.id, section: 'active', top })
-                            }}
-                            onDrop={(e) => {
-                              const info = (window as any).__dragTaskInfo as
-                                | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
-                                | null
-                              if (!info) return
-                              if (info.goalId !== goal.id || info.bucketId !== b.id || info.section !== 'active') return
-                              e.preventDefault()
+                        <ul
+                          className="mt-2 space-y-2"
+                          onDragOver={(e) => {
+                            const info = (window as any).__dragTaskInfo as
+                              | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number; taskId?: string }
+                              | null
+                            if (!info) return
+                            // Allow cross-bucket drops within the same goal (active tasks only)
+                            if (info.goalId !== goal.id || info.section !== 'active') return
+                            e.preventDefault()
+                            const list = e.currentTarget as HTMLElement
+                            const { index: insertIndex, top } = computeInsertMetrics(list, e.clientY)
+                            setDragHover((cur) => {
+                              if (cur && cur.bucketId === b.id && cur.section === 'active' && cur.index === insertIndex) {
+                                return cur
+                              }
+                              return { bucketId: b.id, section: 'active', index: insertIndex }
+                            })
+                            setDragLine({ bucketId: b.id, section: 'active', top })
+                          }}
+                          onDrop={(e) => {
+                            const info = (window as any).__dragTaskInfo as
+                              | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number; taskId?: string }
+                              | null
+                            if (!info) return
+                            // Allow cross-bucket drops within the same goal (active tasks only)
+                            if (info.goalId !== goal.id || info.section !== 'active') return
+                            e.preventDefault()
+                            const toIndex = dragHover && dragHover.bucketId === b.id && dragHover.section === 'active' ? dragHover.index : activeTasks.length
+                            
+                            const isCrossBucket = info.bucketId !== b.id
+                            if (isCrossBucket && info.taskId) {
+                              // Cross-bucket move
+                              onMoveTaskToBucket(goal.id, info.taskId, info.bucketId, b.id, toIndex)
+                            } else {
+                              // Same bucket reorder
                               const fromIndex = info.index
-                              const toIndex = dragHover && dragHover.bucketId === b.id && dragHover.section === 'active' ? dragHover.index : activeTasks.length
                               if (fromIndex !== toIndex) {
                                 onReorderTasks(goal.id, b.id, 'active', fromIndex, toIndex)
                               }
-                              setDragHover(null)
-                              setDragLine(null)
-                            }}
-                            onDragLeave={(e) => {
-                              if (e.currentTarget.contains(e.relatedTarget as Node)) return
-                              setDragHover((cur) => (cur && cur.bucketId === b.id && cur.section === 'active' ? null : cur))
-                              setDragLine((cur) => (cur && cur.bucketId === b.id && cur.section === 'active' ? null : cur))
-                            }}
-                          >
-                            {dragLine && dragLine.bucketId === b.id && dragLine.section === 'active' ? (
-                              <div
-                                className="goal-insert-line"
-                                style={{ top: `${dragLine.top}px` }}
-                                aria-hidden
+                            }
+                            setDragHover(null)
+                            setDragLine(null)
+                          }}
+                          onDragLeave={(e) => {
+                            if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                            setDragHover((cur) => (cur && cur.bucketId === b.id && cur.section === 'active' ? null : cur))
+                            setDragLine((cur) => (cur && cur.bucketId === b.id && cur.section === 'active' ? null : cur))
+                          }}
+                        >
+                          {dragLine && dragLine.bucketId === b.id && dragLine.section === 'active' ? (
+                            <div
+                              className="goal-insert-line"
+                              style={{ top: `${dragLine.top}px` }}
+                              aria-hidden
                               />
                             ) : null}
+                            {activeTasks.length === 0 && draftValue === undefined && (
+                              <li className="goal-task-empty">No tasks yet.</li>
+                            )}
                             {activeTasks.map((task, index) => {
                               const isEditing = editingTasks[task.id] !== undefined
                               const diffClass =
@@ -4174,12 +4193,13 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                       detailsDiv.style.display = originalDisplay || ''
                                     }
                                     
-                                    // Store whether this task was expanded for restoration
+                                    // Store whether this task was expanded for restoration (include taskId for cross-bucket moves)
                                     ;(window as any).__dragTaskInfo = { 
                                       goalId: goal.id, 
                                       bucketId: b.id, 
                                       section: 'active', 
                                       index,
+                                      taskId: task.id,
                                       wasExpanded 
                                     }
                                     
@@ -4224,7 +4244,8 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                         | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
                                         | null
                                       if (!info) return
-                                      if (info.goalId !== goal.id || info.bucketId !== b.id || info.section !== 'active') return
+                                      // Allow cross-bucket drags within the same goal (active tasks only)
+                                      if (info.goalId !== goal.id || info.section !== 'active') return
                                       e.preventDefault()
                                       e.dataTransfer.dropEffect = 'move'
                                     }}
@@ -4850,7 +4871,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                               )
                             })}
                           </ul>
-                        )}
 
                         {completedTasks.length > 0 && (
                           <div className="goal-completed">
@@ -4870,53 +4890,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                               </svg>
                             </button>
                             {!isCompletedCollapsed && (
-                              <ul
-                                className="goal-completed__list"
-                                onDragOver={(e) => {
-                                  const info = (window as any).__dragTaskInfo as
-                                    | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
-                                    | null
-                                  if (!info) return
-                                  if (info.goalId !== goal.id || info.bucketId !== b.id || info.section !== 'completed') return
-                                  e.preventDefault()
-                                  const list = e.currentTarget as HTMLElement
-                                  const { index: insertIndex, top } = computeInsertMetrics(list, e.clientY)
-                                  setDragHover((cur) => {
-                                    if (cur && cur.bucketId === b.id && cur.section === 'completed' && cur.index === insertIndex) {
-                                      return cur
-                                    }
-                                    return { bucketId: b.id, section: 'completed', index: insertIndex }
-                                  })
-                                  setDragLine({ bucketId: b.id, section: 'completed', top })
-                                }}
-                                onDrop={(e) => {
-                                  const info = (window as any).__dragTaskInfo as
-                                    | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
-                                    | null
-                                  if (!info) return
-                                  if (info.goalId !== goal.id || info.bucketId !== b.id || info.section !== 'completed') return
-                                  e.preventDefault()
-                                  const fromIndex = info.index
-                                  const toIndex = dragHover && dragHover.bucketId === b.id && dragHover.section === 'completed' ? dragHover.index : completedTasks.length
-                                  if (fromIndex !== toIndex) {
-                                    onReorderTasks(goal.id, b.id, 'completed', fromIndex, toIndex)
-                                  }
-                                  setDragHover(null)
-                                  setDragLine(null)
-                                }}
-                                onDragLeave={(e) => {
-                                  if (e.currentTarget.contains(e.relatedTarget as Node)) return
-                                  setDragHover((cur) => (cur && cur.bucketId === b.id && cur.section === 'completed' ? null : cur))
-                                  setDragLine((cur) => (cur && cur.bucketId === b.id && cur.section === 'completed' ? null : cur))
-                                }}
-                              >
-                                {dragLine && dragLine.bucketId === b.id && dragLine.section === 'completed' ? (
-                                  <div
-                                    className="goal-insert-line"
-                                    style={{ top: `${dragLine.top}px` }}
-                                    aria-hidden
-                                  />
-                                ) : null}
+                              <ul className="goal-completed__list">
                                 {completedTasks.map((task) => {
                                   const isEditing = editingTasks[task.id] !== undefined
                                   const diffClass =
@@ -4961,7 +4935,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           showDetails && hasDetailsContent && 'goal-task-row--has-details',
                                           isDeleteRevealed && 'goal-task-row--delete-revealed',
                                         )}
-                                        draggable
                                         onContextMenu={(event) => {
                                           event.preventDefault()
                                           event.stopPropagation()
@@ -4970,109 +4943,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                             return
                                           }
                                           onRevealDeleteTask(isDeleteRevealed ? null : deleteKey)
-                                        }}
-                                        onDragStart={(e) => {
-                                          onRevealDeleteTask(null)
-                                          e.dataTransfer.setData('text/plain', task.id)
-                                          e.dataTransfer.effectAllowed = 'move'
-                                          const row = e.currentTarget as HTMLElement
-                                          draggingRowRef.current = row
-                                          row.classList.add('dragging')
-                                          
-                                          // Collapse the dragged task's expanded state BEFORE creating drag image
-                                          const wasExpanded = isDetailsOpen
-                                          if (wasExpanded) {
-                                            handleToggleTaskDetails(task.id)
-                                          }
-                                          
-                                          // Temporarily hide details div to capture collapsed drag image
-                                          const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
-                                          let originalDisplay: string | null = null
-                                          if (detailsDiv) {
-                                            originalDisplay = detailsDiv.style.display
-                                            detailsDiv.style.display = 'none'
-                                          }
-                                          
-                                          const clone = row.cloneNode(true) as HTMLElement
-                                          clone.className = `${row.className} goal-drag-clone`
-                                          clone.classList.remove('dragging', 'goal-task-row--collapsed', 'goal-task-row--expanded')
-                                          const rowRect = row.getBoundingClientRect()
-                                          clone.style.width = `${Math.floor(rowRect.width)}px`
-                                          // Don't set minHeight - let it collapse to single-line height
-                                          copyVisualStyles(row, clone)
-                                          // Force single-line text in clone even if original contains line breaks
-                                          const textNodes = clone.querySelectorAll('.goal-task-text, .goal-task-input, .goal-task-text--button')
-                                          textNodes.forEach((node) => {
-                                            const el = node as HTMLElement
-                                            el.querySelectorAll('br').forEach((br) => br.parentNode?.removeChild(br))
-                                            const oneLine = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim()
-                                            el.textContent = oneLine
-                                          })
-                                          clone.querySelectorAll('.goal-task-details').forEach((node) => node.parentNode?.removeChild(node))
-                                          // Width already matched above
-                                          document.body.appendChild(clone)
-                                          dragCloneRef.current = clone
-                                          try {
-                                            e.dataTransfer.setDragImage(clone, 16, 0)
-                                          } catch {}
-                                          
-                                          // Restore details display
-                                          if (detailsDiv) {
-                                            detailsDiv.style.display = originalDisplay || ''
-                                          }
-                                          
-                                          // Store whether this task was expanded for restoration
-                                          ;(window as any).__dragTaskInfo = { 
-                                            goalId: goal.id, 
-                                            bucketId: b.id, 
-                                            section: 'completed', 
-                                            index,
-                                            wasExpanded 
-                                          }
-                                          
-                                          // Defer visual collapse and other task collapses to avoid interfering with drag start
-                                          window.requestAnimationFrame(() => {
-                                            window.requestAnimationFrame(() => {
-                                              // Add visual collapse class to make row leave the list
-                                              if (draggingRowRef.current) {
-                                                draggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                              }
-                                              // Collapse OTHER tasks in the bucket
-                                              onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
-                                            })
-                                          })
-                                        }}
-  onDragEnd={() => {
-    const row = draggingRowRef.current
-    if (row) {
-      row.classList.remove('dragging', 'goal-task-row--collapsed')
-    }
-    const dragInfo = (window as any).__dragTaskInfo as { wasExpanded?: boolean } | null
-    ;(window as any).__dragTaskInfo = null
-    setDragHover(null)
-    setDragLine(null)
-    
-    // Restore other tasks
-    onRestoreTaskDetailsAfterDrag(task.id)
-    
-    // Restore the dragged task's expanded state if it was originally expanded
-    if (dragInfo?.wasExpanded) {
-      handleToggleTaskDetails(task.id)
-    }
-    
-    draggingRowRef.current = null
-    const ghost = dragCloneRef.current
-    if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
-    dragCloneRef.current = null
-  }}
-                                        onDragOver={(e) => {
-                                          const info = (window as any).__dragTaskInfo as
-                                            | { goalId: string; bucketId: string; section: 'active' | 'completed'; index: number }
-                                            | null
-                                          if (!info) return
-                                          if (info.goalId !== goal.id || info.bucketId !== b.id || info.section !== 'completed') return
-                                          e.preventDefault()
-                                          e.dataTransfer.dropEffect = 'move'
                                         }}
                                       >
                                       <div className="goal-task-row__content">
@@ -5559,7 +5429,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                   </svg>
                                 </button>
                                 </li>
-                                    </React.Fragment>
+                                </React.Fragment>
                                   )
                                 })}
                               </ul>
@@ -11593,6 +11463,73 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     }
   }
 
+  // Move a task from one bucket to another within the same goal
+  const moveTaskToBucket = (
+    goalId: string,
+    taskId: string,
+    fromBucketId: string,
+    toBucketId: string,
+    toIndex: number,
+  ) => {
+    // Find the task in the source bucket
+    const goal = goals.find((g) => g.id === goalId)
+    if (!goal) return
+    const fromBucket = goal.buckets.find((b) => b.id === fromBucketId)
+    if (!fromBucket) return
+    const task = fromBucket.tasks.find((t) => t.id === taskId)
+    if (!task) return
+
+    // Optimistic UI update: move task from source to destination bucket
+    setGoals((gs) =>
+      gs.map((g) => {
+        if (g.id !== goalId) return g
+        return {
+          ...g,
+          buckets: g.buckets.map((b) => {
+            if (b.id === fromBucketId) {
+              // Remove task from source bucket
+              return { ...b, tasks: b.tasks.filter((t) => t.id !== taskId) }
+            }
+            if (b.id === toBucketId) {
+              // Add task to destination bucket at the specified index
+              const activeTasks = b.tasks.filter((t) => !t.completed)
+              const completedTasks = b.tasks.filter((t) => t.completed)
+              const cappedIndex = Math.max(0, Math.min(toIndex, activeTasks.length))
+              const nextActive = [...activeTasks]
+              nextActive.splice(cappedIndex, 0, { ...task, completed: false })
+              return { ...b, tasks: [...nextActive, ...completedTasks] }
+            }
+            return b
+          }),
+        }
+      }),
+    )
+
+    // Persist to backend
+    apiMoveTaskToBucket(taskId, fromBucketId, toBucketId, toIndex).catch(() => {
+      // Rollback on error: move task back to source bucket
+      setGoals((gs) =>
+        gs.map((g) => {
+          if (g.id !== goalId) return g
+          return {
+            ...g,
+            buckets: g.buckets.map((b) => {
+              if (b.id === toBucketId) {
+                return { ...b, tasks: b.tasks.filter((t) => t.id !== taskId) }
+              }
+              if (b.id === fromBucketId) {
+                const activeTasks = b.tasks.filter((t) => !t.completed)
+                const completedTasks = b.tasks.filter((t) => t.completed)
+                return { ...b, tasks: [...activeTasks, task, ...completedTasks] }
+              }
+              return b
+            }),
+          }
+        }),
+      )
+    })
+  }
+
   // Reorder buckets within a goal (active buckets only; archived stay at the end)
   const reorderBuckets = (goalId: string, bucketId: string, toIndex: number) => {
     let persistedIndex: number | null = null
@@ -12916,6 +12853,9 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onReorderTasks={(goalId, bucketId, section, fromIndex, toIndex) =>
                           reorderTasks(goalId, bucketId, section, fromIndex, toIndex)
                         }
+                        onMoveTaskToBucket={(goalId, taskId, fromBucketId, toBucketId, toIndex) =>
+                          moveTaskToBucket(goalId, taskId, fromBucketId, toBucketId, toIndex)
+                        }
                         onReorderBuckets={(bucketId, toIndex) => reorderBuckets(dashboardSelectedGoal.id, bucketId, toIndex)}
                         onOpenCustomizer={(goalId) => setActiveCustomizerGoalId(goalId)}
                         activeCustomizerGoalId={activeCustomizerGoalId}
@@ -13059,6 +12999,9 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     onReorderTasks={(goalId, bucketId, section, fromIndex, toIndex) =>
                       reorderTasks(goalId, bucketId, section, fromIndex, toIndex)
                     }
+                    onMoveTaskToBucket={(goalId, taskId, fromBucketId, toBucketId, toIndex) =>
+                      moveTaskToBucket(goalId, taskId, fromBucketId, toBucketId, toIndex)
+                    }
                     onReorderBuckets={(bucketId, toIndex) => reorderBuckets(g.id, bucketId, toIndex)}
                     onOpenCustomizer={(goalId) => setActiveCustomizerGoalId(goalId)}
                     activeCustomizerGoalId={activeCustomizerGoalId}
@@ -13197,6 +13140,9 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         scheduledTaskIds={scheduledTaskIds}
                         onReorderTasks={(goalId, bucketId, section, fromIndex, toIndex) =>
                           reorderTasks(goalId, bucketId, section, fromIndex, toIndex)
+                        }
+                        onMoveTaskToBucket={(goalId, taskId, fromBucketId, toBucketId, toIndex) =>
+                          moveTaskToBucket(goalId, taskId, fromBucketId, toBucketId, toIndex)
                         }
                         onReorderBuckets={(bucketId, toIndex) => reorderBuckets(g.id, bucketId, toIndex)}
                         onOpenCustomizer={(goalId) => setActiveCustomizerGoalId(goalId)}
