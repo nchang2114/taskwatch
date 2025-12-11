@@ -8420,6 +8420,26 @@ useEffect(() => {
     return ticks
   }, [])
 
+  // --- Month cell overview panel ---
+  const [monthCellOverview, setMonthCellOverview] = useState<{
+    dateKey: string
+    dateLabel: string
+    entries: HistoryEntry[]
+  } | null>(null)
+  const monthCellOverviewRef = useRef<HTMLDivElement | null>(null)
+
+  // Close month cell overview on outside click
+  useEffect(() => {
+    if (!monthCellOverview) return
+    const handleClickOutside = (e: PointerEvent) => {
+      if (monthCellOverviewRef.current && !monthCellOverviewRef.current.contains(e.target as Node)) {
+        setMonthCellOverview(null)
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside)
+    return () => document.removeEventListener('pointerdown', handleClickOutside)
+  }, [monthCellOverview])
+
   // --- Calendar event preview (popover) ---
   const [calendarPreview, setCalendarPreview] = useState<
     | null
@@ -9649,8 +9669,27 @@ useEffect(() => {
   // Build minimal calendar content for non-day views
   const renderCalendarContent = useCallback(() => {
     const entries = effectiveHistory
-    const dayHasSessions = (startMs: number, endMs: number) =>
-      entries.some((e) => Math.min(e.endedAt, endMs) > Math.max(e.startedAt, startMs))
+
+    // Get all-day entries that should appear on a given date
+    const getAllDayEntriesForDate = (dateKey: string) =>
+      entries.filter((e) => {
+        if (!isEntryAllDay(e) || isSkippedSession(e)) return false
+        
+        if (e.isAllDay) {
+          // For entries with isAllDay flag, use UTC date key matching
+          // startedAt/endedAt are UTC midnights, endedAt is exclusive
+          const startDateKey = getUtcDateKey(e.startedAt)
+          const endDateKey = getUtcDateKey(e.endedAt)
+          // Entry appears on this date if dateKey >= startDateKey and dateKey < endDateKey
+          return dateKey >= startDateKey && dateKey < endDateKey
+        } else {
+          // Legacy: use local midnight timestamp overlap
+          const [year, month, day] = dateKey.split('-').map(Number)
+          const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+          const dayEnd = dayStart + DAY_DURATION_MS
+          return Math.min(e.endedAt, dayEnd) > Math.max(e.startedAt, dayStart)
+        }
+      })
 
     // (removed unused legacy swipe handler for month/year grids)
 
@@ -9678,12 +9717,11 @@ useEffect(() => {
     const renderCell = (date: Date, isCurrentMonth: boolean) => {
       const start = new Date(date)
       start.setHours(0, 0, 0, 0)
-      const end = new Date(start)
-      end.setDate(end.getDate() + 1)
-      const has = dayHasSessions(start.getTime(), end.getTime())
-      // Compare date key strings instead of timestamps for accurate today detection
+      // Build date key for this cell
       const cellDateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+      const allDayEntries = getAllDayEntriesForDate(cellDateKey)
       const isToday = cellDateKey === todayDateKeyInDisplayTz
+      const dateLabel = start.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
       return (
         <div
           key={`cell-${start.toISOString()}`}
@@ -9705,7 +9743,44 @@ useEffect(() => {
           >
             {start.getDate()}
           </div>
-          {has ? <div className="calendar-session-dot" aria-hidden="true" /> : null}
+          {allDayEntries.length > 0 && (
+            <div
+              className="calendar-cell__events"
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: allDayEntries })
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: allDayEntries })
+                }
+              }}
+            >
+              {allDayEntries.slice(0, 3).map((entry) => {
+                const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
+                const label = deriveEntryTaskName(entry)
+                const colorCss = meta.colorInfo?.gradient?.css ?? meta.colorInfo?.solidColor ?? getPaletteColorForLabel(label)
+                const isPlanned = !!entry.futureSession
+                const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
+                return (
+                  <div
+                    key={entry.id}
+                    className={`calendar-cell__event${isPlanned ? ' calendar-cell__event--planned' : ''}`}
+                    style={isPlanned ? { color: baseColor, borderColor: baseColor } : { background: colorCss }}
+                    title={label}
+                  >
+                    <span className="calendar-cell__event-title">{label}</span>
+                  </div>
+                )
+              })}
+              {allDayEntries.length > 3 && (
+                <div className="calendar-cell__more">+{allDayEntries.length - 3} more</div>
+              )}
+            </div>
+          )}
         </div>
       )
     }
@@ -11217,9 +11292,20 @@ useEffect(() => {
 
       const hours = Array.from({ length: 25 }).map((_, h) => h) // 0..24 (24 for bottom line)
       const allDayBars = computeAllDayBars()
-      const allDayMaxLane = allDayBars.reduce((m, b) => Math.max(m, b.lane), -1)
-      const allDayRowCount = Math.max(0, allDayMaxLane + 1)
-      const allDayTrackRows = Math.max(1, allDayRowCount)
+      // Limit visible lanes to 1 (only show lane 0)
+      const MAX_VISIBLE_LANES = 1
+      const visibleAllDayBars = allDayBars.filter((b) => b.lane < MAX_VISIBLE_LANES)
+      const hiddenAllDayBars = allDayBars.filter((b) => b.lane >= MAX_VISIBLE_LANES)
+      // Count hidden bars per day column
+      const hiddenCountPerDay: number[] = new Array(dayStarts.length).fill(0)
+      for (const bar of hiddenAllDayBars) {
+        for (let col = bar.colStart; col < bar.colEnd; col++) {
+          if (col >= 0 && col < dayStarts.length) {
+            hiddenCountPerDay[col]++
+          }
+        }
+      }
+      const allDayTrackRows = MAX_VISIBLE_LANES + (hiddenAllDayBars.length > 0 ? 1 : 0) // +1 row for "+N more" indicators
           const body = (
             <div className="calendar-vertical__body">
               {/* All‑day row inside the body grid so it behaves as an extension of the days area */}
@@ -11240,7 +11326,7 @@ useEffect(() => {
                   <div key={`adgl-${i}`} className={`calendar-allday-gridline${i === 0 ? ' is-first' : ''}`} />)
                 )}
               </div>
-              {allDayBars.map((bar, i) => {
+              {visibleAllDayBars.map((bar, i) => {
                 const backgroundStyle: React.CSSProperties = bar.isGuide
                   ? { background: 'transparent' }
                   : bar.isPlanned
@@ -11516,6 +11602,39 @@ useEffect(() => {
                   </div>
                 </div>
               )})}
+              {/* "+N more" indicators for each day column with hidden all-day events */}
+              {hiddenCountPerDay.map((count, colIndex) => {
+                if (count === 0) return null
+                // Get all entries for this day (both visible and hidden) for the overlay
+                const dayDateKey = dayDateKeys[colIndex]
+                const dayStart = dayStarts[colIndex]
+                const dayDate = new Date(dayStart)
+                const dateLabel = dayDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                const entriesForDay = allDayBars
+                  .filter((b) => b.colStart <= colIndex && b.colEnd > colIndex)
+                  .map((b) => b.entry)
+                return (
+                  <div
+                    key={`allday-more-${colIndex}`}
+                    className="calendar-allday-more"
+                    style={{ gridColumn: `${colIndex + 1}`, gridRow: `${MAX_VISIBLE_LANES + 1}` }}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMonthCellOverview({ dateKey: dayDateKey, dateLabel, entries: entriesForDay })
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setMonthCellOverview({ dateKey: dayDateKey, dateLabel, entries: entriesForDay })
+                      }
+                    }}
+                  >
+                    +{count} more
+                  </div>
+                )
+              })}
               {/* Hold-to-create hit area for all-day sessions (single element spanning all days) */}
               <div
                 className="calendar-allday-hit-area"
@@ -11777,7 +11896,7 @@ useEffect(() => {
                     className="calendar-allday-event calendar-allday-event--preview"
                     style={{
                       gridColumn: `${colStart + 1} / ${colEnd + 1}`,
-                      gridRow: `${allDayTrackRows}`,
+                      gridRow: '1',
                       background: 'rgba(104, 124, 255, 0.6)',
                       pointerEvents: 'none',
                     }}
@@ -13622,6 +13741,60 @@ useEffect(() => {
     updateHistory,
     repeatingRules,
   ])
+
+  // Month cell overview panel
+  const monthCellOverviewPanel = useMemo(() => {
+    if (!monthCellOverview) return null
+    return createPortal(
+      <div className="month-cell-overview__backdrop">
+        <div
+          className="month-cell-overview"
+          ref={monthCellOverviewRef}
+          role="dialog"
+          aria-label={`Events for ${monthCellOverview.dateLabel}`}
+        >
+          <div className="month-cell-overview__header">
+            <h3 className="month-cell-overview__title">{monthCellOverview.dateLabel}</h3>
+            <button
+              type="button"
+              className="month-cell-overview__close"
+              aria-label="Close"
+              onClick={() => setMonthCellOverview(null)}
+            >
+              <IconClose />
+            </button>
+          </div>
+          <div className="month-cell-overview__events">
+            {monthCellOverview.entries.map((entry) => {
+              const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
+              const label = deriveEntryTaskName(entry)
+              const colorCss = meta.colorInfo?.gradient?.css ?? meta.colorInfo?.solidColor ?? getPaletteColorForLabel(label)
+              const isPlanned = !!entry.futureSession
+              const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
+              const goalLabel = entry.goalName || 'No goal'
+              return (
+                <div
+                  key={entry.id}
+                  className={`month-cell-overview__event${isPlanned ? ' month-cell-overview__event--planned' : ''}`}
+                  style={isPlanned ? { borderColor: baseColor } : {}}
+                >
+                  <div
+                    className="month-cell-overview__event-color"
+                    style={{ background: colorCss }}
+                  />
+                  <div className="month-cell-overview__event-content">
+                    <div className="month-cell-overview__event-title">{label || 'Untitled'}</div>
+                    <div className="month-cell-overview__event-goal">{goalLabel}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )
+  }, [monthCellOverview, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup])
 
   // Calendar editor modal
   useEffect(() => {
@@ -15536,6 +15709,7 @@ useEffect(() => {
               {renderCalendarContent()}
             </div>
             {renderCalendarPopover()}
+            {monthCellOverviewPanel}
           </div>
           {calendarInspectorPanel}
         </div>
