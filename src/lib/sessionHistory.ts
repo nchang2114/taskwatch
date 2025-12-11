@@ -657,15 +657,15 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
       notes: 'Inbox, bills, planning.',
     },
     demo: {
-      taskName: 'Hold a 1-min plank',
-      goalName: 'Get in Shape',
-      bucketName: 'Strength',
-      goalId: 'g3',
-      bucketId: 'b8',
-      taskId: 't27',
+      taskName: 'End Taskwatch Demo event',
+      goalName: 'Quick List',
+      bucketName: 'Quick List',
+      goalId: null,
+      bucketId: null,
+      taskId: null,
       goalSurface: 'glass',
-      bucketSurface: 'fresh-teal',
-      notes: 'Core workout session.',
+      bucketSurface: 'glass',
+      notes: 'Wrap up guest walkthrough and share highlights.',
     },
   }
 
