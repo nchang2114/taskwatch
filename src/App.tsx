@@ -24,6 +24,7 @@ type UserProfile = {
   name: string
   email: string
   avatarUrl?: string
+  appTimezone?: string | null
 }
 type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending'
 
@@ -63,6 +64,130 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const TERMS_URL = 'https://genzero.vercel.app/taskwatch/terms'
 const PRIVACY_URL = 'https://genzero.vercel.app/taskwatch/privacy'
 
+// Timezone settings
+const APP_TIMEZONE_STORAGE_KEY = 'taskwatch_app_timezone'
+
+// Get current system timezone
+const getCurrentSystemTimezone = (): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'UTC'
+  }
+}
+
+// Read app timezone override from localStorage
+const readStoredAppTimezone = (): string | null => {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    return localStorage.getItem(APP_TIMEZONE_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+// Save app timezone override to localStorage
+const storeAppTimezone = (timezone: string | null): void => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (timezone) {
+      localStorage.setItem(APP_TIMEZONE_STORAGE_KEY, timezone)
+    } else {
+      localStorage.removeItem(APP_TIMEZONE_STORAGE_KEY)
+    }
+    // Dispatch custom event to notify components in the same tab
+    window.dispatchEvent(new CustomEvent('taskwatch-timezone-changed', { detail: { timezone } }))
+  } catch {
+    // ignore
+  }
+}
+
+// Comprehensive list of IANA timezones with display labels and search terms
+const TIMEZONE_OPTIONS: Array<{ value: string; label: string; searchTerms: string[] }> = [
+  // UTC
+  { value: 'UTC', label: 'UTC', searchTerms: ['utc', 'coordinated universal', 'gmt'] },
+  // Americas
+  { value: 'America/New_York', label: 'New York (Eastern)', searchTerms: ['new york', 'eastern', 'est', 'edt', 'usa', 'us', 'nyc', 'america'] },
+  { value: 'America/Chicago', label: 'Chicago (Central)', searchTerms: ['chicago', 'central', 'cst', 'cdt', 'usa', 'us', 'america'] },
+  { value: 'America/Denver', label: 'Denver (Mountain)', searchTerms: ['denver', 'mountain', 'mst', 'mdt', 'usa', 'us', 'america', 'colorado'] },
+  { value: 'America/Los_Angeles', label: 'Los Angeles (Pacific)', searchTerms: ['los angeles', 'pacific', 'pst', 'pdt', 'usa', 'us', 'la', 'sf', 'san francisco', 'seattle', 'america'] },
+  { value: 'America/Anchorage', label: 'Anchorage (Alaska)', searchTerms: ['anchorage', 'alaska', 'akst', 'akdt', 'usa', 'us'] },
+  { value: 'Pacific/Honolulu', label: 'Honolulu (Hawaii)', searchTerms: ['honolulu', 'hawaii', 'hst', 'usa', 'us'] },
+  { value: 'America/Toronto', label: 'Toronto (Eastern)', searchTerms: ['toronto', 'canada', 'ca', 'ontario'] },
+  { value: 'America/Vancouver', label: 'Vancouver (Pacific)', searchTerms: ['vancouver', 'canada', 'ca', 'bc', 'british columbia'] },
+  { value: 'America/Mexico_City', label: 'Mexico City', searchTerms: ['mexico city', 'mexico', 'mx', 'cdmx'] },
+  { value: 'America/Sao_Paulo', label: 'São Paulo', searchTerms: ['sao paulo', 'brazil', 'br', 'são paulo'] },
+  { value: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires', searchTerms: ['buenos aires', 'argentina', 'ar'] },
+  { value: 'America/Santiago', label: 'Santiago', searchTerms: ['santiago', 'chile', 'cl'] },
+  { value: 'America/Lima', label: 'Lima', searchTerms: ['lima', 'peru', 'pe'] },
+  { value: 'America/Bogota', label: 'Bogota', searchTerms: ['bogota', 'colombia', 'co', 'bogotá'] },
+  // Europe
+  { value: 'Europe/London', label: 'London (GMT/BST)', searchTerms: ['london', 'uk', 'gmt', 'bst', 'britain', 'england'] },
+  { value: 'Europe/Paris', label: 'Paris (CET)', searchTerms: ['paris', 'france', 'cet', 'cest', 'fr'] },
+  { value: 'Europe/Berlin', label: 'Berlin (CET)', searchTerms: ['berlin', 'germany', 'cet', 'cest', 'de', 'munich', 'frankfurt'] },
+  { value: 'Europe/Amsterdam', label: 'Amsterdam (CET)', searchTerms: ['amsterdam', 'netherlands', 'nl', 'holland'] },
+  { value: 'Europe/Brussels', label: 'Brussels (CET)', searchTerms: ['brussels', 'belgium', 'be'] },
+  { value: 'Europe/Zurich', label: 'Zurich (CET)', searchTerms: ['zurich', 'switzerland', 'ch', 'geneva'] },
+  { value: 'Europe/Vienna', label: 'Vienna (CET)', searchTerms: ['vienna', 'austria', 'at'] },
+  { value: 'Europe/Rome', label: 'Rome (CET)', searchTerms: ['rome', 'italy', 'it', 'milan'] },
+  { value: 'Europe/Madrid', label: 'Madrid (CET)', searchTerms: ['madrid', 'spain', 'es', 'barcelona'] },
+  { value: 'Europe/Lisbon', label: 'Lisbon (WET)', searchTerms: ['lisbon', 'portugal', 'pt'] },
+  { value: 'Europe/Dublin', label: 'Dublin (GMT/IST)', searchTerms: ['dublin', 'ireland', 'ie'] },
+  { value: 'Europe/Stockholm', label: 'Stockholm (CET)', searchTerms: ['stockholm', 'sweden', 'se'] },
+  { value: 'Europe/Oslo', label: 'Oslo (CET)', searchTerms: ['oslo', 'norway', 'no'] },
+  { value: 'Europe/Copenhagen', label: 'Copenhagen (CET)', searchTerms: ['copenhagen', 'denmark', 'dk'] },
+  { value: 'Europe/Helsinki', label: 'Helsinki (EET)', searchTerms: ['helsinki', 'finland', 'fi'] },
+  { value: 'Europe/Warsaw', label: 'Warsaw (CET)', searchTerms: ['warsaw', 'poland', 'pl'] },
+  { value: 'Europe/Prague', label: 'Prague (CET)', searchTerms: ['prague', 'czech', 'cz', 'praha'] },
+  { value: 'Europe/Athens', label: 'Athens (EET)', searchTerms: ['athens', 'greece', 'gr'] },
+  { value: 'Europe/Istanbul', label: 'Istanbul', searchTerms: ['istanbul', 'turkey', 'tr'] },
+  { value: 'Europe/Moscow', label: 'Moscow (MSK)', searchTerms: ['moscow', 'russia', 'ru', 'msk'] },
+  // Asia & Middle East
+  { value: 'Asia/Dubai', label: 'Dubai (GST)', searchTerms: ['dubai', 'uae', 'abu dhabi', 'gulf'] },
+  { value: 'Asia/Jerusalem', label: 'Tel Aviv (IST)', searchTerms: ['tel aviv', 'israel', 'jerusalem', 'il'] },
+  { value: 'Asia/Kolkata', label: 'Mumbai/Delhi (IST)', searchTerms: ['mumbai', 'delhi', 'india', 'in', 'ist', 'bangalore', 'kolkata'] },
+  { value: 'Asia/Bangkok', label: 'Bangkok (ICT)', searchTerms: ['bangkok', 'thailand', 'th'] },
+  { value: 'Asia/Jakarta', label: 'Jakarta (WIB)', searchTerms: ['jakarta', 'indonesia', 'id'] },
+  { value: 'Asia/Singapore', label: 'Singapore (SGT)', searchTerms: ['singapore', 'sg'] },
+  { value: 'Asia/Kuala_Lumpur', label: 'Kuala Lumpur (MYT)', searchTerms: ['kuala lumpur', 'malaysia', 'my', 'kl'] },
+  { value: 'Asia/Manila', label: 'Manila (PHT)', searchTerms: ['manila', 'philippines', 'ph'] },
+  { value: 'Asia/Hong_Kong', label: 'Hong Kong (HKT)', searchTerms: ['hong kong', 'hk'] },
+  { value: 'Asia/Shanghai', label: 'Shanghai/Beijing (CST)', searchTerms: ['shanghai', 'beijing', 'china', 'cn', 'cst'] },
+  { value: 'Asia/Tokyo', label: 'Tokyo (JST)', searchTerms: ['tokyo', 'japan', 'jp', 'jst'] },
+  { value: 'Asia/Seoul', label: 'Seoul (KST)', searchTerms: ['seoul', 'south korea', 'korea', 'kr', 'kst'] },
+  // Oceania
+  { value: 'Australia/Sydney', label: 'Sydney (AEST)', searchTerms: ['sydney', 'australia', 'au', 'aest', 'aedt', 'nsw'] },
+  { value: 'Australia/Melbourne', label: 'Melbourne (AEST)', searchTerms: ['melbourne', 'australia', 'au', 'victoria'] },
+  { value: 'Australia/Brisbane', label: 'Brisbane (AEST)', searchTerms: ['brisbane', 'australia', 'au', 'queensland'] },
+  { value: 'Australia/Perth', label: 'Perth (AWST)', searchTerms: ['perth', 'australia', 'au', 'awst', 'western australia'] },
+  { value: 'Australia/Adelaide', label: 'Adelaide (ACST)', searchTerms: ['adelaide', 'australia', 'au', 'south australia'] },
+  { value: 'Pacific/Auckland', label: 'Auckland (NZST)', searchTerms: ['auckland', 'new zealand', 'nz', 'nzst', 'wellington'] },
+  // Africa
+  { value: 'Africa/Cairo', label: 'Cairo (EET)', searchTerms: ['cairo', 'egypt', 'eg'] },
+  { value: 'Africa/Johannesburg', label: 'Johannesburg (SAST)', searchTerms: ['johannesburg', 'south africa', 'za', 'cape town', 'joburg'] },
+  { value: 'Africa/Lagos', label: 'Lagos (WAT)', searchTerms: ['lagos', 'nigeria', 'ng'] },
+  { value: 'Africa/Nairobi', label: 'Nairobi (EAT)', searchTerms: ['nairobi', 'kenya', 'ke'] },
+]
+
+// Validate if a string is a valid IANA timezone
+const isValidTimezone = (tz: string): boolean => {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Get display label for a timezone (either from our list or formatted IANA name)
+const getTimezoneLabel = (tz: string | null): string => {
+  if (!tz) return 'Auto-detect'
+  const found = TIMEZONE_OPTIONS.find((opt) => opt.value === tz)
+  if (found) return found.label
+  // Format unknown IANA timezone: "America/New_York" -> "America/New York"
+  return tz.replace(/_/g, ' ').replace(/\//g, ' / ')
+}
+
 const sanitizeStoredProfile = (value: unknown): UserProfile | null => {
   if (!value || typeof value !== 'object') {
     return null
@@ -71,10 +196,11 @@ const sanitizeStoredProfile = (value: unknown): UserProfile | null => {
   const name = typeof candidate.name === 'string' ? candidate.name : null
   const email = typeof candidate.email === 'string' ? candidate.email : null
   const avatarUrl = typeof candidate.avatarUrl === 'string' ? candidate.avatarUrl : undefined
+  const appTimezone = typeof candidate.appTimezone === 'string' ? candidate.appTimezone : null
   if (!name || !email) {
     return null
   }
-  return avatarUrl ? { name, email, avatarUrl } : { name, email }
+  return { name, email, avatarUrl, appTimezone }
 }
 
 const readStoredProfile = (): UserProfile | null => {
@@ -93,7 +219,7 @@ const readStoredProfile = (): UserProfile | null => {
   }
 }
 
-const deriveProfileFromSupabaseUser = (user: User | null | undefined): UserProfile | null => {
+const deriveProfileFromSupabaseUser = (user: User | null | undefined, appTimezone?: string | null): UserProfile | null => {
   if (!user) {
     return null
   }
@@ -116,6 +242,7 @@ const deriveProfileFromSupabaseUser = (user: User | null | undefined): UserProfi
     name: resolvedName,
     email,
     avatarUrl: avatar,
+    appTimezone: appTimezone ?? null,
   }
 }
 
@@ -376,6 +503,9 @@ function MainApp() {
   const [weekStartDay, setWeekStartDay] = useState<0 | 1>(0) // 0 = Sunday, 1 = Monday
   const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(6)
   const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(0) // 0 = none, or 5/10/15 minutes
+  const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
+  const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
+  const [timezoneSearch, setTimezoneSearch] = useState('')
   const [isSigningOut, setIsSigningOut] = useState(false)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
@@ -393,6 +523,8 @@ function MainApp() {
   const profileButtonId = useId()
   const profileHelpMenuId = useId()
   const settingsOverlayRef = useRef<HTMLDivElement | null>(null)
+  const timezonePickerRef = useRef<HTMLDivElement | null>(null)
+  const timezoneInputRef = useRef<HTMLInputElement | null>(null)
   const goalsPanelRef = useRef<HTMLElement | null>(null)
   const focusPanelRef = useRef<HTMLElement | null>(null)
   const reflectionPanelRef = useRef<HTMLElement | null>(null)
@@ -903,6 +1035,103 @@ function MainApp() {
     }
   }, [settingsOpen])
 
+  // Handle timezone picker close on outside click
+  useEffect(() => {
+    if (!timezonePickerOpen) return
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (timezonePickerRef.current?.contains(target)) return
+      setTimezonePickerOpen(false)
+      setTimezoneSearch('')
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setTimezonePickerOpen(false)
+        setTimezoneSearch('')
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown, true)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [timezonePickerOpen])
+
+  // Sync timezone state with localStorage changes (cross-tab or from ReflectionPage)
+  useEffect(() => {
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === APP_TIMEZONE_STORAGE_KEY) {
+        setAppTimezone(event.newValue)
+      }
+    }
+    const handleTimezoneChange = (event: Event) => {
+      const customEvent = event as CustomEvent<{ timezone: string | null }>
+      if (customEvent.detail) {
+        setAppTimezone(customEvent.detail.timezone)
+      }
+    }
+    const handleTimezoneReset = () => {
+      setAppTimezone(null)
+    }
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener('taskwatch-timezone-changed', handleTimezoneChange)
+    window.addEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('taskwatch-timezone-changed', handleTimezoneChange)
+      window.removeEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+    }
+  }, [])
+
+  // Update timezone and persist to storage + DB
+  const updateAppTimezone = useCallback((timezone: string | null) => {
+    storeAppTimezone(timezone)
+    setAppTimezone(timezone)
+    setTimezonePickerOpen(false)
+    setTimezoneSearch('')
+    
+    // Save to DB if signed in
+    if (userProfile && supabase) {
+      // Get current user ID
+      void (async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user?.id) {
+            await supabase
+              .from('profiles')
+              .update({ app_timezone: timezone })
+              .eq('id', user.id)
+          }
+        } catch {
+          // Ignore errors - localStorage is the source of truth for UI
+        }
+      })()
+    }
+  }, [userProfile])
+
+  // Filtered timezone options based on search
+  const filteredTimezoneOptions = useMemo(() => {
+    const searchLower = timezoneSearch.toLowerCase().trim()
+    if (!searchLower) return TIMEZONE_OPTIONS
+    return TIMEZONE_OPTIONS.filter((opt) => 
+      opt.label.toLowerCase().includes(searchLower) ||
+      opt.value.toLowerCase().includes(searchLower) ||
+      opt.searchTerms.some((term) => term.includes(searchLower))
+    )
+  }, [timezoneSearch])
+
+  // Current timezone display
+  const currentTimezoneLabel = useMemo(() => {
+    if (!appTimezone) {
+      const systemTz = getCurrentSystemTimezone()
+      const found = TIMEZONE_OPTIONS.find((opt) => opt.value === systemTz)
+      return found ? `Auto (${found.label})` : `Auto (${systemTz.replace(/_/g, ' ')})`
+    }
+    return getTimezoneLabel(appTimezone)
+  }, [appTimezone])
+
   useEffect(() => {
     if (!supabase) {
       return
@@ -1079,11 +1308,49 @@ function MainApp() {
         } catch {}
       }
       
-      const profile = deriveProfileFromSupabaseUser(user ?? null)
+      // Fetch timezone from DB for signed-in users
+      let dbTimezone: string | null = null
+      if (user?.id && client) {
+        try {
+          const { data } = await client
+            .from('profiles')
+            .select('app_timezone')
+            .eq('id', user.id)
+            .maybeSingle()
+          dbTimezone = typeof data?.app_timezone === 'string' ? data.app_timezone : null
+          
+          // If DB has a timezone, sync it to localStorage and notify components
+          if (dbTimezone) {
+            storeAppTimezone(dbTimezone)
+          } else {
+            // If DB has no timezone but localStorage does (e.g., from guest session),
+            // migrate localStorage value to DB
+            const localTimezone = readStoredAppTimezone()
+            if (localTimezone) {
+              dbTimezone = localTimezone
+              // Fire-and-forget save to DB
+              void client
+                .from('profiles')
+                .update({ app_timezone: localTimezone })
+                .eq('id', user.id)
+            }
+          }
+        } catch {
+          // Ignore errors, fall back to localStorage
+        }
+      }
+      
+      const profile = deriveProfileFromSupabaseUser(user ?? null, dbTimezone)
       
       // Fetch all data BEFORE updating the profile (which triggers UI change)
       // Keep the auth modal open during this time - user just sees the sign-in screen
       await alignLocalStoresForUser(user?.id ?? null)
+      
+      // Sync app timezone state with what we loaded from DB
+      if (mounted && user?.id) {
+        const effectiveTimezone = dbTimezone ?? readStoredAppTimezone()
+        setAppTimezone(effectiveTimezone)
+      }
       
       // Now that data is ready, update the profile and close the modal
       if (mounted) {
@@ -1855,7 +2122,70 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Timezone</p>
                 <p className="settings-panel__row-subtitle">Your current timezone.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Auto-detect ▾</button>
+              <div className="settings-panel__timezone-picker" ref={timezonePickerRef}>
+                <button
+                  type="button"
+                  className={`settings-panel__chip ${timezonePickerOpen ? 'settings-panel__chip--open' : ''}`}
+                  onClick={() => {
+                    setTimezonePickerOpen(!timezonePickerOpen)
+                    if (!timezonePickerOpen) {
+                      setTimezoneSearch('')
+                      // Focus input after opening
+                      requestAnimationFrame(() => {
+                        timezoneInputRef.current?.focus()
+                      })
+                    }
+                  }}
+                  aria-expanded={timezonePickerOpen}
+                  aria-haspopup="listbox"
+                >
+                  {currentTimezoneLabel} ▾
+                </button>
+                {timezonePickerOpen ? (
+                  <div className="settings-panel__timezone-menu">
+                    <input
+                      ref={timezoneInputRef}
+                      type="text"
+                      className="settings-panel__timezone-input"
+                      placeholder="Search or type timezone..."
+                      value={timezoneSearch}
+                      onChange={(e) => setTimezoneSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          // If exact match or only one filtered result, select it
+                          if (filteredTimezoneOptions.length === 1) {
+                            updateAppTimezone(filteredTimezoneOptions[0].value)
+                          } else if (timezoneSearch.trim() && isValidTimezone(timezoneSearch.trim())) {
+                            // Allow typing custom IANA timezone
+                            updateAppTimezone(timezoneSearch.trim())
+                          }
+                        }
+                      }}
+                    />
+                    <div className="settings-panel__timezone-options">
+                      <button
+                        type="button"
+                        className={`settings-panel__timezone-option ${appTimezone === null ? 'settings-panel__timezone-option--selected' : ''}`}
+                        onClick={() => updateAppTimezone(null)}
+                      >
+                        <span className="settings-panel__timezone-option-label">Auto-detect</span>
+                        <span className="settings-panel__timezone-option-value">{getCurrentSystemTimezone().replace(/_/g, ' ')}</span>
+                      </button>
+                      {filteredTimezoneOptions.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`settings-panel__timezone-option ${appTimezone === opt.value ? 'settings-panel__timezone-option--selected' : ''}`}
+                          onClick={() => updateAppTimezone(opt.value)}
+                        >
+                          <span className="settings-panel__timezone-option-label">{opt.label}</span>
+                          <span className="settings-panel__timezone-option-value">{opt.value.replace(/_/g, ' ')}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="settings-panel__row">
               <div>

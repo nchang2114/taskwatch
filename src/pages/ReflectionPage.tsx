@@ -739,6 +739,8 @@ const storeAppTimezone = (timezone: string | null): void => {
     } else {
       localStorage.removeItem(APP_TIMEZONE_STORAGE_KEY)
     }
+    // Dispatch custom event to notify components in the same tab (e.g., settings panel)
+    window.dispatchEvent(new CustomEvent('taskwatch-timezone-changed', { detail: { timezone } }))
   } catch {
     // ignore
   }
@@ -3791,13 +3793,28 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
   const deferredAppTimezone = useDeferredValue(appTimezone)
   
-  // Handler to update app timezone and persist to localStorage
+  // Handler to update app timezone and persist to localStorage + DB
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
   const updateAppTimezone = useCallback((timezone: string | null) => {
     storeAppTimezone(timezone)
     startTransition(() => {
       setAppTimezone(timezone)
     })
+    
+    // Save to DB if signed in
+    const ownerId = readHistoryOwnerId()
+    if (ownerId && ownerId !== HISTORY_GUEST_USER_ID && supabase) {
+      void (async () => {
+        try {
+          await supabase
+            .from('profiles')
+            .update({ app_timezone: timezone })
+            .eq('id', ownerId)
+        } catch {
+          // Ignore errors - localStorage is the source of truth for UI
+        }
+      })()
+    }
   }, [appTimezone])
   
   // Listen for timezone being cleared (e.g., on sign-out) and reset in-memory state
@@ -3827,12 +3844,27 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
         setAppTimezone(null)
       })
     }
+
+    // Handle same-tab timezone changes (from settings panel)
+    const handleTimezoneChanged = (event: Event) => {
+      const customEvent = event as CustomEvent<{ timezone: string | null }>
+      if (customEvent.detail) {
+        const newTimezone = customEvent.detail.timezone
+        if (newTimezone !== appTimezone) {
+          startTransition(() => {
+            setAppTimezone(newTimezone)
+          })
+        }
+      }
+    }
     
     window.addEventListener('storage', handleStorageChange)
     window.addEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+    window.addEventListener('taskwatch-timezone-changed', handleTimezoneChanged)
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       window.removeEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+      window.removeEventListener('taskwatch-timezone-changed', handleTimezoneChanged)
     }
   }, [appTimezone])
   
