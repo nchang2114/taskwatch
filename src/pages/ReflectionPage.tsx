@@ -9831,10 +9831,9 @@ useEffect(() => {
                 const isPlanned = !!entry.futureSession
                 const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
                 const entryIsAllDay = isEntryAllDay(entry)
-                const timeStr = entryIsAllDay ? null : formatMonthCellTime(entry.startedAt)
                 
                 // All-day events render as full-width colored bars (original style)
-                // Timed events render with marker + title + time
+                // Timed events render with marker + title
                 if (entryIsAllDay) {
                   return (
                     <div
