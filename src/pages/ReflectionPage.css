@@ -2625,6 +2625,27 @@ html[data-theme='light'] .calendar-cell__event {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  /* Ensure backdrop captures all pointer events */
+  touch-action: none;
+}
+
+/* Disable pointer events on everything below when month cell overview is open */
+body[data-month-cell-overview-open='true'] .reflection-page,
+body[data-month-cell-overview-open='true'] .history-timeline,
+body[data-month-cell-overview-open='true'] .calendar-grid,
+body[data-month-cell-overview-open='true'] .calendar-cell,
+body[data-month-cell-overview-open='true'] .calendar-day-number,
+body[data-month-cell-overview-open='true'] .calendar-cell__events {
+  pointer-events: none !important;
+}
+
+/* Re-enable pointer events for the modal itself */
+body[data-month-cell-overview-open='true'] .month-cell-overview__backdrop {
+  pointer-events: auto !important;
+}
+
+body[data-month-cell-overview-open='true'] .month-cell-overview {
+  pointer-events: auto !important;
 }
 
 .month-cell-overview {

@@ -8458,16 +8458,16 @@ useEffect(() => {
   } | null>(null)
   const monthCellOverviewRef = useRef<HTMLDivElement | null>(null)
 
-  // Close month cell overview on outside click
+  // Add data attribute to body when modal is open to block pointer events via CSS
   useEffect(() => {
-    if (!monthCellOverview) return
-    const handleClickOutside = (e: PointerEvent) => {
-      if (monthCellOverviewRef.current && !monthCellOverviewRef.current.contains(e.target as Node)) {
-        setMonthCellOverview(null)
-      }
+    if (monthCellOverview) {
+      document.body.setAttribute('data-month-cell-overview-open', 'true')
+    } else {
+      document.body.removeAttribute('data-month-cell-overview-open')
     }
-    document.addEventListener('pointerdown', handleClickOutside)
-    return () => document.removeEventListener('pointerdown', handleClickOutside)
+    return () => {
+      document.body.removeAttribute('data-month-cell-overview-open')
+    }
   }, [monthCellOverview])
 
   // --- Calendar event preview (popover) ---
@@ -13776,12 +13776,21 @@ useEffect(() => {
   const monthCellOverviewPanel = useMemo(() => {
     if (!monthCellOverview) return null
     return createPortal(
-      <div className="month-cell-overview__backdrop">
+      <div
+        className="month-cell-overview__backdrop"
+        onClick={(e) => {
+          // Close when clicking backdrop (not the modal itself)
+          if (e.target === e.currentTarget) {
+            setMonthCellOverview(null)
+          }
+        }}
+      >
         <div
           className="month-cell-overview"
           ref={monthCellOverviewRef}
           role="dialog"
           aria-label={`Events for ${monthCellOverview.dateLabel}`}
+          onClick={(e) => e.stopPropagation()}
         >
           <div className="month-cell-overview__header">
             <h3 className="month-cell-overview__title">{monthCellOverview.dateLabel}</h3>
