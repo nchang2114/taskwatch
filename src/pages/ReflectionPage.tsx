@@ -5943,14 +5943,14 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           const prevGoal = draft.goalName.trim().toLowerCase()
           const isQuickList = nextGoal === QUICK_LIST_NAME.toLowerCase()
           
-          // When goal changes, reset bucket and task (except for special cases)
+          // When goal changes, reset bucket (but preserve task name)
           if (nextGoal !== prevGoal) {
             if (isQuickList) {
-              // Quick List: auto-set the bucket, clear task
-              base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME, taskName: '' }
+              // Quick List: auto-set the bucket, preserve task name
+              base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME }
             } else {
-              // All other goals: reset bucket and task
-              base = { ...base, bucketName: '', taskName: '' }
+              // All other goals: reset bucket only, preserve task name
+              base = { ...base, bucketName: '' }
             }
           }
         }
@@ -5999,12 +5999,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               base = { ...base, endedAt: startTs + MINUTE_MS }
             }
           }
-          // Only auto-fill once: when choosing a Life Routine bucket, and only if name is effectively empty or default
+          // For Life Routines: clear task name when bucket changes, then auto-fill with bucket name
           const effectiveGoal = base.goalName.trim()
           const isLifeRoutine = effectiveGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-          const trimmedTask = base.taskName.trim()
-          const looksDefault = trimmedTask.length === 0 || /^new session$/i.test(trimmedTask)
-          if (isLifeRoutine && nextBucket.length > 0 && looksDefault && !taskNameAutofilledRef.current) {
+          if (isLifeRoutine && nextBucket.length > 0) {
             taskNameAutofilledRef.current = true
             return { ...base, taskName: nextBucket }
           }
