@@ -2578,23 +2578,57 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
 .calendar-cell__event {
   display: flex;
   align-items: center;
+  gap: 4px;
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.65rem;
-  font-weight: 600;
-  color: #fff;
+  font-weight: 500;
+  color: var(--text-primary);
   overflow: hidden;
   cursor: pointer;
   min-height: 0;
   min-width: 0;
   line-height: 1.2;
-  box-shadow: inset 0 0 0 1px rgba(92, 108, 196, 0.3);
+  background: rgba(124, 138, 220, 0.08);
+}
+
+.calendar-cell__event:hover {
+  background: rgba(124, 138, 220, 0.15);
 }
 
 .calendar-cell__event--planned {
   background: transparent !important;
+}
+
+/* All-day events: full-width colored bar style */
+.calendar-cell__event--allday {
+  background: none; /* Will be set inline */
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(92, 108, 196, 0.3);
+}
+
+.calendar-cell__event--allday:hover {
+  filter: brightness(1.1);
+  background: inherit;
+}
+
+.calendar-cell__event--allday.calendar-cell__event--planned {
+  background: transparent !important;
   border: 1px dashed currentColor;
   box-shadow: none;
+}
+
+.calendar-cell__event-marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.calendar-cell__event--planned .calendar-cell__event-marker {
+  border: 1.5px dashed;
+  background: transparent !important;
 }
 
 .calendar-cell__event-title {
@@ -2605,6 +2639,14 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
   flex: 1;
 }
 
+.calendar-cell__event-time {
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+  font-weight: 400;
+}
+
 .calendar-cell__more {
   font-size: 0.6rem;
   color: var(--text-secondary);
@@ -2612,7 +2654,15 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
 }
 
 html[data-theme='light'] .calendar-cell__event {
+  background: rgba(92, 108, 196, 0.1);
+}
+
+html[data-theme='light'] .calendar-cell__event--allday {
   box-shadow: inset 0 0 0 1px rgba(92, 108, 196, 0.25);
+}
+
+html[data-theme='light'] .calendar-cell__event:hover {
+  background: rgba(92, 108, 196, 0.18);
 }
 
 /* Month cell overview panel (modal) */
@@ -2751,9 +2801,27 @@ body[data-month-cell-overview-open='true'] .month-cell-overview {
   word-break: break-word;
 }
 
-.month-cell-overview__event-goal {
+.month-cell-overview__event-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.month-cell-overview__event-time {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+.month-cell-overview__event-goal {
+  font-size: 0.8rem;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.75;
+}
+
+.month-cell-overview__event-goal::before {
+  content: '·';
+  margin-right: 0.5rem;
 }
 
 html[data-theme='light'] .month-cell-overview__backdrop {
