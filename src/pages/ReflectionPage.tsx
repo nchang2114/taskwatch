@@ -8464,6 +8464,10 @@ useEffect(() => {
   } | null>(null)
   const monthCellOverviewRef = useRef<HTMLDivElement | null>(null)
 
+  // --- Fixed month cell max events ---
+  const monthCellMaxEvents = 2
+  const monthCellMoreFontSize = '0.6rem'
+
   // Add data attribute to body when modal is open to block pointer events via CSS
   // Also lock body scroll when modal is open
   useEffect(() => {
@@ -9782,7 +9786,7 @@ useEffect(() => {
       const cellEntries = getAllEntriesForDate(cellDateKey)
       const isToday = cellDateKey === todayDateKeyInDisplayTz
       const dateLabel = start.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-      const maxVisibleEvents = 4
+      const maxVisibleEvents = monthCellMaxEvents
       return (
         <div
           key={`cell-${start.toISOString()}`}
@@ -9852,15 +9856,14 @@ useEffect(() => {
                   >
                     <span
                       className="calendar-cell__event-marker"
-                      style={isPlanned ? { borderColor: baseColor, background: 'transparent' } : { background: baseColor }}
+                      style={{ background: baseColor }}
                     />
                     <span className="calendar-cell__event-title">{label}</span>
-                    {timeStr && <span className="calendar-cell__event-time">{timeStr}</span>}
                   </div>
                 )
               })}
               {cellEntries.length > maxVisibleEvents && (
-                <div className="calendar-cell__more">+{cellEntries.length - maxVisibleEvents} more</div>
+                <div className="calendar-cell__more" style={{ fontSize: monthCellMoreFontSize }}>+{cellEntries.length - maxVisibleEvents} more</div>
               )}
             </div>
           )}

@@ -2626,11 +2626,6 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
   flex-shrink: 0;
 }
 
-.calendar-cell__event--planned .calendar-cell__event-marker {
-  border: 1.5px dashed;
-  background: transparent !important;
-}
-
 .calendar-cell__event-title {
   white-space: nowrap;
   overflow: hidden;
@@ -2648,9 +2643,14 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
 }
 
 .calendar-cell__more {
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   color: var(--text-secondary);
   padding: 1px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 html[data-theme='light'] .calendar-cell__event {
