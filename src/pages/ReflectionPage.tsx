@@ -9742,19 +9742,6 @@ useEffect(() => {
       })
     }
 
-    // Format time for month cell display (e.g., "9:30a" or "2p")
-    const formatMonthCellTime = (timestamp: number) => {
-      const date = new Date(timestamp)
-      const hours = date.getHours()
-      const minutes = date.getMinutes()
-      const ampm = hours >= 12 ? 'p' : 'a'
-      const displayHour = hours % 12 || 12
-      if (minutes === 0) {
-        return `${displayHour}${ampm}`
-      }
-      return `${displayHour}:${String(minutes).padStart(2, '0')}${ampm}`
-    }
-
     // (removed unused legacy swipe handler for month/year grids)
 
     const jumpToDateAndShowWeek = (targetMidnightMs: number) => {
