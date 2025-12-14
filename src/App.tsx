@@ -2351,13 +2351,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             </div>
             <div className="settings-panel__row">
               <div>
-                <p className="settings-panel__row-title">Export data</p>
-                <p className="settings-panel__row-subtitle">Download all your data as a file.</p>
-              </div>
-              <button type="button" className="settings-panel__chip">Export</button>
-            </div>
-            <div className="settings-panel__row">
-              <div>
                 <p className="settings-panel__row-title">Clear local cache</p>
                 <p className="settings-panel__row-subtitle">Remove temporary data stored on this device.</p>
               </div>
@@ -2411,13 +2404,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-subtitle">Connected sign-in methods.</p>
               </div>
               <button type="button" className="settings-panel__chip">Manage</button>
-            </div>
-            <div className="settings-panel__row">
-              <div>
-                <p className="settings-panel__row-title">Restore purchases</p>
-                <p className="settings-panel__row-subtitle">Recover previous subscriptions.</p>
-              </div>
-              <button type="button" className="settings-panel__chip">Restore</button>
             </div>
             <div className="settings-panel__row">
               <div>
