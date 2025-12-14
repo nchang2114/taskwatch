@@ -6001,12 +6001,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               base = { ...base, startedAt: startTs, endedAt: endTs }
             }
           }
-          // For Life Routines: clear task name when bucket changes, then auto-fill with bucket name
+          // For Life Routines: auto-fill task name with bucket name only if task name is empty
+          // or was previously auto-filled (not manually typed by the user)
           const effectiveGoal = base.goalName.trim()
           const isLifeRoutine = effectiveGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
           if (isLifeRoutine && nextBucket.length > 0) {
-            taskNameAutofilledRef.current = true
-            return { ...base, taskName: nextBucket }
+            const currentTaskName = base.taskName.trim()
+            const shouldAutofill = currentTaskName.length === 0 || taskNameAutofilledRef.current
+            if (shouldAutofill) {
+              taskNameAutofilledRef.current = true
+              return { ...base, taskName: nextBucket }
+            }
           }
         }
         return base
@@ -6018,6 +6023,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const handleHistoryFieldChange = useCallback(
     (field: 'taskName' | 'goalName' | 'bucketName') => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       const { value } = event.target
+      // When user manually changes task name, mark it as no longer auto-filled
+      if (field === 'taskName') {
+        taskNameAutofilledRef.current = false
+      }
       updateHistoryDraftField(field, value)
     },
     [updateHistoryDraftField],
