@@ -1256,6 +1256,63 @@ export async function sortBucketTasksByPriority(bucketId: string): Promise<{ id:
   return updates
 }
 
+/** Sort all tasks in a bucket alphabetically by name (case-insensitive).
+ * Priority tasks are sorted separately and remain at the top.
+ * Returns the updated task IDs with their new sort_index values, or null on failure. */
+export async function sortBucketTasksByName(bucketId: string, direction: 'asc' | 'desc' = 'asc'): Promise<{ id: string; sort_index: number }[] | null> {
+  if (!supabase) return null
+  const userId = await getActiveUserId()
+  if (!userId) return null
+  
+  const STEP = 1024
+  
+  // Fetch all tasks in the bucket with their text and priority
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id, text, priority')
+    .eq('bucket_id', bucketId)
+    .eq('user_id', userId)
+  
+  if (error || !tasks || tasks.length === 0) return null
+  
+  // Separate priority and non-priority tasks
+  const priorityTasks = tasks.filter(t => t.priority)
+  const nonPriorityTasks = tasks.filter(t => !t.priority)
+  
+  // Sort each group alphabetically by text (case-insensitive)
+  const sortByName = (a: typeof tasks[0], b: typeof tasks[0]) => {
+    const textA = (a.text || '').toLowerCase()
+    const textB = (b.text || '').toLowerCase()
+    const result = textA.localeCompare(textB)
+    return direction === 'asc' ? result : -result
+  }
+  
+  priorityTasks.sort(sortByName)
+  nonPriorityTasks.sort(sortByName)
+  
+  // Combine: priority tasks first, then non-priority
+  const sorted = [...priorityTasks, ...nonPriorityTasks]
+  
+  // Build batch updates with new sort_index values
+  const updates = sorted.map((task, index) => ({
+    id: task.id,
+    sort_index: (index + 1) * STEP,
+  }))
+  
+  // Update each task's sort_index
+  await Promise.all(
+    updates.map(({ id, sort_index }) =>
+      supabase!
+        .from('tasks')
+        .update({ sort_index })
+        .eq('id', id)
+        .eq('user_id', userId)
+    )
+  )
+  
+  return updates
+}
+
 export async function upsertTaskSubtask(
   taskId: string,
   subtask: { id: string; text: string; completed: boolean; sort_index: number; updated_at?: string },

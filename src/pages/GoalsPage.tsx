@@ -38,6 +38,7 @@ import {
   setGoalMilestonesShown as apiSetGoalMilestonesShown,
   sortBucketTasksByDate as apiSortBucketTasksByDate,
   sortBucketTasksByPriority as apiSortBucketTasksByPriority,
+  sortBucketTasksByName as apiSortBucketTasksByName,
   moveTaskToBucket as apiMoveTaskToBucket,
 } from '../lib/goalsApi'
 import {
@@ -2485,6 +2486,7 @@ interface GoalRowProps {
   onDeleteCompletedTasks: (bucketId: string) => void
   onSortBucketByDate: (bucketId: string, direction: 'oldest' | 'newest') => void
   onSortBucketByPriority: (bucketId: string) => void
+  onSortBucketByName: (bucketId: string, direction: 'asc' | 'desc') => void
   sortingBucketId: string | null
   onToggleBucketFavorite: (bucketId: string) => void
   onUpdateBucketSurface: (goalId: string, bucketId: string, surface: BucketSurfaceStyle) => void
@@ -2764,6 +2766,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   onDeleteCompletedTasks,
   onSortBucketByDate,
   onSortBucketByPriority,
+  onSortBucketByName,
   sortingBucketId,
   onToggleBucketFavorite,
   onUpdateBucketSurface,
@@ -3464,6 +3467,28 @@ const GoalRow: React.FC<GoalRowProps> = ({
                 }}
               >
                 Sort by priority
+              </button>
+              <button
+                type="button"
+                className="goal-menu__item"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setBucketMenuOpenId(null)
+                  onSortBucketByName(activeBucketForMenu.id, 'asc')
+                }}
+              >
+                Sort by name (A-Z)
+              </button>
+              <button
+                type="button"
+                className="goal-menu__item"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setBucketMenuOpenId(null)
+                  onSortBucketByName(activeBucketForMenu.id, 'desc')
+                }}
+              >
+                Sort by name (Z-A)
               </button>
               <div className="goal-menu__divider" />
               <button
@@ -8965,6 +8990,81 @@ export default function GoalsPage(): ReactElement {
     }
   }
 
+  const sortBucketByName = async (goalId: string, bucketId: string, direction: 'asc' | 'desc') => {
+    const STEP = 1024
+    // Start sorting animation (if enabled)
+    if (ENABLE_SORT_ANIMATION) {
+      setSortingBucketId(bucketId)
+      // Small delay to let animation start before state update
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    
+    // Try API first (for logged-in users)
+    const result = await apiSortBucketTasksByName(bucketId, direction)
+    if (result) {
+      // Update local state with the new sort_index values from API and reorder tasks
+      setGoals((gs) =>
+        gs.map((g) =>
+          g.id === goalId
+            ? {
+                ...g,
+                buckets: g.buckets.map((b) => {
+                  if (b.id !== bucketId) return b
+                  // Update sortIndex values
+                  const updatedTasks = b.tasks.map((t) => {
+                    const updatedIndex = result.find((r) => r.id === t.id)?.sort_index
+                    return updatedIndex !== undefined ? { ...t, sortIndex: updatedIndex } : t
+                  })
+                  // Sort: priority first (desc), then by sortIndex (asc)
+                  const sorted = [...updatedTasks].sort((a, c) => {
+                    const priorityA = a.priority ? 1 : 0
+                    const priorityC = c.priority ? 1 : 0
+                    if (priorityA !== priorityC) return priorityC - priorityA // priority first
+                    return (a.sortIndex ?? 0) - (c.sortIndex ?? 0) // then by sortIndex
+                  })
+                  return { ...b, tasks: sorted }
+                }),
+              }
+            : g,
+        ),
+      )
+      // Clear animation after a short delay
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
+    } else {
+      // Guest mode: sort tasks locally by name within priority groups
+      setGoals((gs) =>
+        gs.map((g) =>
+          g.id === goalId
+            ? {
+                ...g,
+                buckets: g.buckets.map((b) => {
+                  if (b.id !== bucketId) return b
+                  // Separate priority and non-priority tasks
+                  const priorityTasks = b.tasks.filter(t => t.priority)
+                  const nonPriorityTasks = b.tasks.filter(t => !t.priority)
+                  // Sort each group by name (case-insensitive)
+                  const sortByName = (a: TaskItem, c: TaskItem) => {
+                    const textA = (a.text || '').toLowerCase()
+                    const textC = (c.text || '').toLowerCase()
+                    const result = textA.localeCompare(textC)
+                    return direction === 'asc' ? result : -result
+                  }
+                  priorityTasks.sort(sortByName)
+                  nonPriorityTasks.sort(sortByName)
+                  // Combine and reassign sortIndex values
+                  const sorted = [...priorityTasks, ...nonPriorityTasks]
+                  const reindexed = sorted.map((t, idx) => ({ ...t, sortIndex: (idx + 1) * STEP }))
+                  return { ...b, tasks: reindexed }
+                }),
+              }
+            : g,
+        ),
+      )
+      // Clear animation after a short delay
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
+    }
+  }
+
   const toggleBucketExpanded = (bucketId: string) => {
     setBucketExpanded((current) => ({
       ...current,
@@ -12796,6 +12896,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(dashboardSelectedGoal.id, bucketId)}
                         onSortBucketByDate={(bucketId, direction) => sortBucketByDate(dashboardSelectedGoal.id, bucketId, direction)}
                         onSortBucketByPriority={(bucketId) => sortBucketByPriority(dashboardSelectedGoal.id, bucketId)}
+                        onSortBucketByName={(bucketId, direction) => sortBucketByName(dashboardSelectedGoal.id, bucketId, direction)}
                         sortingBucketId={sortingBucketId}
                         onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(dashboardSelectedGoal.id, bucketId)}
                         onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
@@ -12940,6 +13041,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
                     onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
                     onSortBucketByPriority={(bucketId) => sortBucketByPriority(g.id, bucketId)}
+                    onSortBucketByName={(bucketId, direction) => sortBucketByName(g.id, bucketId, direction)}
                     sortingBucketId={sortingBucketId}
                     onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(g.id, bucketId)}
                     onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
@@ -13082,6 +13184,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
                         onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
                         onSortBucketByPriority={(bucketId) => sortBucketByPriority(g.id, bucketId)}
+                        onSortBucketByName={(bucketId, direction) => sortBucketByName(g.id, bucketId, direction)}
                         sortingBucketId={sortingBucketId}
                         onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(g.id, bucketId)}
                         onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
