@@ -9305,12 +9305,15 @@ export default function GoalsPage(): ReactElement {
         const id = db?.id ?? `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         const surfaceStyle = normalizeSurfaceStyle((db?.card_surface as string | null | undefined) ?? 'glass')
         const newGoal: Goal = { id, name: trimmed, goalColour: gradientForGoal, surfaceStyle, starred: false, archived: false, buckets: [] }
-        setGoals((current) => [newGoal, ...current])
+        setGoals((current) => {
+          // Persist new goal at the top: prev=null, next=first existing goal
+          if (db?.id) {
+            const firstExistingGoal = current.length > 0 ? current[0] : null
+            apiSetGoalSortIndex(db.id, null, firstExistingGoal?.id ?? null).catch(() => {})
+          }
+          return [newGoal, ...current]
+        })
         setExpanded((current) => ({ ...current, [id]: true }))
-        // Persist new goal at the top to match optimistic UI order
-        if (db?.id) {
-          apiSetGoalSortIndex(db.id, 0).catch(() => {})
-        }
       })
       .catch(() => {
         const id = `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -11841,16 +11844,24 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     if (fromGlobalIndex === adjustedTo) {
       return
     }
+    // Simulate the splice to find the actual neighbor IDs after move
+    const simulatedNext = goals.slice()
+    const [moved] = simulatedNext.splice(fromGlobalIndex, 1)
+    simulatedNext.splice(adjustedTo, 0, moved)
+    const newIdx = simulatedNext.findIndex((g) => g.id === goalId)
+    const prevGoal = newIdx > 0 ? simulatedNext[newIdx - 1] : null
+    const nextGoal = newIdx < simulatedNext.length - 1 ? simulatedNext[newIdx + 1] : null
+
     setGoals((gs) => {
       const next = gs.slice()
       const fromIdx = next.findIndex((g) => g.id === goalId)
       if (fromIdx === -1) return gs
-      const [moved] = next.splice(fromIdx, 1)
-      next.splice(adjustedTo, 0, moved)
+      const [movedGoal] = next.splice(fromIdx, 1)
+      next.splice(adjustedTo, 0, movedGoal)
       return next
     })
-    // Persist using the computed global insertion index
-    apiSetGoalSortIndex(goalId, adjustedTo).catch(() => {})
+    // Persist using neighbor goal IDs for accurate sort_index calculation
+    apiSetGoalSortIndex(goalId, prevGoal?.id ?? null, nextGoal?.id ?? null).catch(() => {})
   }
 
   const handleDashboardGoalDragStart = (event: React.DragEvent<HTMLElement>, goalId: string) => {

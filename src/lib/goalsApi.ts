@@ -680,37 +680,58 @@ export async function deleteGoalById(goalId: string) {
   await supabase.from('goals').delete().eq('id', goalId).eq('user_id', userId)
 }
 
-export async function setGoalSortIndex(goalId: string, toIndex: number) {
+export async function setGoalSortIndex(
+  goalId: string,
+  prevGoalId: string | null,
+  nextGoalId: string | null
+) {
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  // Load ordered goals
-  const { data: rows } = await supabase
-    .from('goals')
-    .select('id, sort_index')
-    .eq('user_id', userId)
-    .order('sort_index', { ascending: true })
-  if (!rows || rows.length === 0) return
-  const ids = rows.map((r: any) => r.id as string)
-  const prevId = toIndex <= 0 ? null : ids[toIndex - 1] ?? null
-  const nextId = toIndex >= ids.length ? null : ids[toIndex] ?? null
+
   let newSort: number
-  if (!prevId && nextId) {
-    const next = rows.find((r: any) => r.id === nextId) as any
-    newSort = Math.floor((next.sort_index || STEP) / 2) || STEP
-  } else if (prevId && !nextId) {
-    const prev = rows.find((r: any) => r.id === prevId) as any
-    newSort = (prev.sort_index || 0) + STEP
-  } else if (prevId && nextId) {
-    const prev = rows.find((r: any) => r.id === prevId) as any
-    const next = rows.find((r: any) => r.id === nextId) as any
-    newSort = mid(prev.sort_index || 0, next.sort_index || STEP)
-    if (newSort === prev.sort_index || newSort === next.sort_index) {
-      newSort = (prev.sort_index || 0) + Math.ceil(STEP / 2)
+
+  // Fetch sort_index values for the neighbor goals (if provided)
+  if (prevGoalId && nextGoalId) {
+    // Inserting between two goals - calculate midpoint
+    const { data: neighbors } = await supabase
+      .from('goals')
+      .select('id, sort_index')
+      .eq('user_id', userId)
+      .in('id', [prevGoalId, nextGoalId])
+    const prev = neighbors?.find((r: any) => r.id === prevGoalId) as any
+    const next = neighbors?.find((r: any) => r.id === nextGoalId) as any
+    const prevSort = prev?.sort_index ?? 0
+    const nextSort = next?.sort_index ?? STEP
+    newSort = mid(prevSort, nextSort)
+    // Handle collision (when midpoint equals one of the neighbors)
+    if (newSort === prevSort || newSort === nextSort) {
+      newSort = prevSort + Math.ceil(STEP / 2)
     }
+  } else if (prevGoalId && !nextGoalId) {
+    // Inserting at the end (after prevGoalId)
+    const { data: prev } = await supabase
+      .from('goals')
+      .select('sort_index')
+      .eq('user_id', userId)
+      .eq('id', prevGoalId)
+      .single()
+    newSort = ((prev as any)?.sort_index ?? 0) + STEP
+  } else if (!prevGoalId && nextGoalId) {
+    // Inserting at the beginning (before nextGoalId)
+    const { data: next } = await supabase
+      .from('goals')
+      .select('sort_index')
+      .eq('user_id', userId)
+      .eq('id', nextGoalId)
+      .single()
+    const nextSort = (next as any)?.sort_index ?? STEP
+    newSort = Math.floor(nextSort / 2) || STEP
   } else {
+    // No neighbors - first/only goal
     newSort = STEP
   }
+
   await supabase.from('goals').update({ sort_index: newSort }).eq('id', goalId).eq('user_id', userId)
 }
 
